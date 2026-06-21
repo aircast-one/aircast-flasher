@@ -1,0 +1,247 @@
+name: Desktop Release
+
+# Builds the Aircast Flasher for macOS/Windows/Linux on a version tag, publishes
+# a GitHub release, and mirrors the installers to S3 (downloads.aircast.one)
+# under a `flasher/` path with a `releases.json` catalog — mirroring the
+# aircast-web desktop-release pipeline.
+#
+# Required repo/org secrets: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY.
+# (Uses the built-in GITHUB_TOKEN for the GitHub release — no PAT needed.)
+
+permissions:
+  contents: write
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+" # production: v1.0.0
+      - "v*-staging.*" # staging:    v1.0.0-staging.1
+      - "v*-dev.*" # development: v1.0.0-dev.1
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version (e.g. v1.0.1, v1.0.1-dev.0)"
+        required: true
+        type: string
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.config.outputs.version }}
+      environment: ${{ steps.config.outputs.environment }}
+      is_production: ${{ steps.config.outputs.is_production }}
+      s3_path: ${{ steps.config.outputs.s3_path }}
+      cloudfront_domain: ${{ steps.config.outputs.cloudfront_domain }}
+      downloads_url: ${{ steps.config.outputs.downloads_url }}
+    steps:
+      - id: config
+        run: |
+          if [ "${{ github.event_name }}" == "push" ]; then
+            VERSION="${{ github.ref_name }}"
+          else
+            VERSION="${{ inputs.version }}"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+          if [[ "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "is_production=true" >> "$GITHUB_OUTPUT"
+            echo "environment=production" >> "$GITHUB_OUTPUT"
+            echo "s3_path=stable" >> "$GITHUB_OUTPUT"
+            echo "cloudfront_domain=downloads.aircast.one" >> "$GITHUB_OUTPUT"
+            echo "downloads_url=https://downloads.aircast.one" >> "$GITHUB_OUTPUT"
+          elif [[ "$VERSION" =~ -staging\. ]]; then
+            echo "is_production=false" >> "$GITHUB_OUTPUT"
+            echo "environment=staging" >> "$GITHUB_OUTPUT"
+            echo "s3_path=staging" >> "$GITHUB_OUTPUT"
+            echo "cloudfront_domain=downloads.staging.aircast.one" >> "$GITHUB_OUTPUT"
+            echo "downloads_url=https://downloads.staging.aircast.one" >> "$GITHUB_OUTPUT"
+          else
+            echo "is_production=false" >> "$GITHUB_OUTPUT"
+            echo "environment=development" >> "$GITHUB_OUTPUT"
+            echo "s3_path=development" >> "$GITHUB_OUTPUT"
+            echo "cloudfront_domain=downloads.dev.aircast.one" >> "$GITHUB_OUTPUT"
+            echo "downloads_url=https://downloads.dev.aircast.one" >> "$GITHUB_OUTPUT"
+          fi
+          echo "Release: $VERSION"
+
+  desktop-builds:
+    needs: setup
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-latest
+            os: macos
+          - runner: windows-latest
+            os: windows
+          - runner: ubuntu-22.04
+            os: linux
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux dependencies
+        if: matrix.os == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev libjavascriptcoregtk-4.1-dev libsoup-3.0-dev \
+            libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev \
+            build-essential curl wget file libssl-dev libxdo-dev patchelf
+
+      - name: Determine target
+        id: target
+        shell: bash
+        run: |
+          if [ "${{ matrix.os }}" == "macos" ]; then
+            # universal for production, arm64-only for dev/staging (faster)
+            if [ "${{ needs.setup.outputs.is_production }}" == "true" ]; then
+              echo "target=universal-apple-darwin" >> "$GITHUB_OUTPUT"
+              echo "rust_targets=aarch64-apple-darwin,x86_64-apple-darwin" >> "$GITHUB_OUTPUT"
+            else
+              echo "target=aarch64-apple-darwin" >> "$GITHUB_OUTPUT"
+              echo "rust_targets=aarch64-apple-darwin" >> "$GITHUB_OUTPUT"
+            fi
+          elif [ "${{ matrix.os }}" == "windows" ]; then
+            echo "target=x86_64-pc-windows-msvc" >> "$GITHUB_OUTPUT"
+            echo "rust_targets=x86_64-pc-windows-msvc" >> "$GITHUB_OUTPUT"
+          else
+            echo "target=x86_64-unknown-linux-gnu" >> "$GITHUB_OUTPUT"
+            echo "rust_targets=x86_64-unknown-linux-gnu" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ steps.target.outputs.rust_targets }}
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "src-tauri -> target"
+          cache-on-failure: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Sync version from tag
+        shell: bash
+        run: node scripts/sync-version.mjs "${VERSION#v}"
+        env:
+          VERSION: ${{ needs.setup.outputs.version }}
+
+      - name: Build + release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ needs.setup.outputs.version }}
+          releaseName: ${{ format('Aircast Flasher {0}', needs.setup.outputs.version) }}
+          releaseBody: "See the assets below to download this version."
+          releaseDraft: false
+          prerelease: ${{ needs.setup.outputs.is_production != 'true' }}
+          args: ${{ matrix.os == 'windows' && format('--target {0} --bundles nsis', steps.target.outputs.target) || format('--target {0}', steps.target.outputs.target) }}
+
+  mirror-to-s3:
+    needs: [setup, desktop-builds]
+    if: needs.desktop-builds.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Download release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          sleep 20
+          mkdir -p assets && cd assets
+          gh release download "${{ needs.setup.outputs.version }}" -R "${{ github.repository }}"
+          ls -la
+
+      - name: Checksums
+        run: |
+          cd assets
+          for f in *.dmg *.exe *.deb *.rpm *.AppImage; do
+            [ -f "$f" ] && sha256sum "$f" > "$f.sha256"
+          done || true
+
+      - name: Upload to S3
+        run: |
+          cd assets
+          V="${{ needs.setup.outputs.version }}"
+          P="${{ needs.setup.outputs.s3_path }}"
+          base="s3://aircast-artifacts/$P/flasher/$V"
+          for f in *.dmg *.dmg.sha256; do [ -f "$f" ] && aws s3 cp "$f" "$base/macos/$f" --acl public-read; done || true
+          for f in *.exe *.exe.sha256; do [ -f "$f" ] && aws s3 cp "$f" "$base/windows/$f" --acl public-read; done || true
+          for f in *.deb *.deb.sha256 *.rpm *.rpm.sha256 *.AppImage *.AppImage.sha256; do [ -f "$f" ] && aws s3 cp "$f" "$base/linux/$f" --acl public-read; done || true
+
+      - name: Update flasher/releases.json
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cd assets
+          V="${{ needs.setup.outputs.version }}"
+          P="${{ needs.setup.outputs.s3_path }}"
+          URL="${{ needs.setup.outputs.downloads_url }}"
+          PRE="${{ needs.setup.outputs.is_production != 'true' }}"
+          INFO=$(gh api repos/${{ github.repository }}/releases/tags/$V)
+          CREATED=$(echo "$INFO" | jq -r '.created_at')
+          NOTES=$(echo "$INFO" | jq -r '.body // ""')
+          REL_URL=$(echo "$INFO" | jq -r '.html_url')
+
+          PLATFORMS='{}'
+          add() { # os key file
+            local os="$1" key="$2" file="$3"
+            [ -f "$file" ] || return 0
+            local sz; sz=$(stat -c%s "$file")
+            local u="$URL/flasher/$V/$os/$file"
+            PLATFORMS=$(echo "$PLATFORMS" | jq --arg o "$os" --arg k "$key" --arg fn "$file" --arg sz "$sz" --arg url "$u" \
+              '.[$o][$k] = {filename:$fn, size:($sz|tonumber), download_url:$url, checksum_url:($url+".sha256")}')
+          }
+          add macos dmg "$(ls *.dmg 2>/dev/null | head -1)"
+          add windows exe "$(ls *.exe 2>/dev/null | head -1)"
+          add linux deb "$(ls *.deb 2>/dev/null | head -1)"
+          add linux rpm "$(ls *.rpm 2>/dev/null | head -1)"
+          add linux appimage "$(ls *.AppImage 2>/dev/null | head -1)"
+
+          jq -n --arg v "$V" --argjson pre "$PRE" --arg c "$CREATED" --arg n "$NOTES" --arg r "$REL_URL" --argjson p "$PLATFORMS" \
+            '{version:$v, prerelease:$pre, created_at:$c, release_notes:$n, github_release_url:$r, platforms:$p}' > new.json
+
+          KEY="$P/flasher/releases.json"
+          aws s3 cp "s3://aircast-artifacts/$KEY" existing.json 2>/dev/null || echo '{"releases":[]}' > existing.json
+          jq --slurpfile new new.json '.releases = [$new[0]] + [.releases[] | select(.version != $new[0].version)]' existing.json > releases.json
+          aws s3 cp releases.json "s3://aircast-artifacts/$KEY" --acl public-read
+
+      - name: Invalidate CloudFront
+        run: |
+          V="${{ needs.setup.outputs.version }}"
+          DOMAIN="${{ needs.setup.outputs.cloudfront_domain }}"
+          ID=$(aws cloudfront list-distributions --query "DistributionList.Items[?contains(Aliases.Items, '$DOMAIN')].Id" --output text)
+          if [ -n "$ID" ]; then
+            aws cloudfront create-invalidation --distribution-id "$ID" --paths "/flasher/releases.json" "/flasher/$V/*" >/dev/null
+            echo "Invalidated CloudFront for $DOMAIN"
+          else
+            echo "No CloudFront distribution found for $DOMAIN (skipping)"
+          fi
+
+  notify:
+    needs: [setup, desktop-builds, mirror-to-s3]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          {
+            echo "## Aircast Flasher Release"
+            echo "- **Version:** ${{ needs.setup.outputs.version }} (${{ needs.setup.outputs.environment }})"
+            echo "- **Builds:** ${{ needs.desktop-builds.result }}"
+            echo "- **S3 mirror:** ${{ needs.mirror-to-s3.result }}"
+            echo "- **Downloads:** ${{ needs.setup.outputs.downloads_url }}/flasher/${{ needs.setup.outputs.version }}/"
+            echo "- **Catalog:** ${{ needs.setup.outputs.downloads_url }}/flasher/releases.json"
+          } >> "$GITHUB_STEP_SUMMARY"
