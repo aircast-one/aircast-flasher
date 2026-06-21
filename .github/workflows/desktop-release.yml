@@ -133,16 +133,41 @@ jobs:
         env:
           VERSION: ${{ needs.setup.outputs.version }}
 
+      - name: Configure updater endpoint
+        shell: bash
+        run: node scripts/configure-updater.mjs
+        env:
+          DOWNLOADS_URL: ${{ needs.setup.outputs.downloads_url }}
+
       - name: Build + release
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Updater signing. The minisign private key + its password sign the
+          # updater artifacts so the embedded pubkey can verify them. Empty
+          # secrets => tauri-action skips updater signing and the build still
+          # succeeds (just without verifiable updates).
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # macOS code signing + notarization. When these are empty tauri-action
+          # produces an unsigned (ad-hoc) build instead of failing.
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          # Windows Authenticode signing is config/cert-driven, not env-driven:
+          # add `bundle.windows.certificateThumbprint` (+ `digestAlgorithm`,
+          # `timestampUrl`) to tauri.conf.json and import the cert onto the
+          # runner. Left unconfigured so unsigned Windows builds keep working.
         with:
           tagName: ${{ needs.setup.outputs.version }}
           releaseName: ${{ format('Aircast Flasher {0}', needs.setup.outputs.version) }}
           releaseBody: "See the assets below to download this version."
           releaseDraft: false
           prerelease: ${{ needs.setup.outputs.is_production != 'true' }}
+          includeUpdaterJson: true
           args: ${{ matrix.os == 'windows' && format('--target {0} --bundles nsis', steps.target.outputs.target) || format('--target {0}', steps.target.outputs.target) }}
 
   mirror-to-s3:
@@ -178,9 +203,25 @@ jobs:
           V="${{ needs.setup.outputs.version }}"
           P="${{ needs.setup.outputs.s3_path }}"
           base="s3://aircast-artifacts/$P/flasher/$V"
-          for f in *.dmg *.dmg.sha256; do [ -f "$f" ] && aws s3 cp "$f" "$base/macos/$f" --acl public-read; done || true
-          for f in *.exe *.exe.sha256; do [ -f "$f" ] && aws s3 cp "$f" "$base/windows/$f" --acl public-read; done || true
-          for f in *.deb *.deb.sha256 *.rpm *.rpm.sha256 *.AppImage *.AppImage.sha256; do [ -f "$f" ] && aws s3 cp "$f" "$base/linux/$f" --acl public-read; done || true
+          # Installers + their .sig (the updater downloads the platform artifact
+          # plus its detached .sig signature for verification).
+          for f in *.dmg *.dmg.sha256 *.dmg.sig *.app.tar.gz *.app.tar.gz.sha256 *.app.tar.gz.sig; do [ -f "$f" ] && aws s3 cp "$f" "$base/macos/$f" --acl public-read; done || true
+          for f in *.exe *.exe.sha256 *.exe.sig; do [ -f "$f" ] && aws s3 cp "$f" "$base/windows/$f" --acl public-read; done || true
+          for f in *.deb *.deb.sha256 *.rpm *.rpm.sha256 *.AppImage *.AppImage.sha256 *.AppImage.sig; do [ -f "$f" ] && aws s3 cp "$f" "$base/linux/$f" --acl public-read; done || true
+
+      - name: Upload updater manifest
+        run: |
+          cd assets
+          V="${{ needs.setup.outputs.version }}"
+          P="${{ needs.setup.outputs.s3_path }}"
+          # latest.json is what the updater endpoint serves. Publish it at the
+          # channel root (the configured endpoint) and keep a versioned copy.
+          if [ -f latest.json ]; then
+            aws s3 cp latest.json "s3://aircast-artifacts/$P/flasher/latest.json" --acl public-read
+            aws s3 cp latest.json "s3://aircast-artifacts/$P/flasher/$V/updater/latest.json" --acl public-read
+          else
+            echo "No latest.json produced (updater artifacts disabled?) — skipping"
+          fi
 
       - name: Update flasher/releases.json
         env:
@@ -225,14 +266,92 @@ jobs:
           DOMAIN="${{ needs.setup.outputs.cloudfront_domain }}"
           ID=$(aws cloudfront list-distributions --query "DistributionList.Items[?contains(Aliases.Items, '$DOMAIN')].Id" --output text)
           if [ -n "$ID" ]; then
-            aws cloudfront create-invalidation --distribution-id "$ID" --paths "/flasher/releases.json" "/flasher/$V/*" >/dev/null
+            aws cloudfront create-invalidation --distribution-id "$ID" --paths "/flasher/releases.json" "/flasher/latest.json" "/flasher/$V/*" >/dev/null
             echo "Invalidated CloudFront for $DOMAIN"
           else
             echo "No CloudFront distribution found for $DOMAIN (skipping)"
           fi
 
-  notify:
+  cleanup-old-releases:
     needs: [setup, desktop-builds, mirror-to-s3]
+    if: always() && needs.desktop-builds.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Cleanup old releases
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          P="${{ needs.setup.outputs.s3_path }}"
+          ENV="${{ needs.setup.outputs.environment }}"
+          DOMAIN="${{ needs.setup.outputs.cloudfront_domain }}"
+          KEEP_COUNT=5
+
+          # Match only this channel's tags (double-escaped for jq's regex).
+          if [ "${{ needs.setup.outputs.is_production }}" == "true" ]; then
+            TAG_PATTERN='^v[0-9]+\\.[0-9]+\\.[0-9]+$'
+          elif [ "$ENV" == "staging" ]; then
+            TAG_PATTERN='^v.*-staging\\..*$'
+          else
+            TAG_PATTERN='^v.*-dev\\..*$'
+          fi
+
+          RELEASES=$(gh api repos/${{ github.repository }}/releases \
+            --paginate \
+            --jq "[.[] | select(.tag_name | test(\"$TAG_PATTERN\")) | {id: .id, tag_name: .tag_name, created_at: .created_at}] | sort_by(.created_at) | reverse")
+
+          TOTAL_COUNT=$(echo "$RELEASES" | jq 'length')
+          echo "Found $TOTAL_COUNT releases for $ENV"
+
+          VERSIONS_TO_KEEP=$(echo "$RELEASES" | jq -r ".[0:$KEEP_COUNT] | .[].tag_name")
+
+          if [ "$TOTAL_COUNT" -gt "$KEEP_COUNT" ]; then
+            RELEASES_TO_DELETE=$(echo "$RELEASES" | jq ".[$KEEP_COUNT:]")
+            DELETE_COUNT=$(echo "$RELEASES_TO_DELETE" | jq 'length')
+            echo "Deleting $DELETE_COUNT old releases..."
+
+            echo "$RELEASES_TO_DELETE" | jq -c '.[]' | while read -r release; do
+              RELEASE_ID=$(echo "$release" | jq -r '.id')
+              TAG_NAME=$(echo "$release" | jq -r '.tag_name')
+              echo "Processing: $TAG_NAME"
+              gh api -X DELETE repos/${{ github.repository }}/releases/$RELEASE_ID || true
+              gh api -X DELETE repos/${{ github.repository }}/git/refs/tags/$TAG_NAME || true
+              aws s3 rm "s3://aircast-artifacts/$P/flasher/$TAG_NAME/" --recursive || true
+            done
+            echo "Kept latest $KEEP_COUNT releases"
+          else
+            echo "No cleanup needed ($TOTAL_COUNT <= $KEEP_COUNT)"
+          fi
+
+          # Prune deleted versions from releases.json.
+          KEY="$P/flasher/releases.json"
+          if aws s3 cp "s3://aircast-artifacts/$KEY" releases.json 2>/dev/null; then
+            KEEP_JSON=$(echo "$VERSIONS_TO_KEEP" | jq -R -s 'split("\n") | map(select(length > 0))')
+            jq --argjson keep "$KEEP_JSON" \
+              '.releases = [.releases[] | select(.version as $v | $keep | index($v))]' \
+              releases.json > releases-cleaned.json
+            BEFORE=$(jq '.releases | length' releases.json)
+            AFTER=$(jq '.releases | length' releases-cleaned.json)
+            echo "releases.json: $BEFORE -> $AFTER entries"
+            if [ "$BEFORE" != "$AFTER" ]; then
+              aws s3 cp releases-cleaned.json "s3://aircast-artifacts/$KEY" --acl public-read
+            fi
+          fi
+
+          # Invalidate CloudFront so the pruned catalog is served immediately.
+          ID=$(aws cloudfront list-distributions --query "DistributionList.Items[?contains(Aliases.Items, '$DOMAIN')].Id" --output text)
+          if [ -n "$ID" ]; then
+            aws cloudfront create-invalidation --distribution-id "$ID" --paths "/flasher/releases.json" "/flasher/latest.json" >/dev/null
+            echo "Invalidated CloudFront for $DOMAIN"
+          fi
+
+  notify:
+    needs: [setup, desktop-builds, mirror-to-s3, cleanup-old-releases]
     if: always()
     runs-on: ubuntu-latest
     steps:

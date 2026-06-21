@@ -1,6 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
+import { check, type Update } from "@tauri-apps/plugin-updater";
+import { relaunch } from "@tauri-apps/plugin-process";
 import type {
   BlockDevice,
   Channel,
@@ -78,6 +80,25 @@ export function onFlashProgress(
   return listen<FlashProgress>(FLASH_PROGRESS_EVENT, (event) =>
     handler(event.payload),
   );
+}
+
+// Ask the updater endpoint whether a newer build is available. Returns the
+// pending Update (with `.version`) or null when up-to-date. Swallows every
+// error — the endpoint 404s until the first release ships, and dev builds have
+// no updater configured, neither of which should surface to the user.
+export async function checkForUpdate(): Promise<Update | null> {
+  try {
+    const update = await check();
+    return update?.available ? update : null;
+  } catch {
+    return null;
+  }
+}
+
+// Download + install the pending update, then restart into the new version.
+export async function installUpdate(update: Update): Promise<void> {
+  await update.downloadAndInstall();
+  await relaunch();
 }
 
 export async function pickLocalImage(): Promise<string | null> {

@@ -18,6 +18,7 @@ import {
 import type { BlockDevice, InitFormat, Release, WifiConfig } from "@/types";
 import { errorMessage } from "@/lib/format";
 import { useLocalStorage } from "@/lib/use-local-storage";
+import { UpdateBanner } from "@/components/update-banner";
 import { WizardSidebar } from "@/components/wizard-sidebar";
 import { StepStorage } from "@/components/step-storage";
 import { StepImage } from "@/components/step-image";
@@ -231,13 +232,16 @@ function App() {
   const writing = flashMutation.isPending;
 
   return (
-    <div className="flex h-screen overflow-hidden bg-background text-foreground">
-      <WizardSidebar
-        current={step}
-        highestReached={step}
-        writing={writing}
-        onSelect={(s) => setStep(s)}
-      />
+    <div className="flex h-screen flex-col overflow-hidden bg-background text-foreground">
+      <UpdateBanner />
+
+      <div className="flex min-h-0 flex-1 overflow-hidden">
+        <WizardSidebar
+          current={step}
+          highestReached={step}
+          writing={writing}
+          onSelect={(s) => setStep(s)}
+        />
 
       <main className="flex min-h-0 min-w-0 flex-1 flex-col">
         {step === 1 ? (
@@ -293,6 +297,7 @@ function App() {
           />
         )}
       </main>
+      </div>
     </div>
   );
 }
