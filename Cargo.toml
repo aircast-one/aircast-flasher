@@ -1,0 +1,19 @@
+[workspace]
+members = ["src-tauri", "crates/flasher-core"]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/aircast-one/aircast-flasher"
+
+[workspace.dependencies]
+flasher-core = { path = "crates/flasher-core" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[profile.release]
+strip = true
+lto = true
+codegen-units = 1

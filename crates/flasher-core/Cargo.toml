@@ -1,0 +1,36 @@
+[package]
+name = "flasher-core"
+description = "Pure logic for aircast image provisioning: WPA-PSK derivation and first-boot file generation (cloud-init / firstrun)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+
+# psk: WPA-PSK derivation
+pbkdf2 = "0.12"
+hmac = "0.12"
+sha1 = "0.10"
+hex = "0.4"
+
+# sha2: post-write verification (read-back hash compare)
+sha2 = "0.10"
+
+# engine: block-level FAT customization + MBR parsing over the raw device.
+fatfs = "0.3"
+fscommon = "0.1"
+mbrman = "0.5"
+
+# Windows-only: raw disk enumeration + image writing via Win32 APIs.
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.58", features = [
+  "Win32_Foundation",
+  "Win32_Security",
+  "Win32_Storage_FileSystem",
+  "Win32_System_IO",
+  "Win32_System_Ioctl",
+  "Win32_System_SystemServices",
+  "Win32_System_Threading",
+] }

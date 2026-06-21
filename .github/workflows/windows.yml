@@ -1,0 +1,62 @@
+name: Windows build
+
+# Builds the Aircast Flasher Windows app and uploads the installer as an
+# artifact. This is also the only place the Windows-specific Rust code is
+# actually compiled+linked (it can't be built on macOS — ring/reqwest needs the
+# Windows C SDK), so it doubles as CI for the cfg(windows) paths.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [master]
+    paths:
+      - "src/**"
+      - "src-tauri/**"
+      - "crates/**"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/windows.yml"
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # x64 (runs on ARM Windows via emulation too)
+          - runner: windows-latest
+            target: x86_64-pc-windows-msvc
+          # native ARM64 (matches Windows 11 on Apple Silicon / UTM)
+          - runner: windows-11-arm
+            target: aarch64-pc-windows-msvc
+    runs-on: ${{ matrix.runner }}
+    name: build (${{ matrix.target }})
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - run: npm ci
+
+      - name: Build app
+        run: npm run tauri build -- --target ${{ matrix.target }}
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: aircast-flasher-${{ matrix.target }}
+          path: |
+            src-tauri/target/${{ matrix.target }}/release/bundle/nsis/*.exe
+            src-tauri/target/${{ matrix.target }}/release/bundle/msi/*.msi
+          if-no-files-found: error
