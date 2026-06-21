@@ -149,18 +149,15 @@ jobs:
           # succeeds (just without verifiable updates).
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          # macOS code signing + notarization. When these are empty tauri-action
-          # produces an unsigned (ad-hoc) build instead of failing.
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          # Windows Authenticode signing is config/cert-driven, not env-driven:
-          # add `bundle.windows.certificateThumbprint` (+ `digestAlgorithm`,
-          # `timestampUrl`) to tauri.conf.json and import the cert onto the
-          # runner. Left unconfigured so unsigned Windows builds keep working.
+          # macOS code signing / notarization is intentionally NOT wired here:
+          # passing empty APPLE_CERTIFICATE makes tauri-action attempt
+          # `security import` on an empty cert and fail. To enable signing, add a
+          # real Apple Developer ID cert and set these env (only when non-empty):
+          #   APPLE_CERTIFICATE, APPLE_CERTIFICATE_PASSWORD, APPLE_SIGNING_IDENTITY,
+          #   APPLE_ID, APPLE_PASSWORD, APPLE_TEAM_ID
+          # Until then macOS builds ad-hoc (unsigned) and succeeds, like Win/Linux.
+          # Windows Authenticode is config-driven: add
+          # `bundle.windows.certificateThumbprint` to tauri.conf.json + a runner cert.
         with:
           tagName: ${{ needs.setup.outputs.version }}
           releaseName: ${{ format('Aircast Flasher {0}', needs.setup.outputs.version) }}
