@@ -934,6 +934,16 @@ async fn launch_helper(
 }
 
 #[cfg(target_os = "windows")]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+#[cfg(target_os = "windows")]
+fn hidden_command(program: &str) -> tokio::process::Command {
+    let mut cmd = tokio::process::Command::new(program);
+    cmd.creation_flags(CREATE_NO_WINDOW);
+    cmd
+}
+
+#[cfg(target_os = "windows")]
 async fn launch_helper(
     exe: &std::path::Path,
     target_disk: &str,
@@ -954,7 +964,7 @@ async fn launch_helper(
         provision = ps_escape(provision_b64),
     );
 
-    let status = tokio::process::Command::new("powershell")
+    let status = hidden_command("powershell")
         .args(["-NoProfile", "-Command", &ps_cmd])
         .status()
         .await
@@ -1117,7 +1127,7 @@ pub async fn list_wifi_networks() -> Result<WifiNetworks, String> {
 async fn list_wifi_windows() -> Result<WifiNetworks, String> {
     // Known/saved networks: `netsh wlan show profiles` lists
     //   "    All User Profile     : <NAME>"
-    let known = tokio::process::Command::new("netsh")
+    let known = hidden_command("netsh")
         .args(["wlan", "show", "profiles"])
         .output()
         .await
@@ -1137,7 +1147,7 @@ async fn list_wifi_windows() -> Result<WifiNetworks, String> {
     // Current SSID: `netsh wlan show interfaces` has a line
     //   "    SSID                   : <NAME>"
     // Careful: there is also a "BSSID" line — match the SSID line specifically.
-    let current = tokio::process::Command::new("netsh")
+    let current = hidden_command("netsh")
         .args(["wlan", "show", "interfaces"])
         .output()
         .await
@@ -1170,7 +1180,7 @@ async fn list_wifi_windows() -> Result<WifiNetworks, String> {
 /// Get-Culture, falling back to the LANG/locale env if PowerShell is missing.
 #[cfg(target_os = "windows")]
 async fn user_locale_windows() -> Option<String> {
-    if let Ok(o) = tokio::process::Command::new("powershell")
+    if let Ok(o) = hidden_command("powershell")
         .args(["-NoProfile", "-Command", "(Get-Culture).Name"])
         .output()
         .await
