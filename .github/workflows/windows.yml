@@ -45,7 +45,7 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: src-tauri -> target
+          workspaces: . -> target
 
       - run: npm ci
 
@@ -63,6 +63,6 @@ jobs:
         with:
           name: aircast-flasher-${{ matrix.target }}
           path: |
-            src-tauri/target/${{ matrix.target }}/release/bundle/nsis/*.exe
-            src-tauri/target/${{ matrix.target }}/release/bundle/msi/*.msi
+            target/${{ matrix.target }}/release/bundle/nsis/*.exe
+            target/${{ matrix.target }}/release/bundle/msi/*.msi
           if-no-files-found: error
