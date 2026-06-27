@@ -18,10 +18,10 @@ use windows::Win32::Storage::FileSystem::{
     FILE_SHARE_READ, FILE_SHARE_WRITE, IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS, OPEN_EXISTING,
 };
 use windows::Win32::System::Ioctl::{
-    PropertyStandardQuery, StorageDeviceProperty, DISK_EXTENT, FSCTL_DISMOUNT_VOLUME,
-    FSCTL_LOCK_VOLUME, FSCTL_UNLOCK_VOLUME, GET_LENGTH_INFORMATION, IOCTL_DISK_GET_LENGTH_INFO,
-    IOCTL_STORAGE_QUERY_PROPERTY, STORAGE_DEVICE_DESCRIPTOR, STORAGE_PROPERTY_QUERY,
-    VOLUME_DISK_EXTENTS,
+    PropertyStandardQuery, StorageDeviceProperty, DISK_EXTENT, DISK_GEOMETRY_EX,
+    FSCTL_DISMOUNT_VOLUME, FSCTL_LOCK_VOLUME, FSCTL_UNLOCK_VOLUME,
+    IOCTL_DISK_GET_DRIVE_GEOMETRY_EX, IOCTL_STORAGE_QUERY_PROPERTY, STORAGE_DEVICE_DESCRIPTOR,
+    STORAGE_PROPERTY_QUERY, VOLUME_DISK_EXTENTS,
 };
 use windows::Win32::System::IO::DeviceIoControl;
 
@@ -191,18 +191,22 @@ fn read_offset_string(buf: &[u8], offset: usize) -> String {
     String::from_utf8_lossy(&bytes[..end]).trim().to_string()
 }
 
-/// Query the size in bytes of a physical-drive handle via IOCTL_DISK_GET_LENGTH_INFO.
+/// Query the size in bytes of a physical-drive handle. Uses
+/// IOCTL_DISK_GET_DRIVE_GEOMETRY_EX (`FILE_ANY_ACCESS`) rather than
+/// IOCTL_DISK_GET_LENGTH_INFO (`FILE_READ_ACCESS`) so it succeeds on the
+/// zero-access handle [`list_disks`] opens; the latter returns ACCESS_DENIED
+/// there, leaving every disk at size 0 and filtered out as a target.
 fn query_disk_length(handle: HANDLE) -> Option<u64> {
-    let mut info = GET_LENGTH_INFORMATION::default();
+    let mut geometry = DISK_GEOMETRY_EX::default();
     let mut returned: u32 = 0;
     unsafe {
         let ok = DeviceIoControl(
             handle,
-            IOCTL_DISK_GET_LENGTH_INFO,
+            IOCTL_DISK_GET_DRIVE_GEOMETRY_EX,
             None,
             0,
-            Some(&mut info as *mut _ as *mut _),
-            std::mem::size_of::<GET_LENGTH_INFORMATION>() as u32,
+            Some(&mut geometry as *mut _ as *mut _),
+            std::mem::size_of::<DISK_GEOMETRY_EX>() as u32,
             Some(&mut returned),
             None,
         );
@@ -210,7 +214,7 @@ fn query_disk_length(handle: HANDLE) -> Option<u64> {
             return None;
         }
     }
-    Some(info.Length as u64)
+    Some(geometry.DiskSize as u64)
 }
 
 /// Enumerate `\\.\PhysicalDrive0..=31`, skipping ones that can't be opened.
