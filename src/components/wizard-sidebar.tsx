@@ -1,7 +1,7 @@
 import { Check } from "lucide-react";
 
 import { cn } from "@/lib/utils";
-import type { WizardStep } from "@/components/wizard-types";
+import { STEP, type WizardStep } from "@/components/wizard-types";
 
 export interface SidebarStep {
   id: WizardStep;
@@ -9,10 +9,10 @@ export interface SidebarStep {
 }
 
 export const WIZARD_STEPS: SidebarStep[] = [
-  { id: 1, label: "Storage" },
-  { id: 2, label: "Operating system" },
-  { id: 3, label: "Customisation" },
-  { id: 4, label: "Write" },
+  { id: STEP.os, label: "Operating system" },
+  { id: STEP.network, label: "Customisation" },
+  { id: STEP.storage, label: "Storage" },
+  { id: STEP.write, label: "Write" },
 ];
 
 export function WizardSidebar({
@@ -90,9 +90,9 @@ export function WizardSidebar({
       <div className="mt-auto px-5 py-4 text-xs text-muted-foreground/60">
         {writing
           ? "Writing in progress"
-          : highestReached >= 4
+          : highestReached >= STEP.write
             ? "Ready to write"
-            : "Configure your SD card"}
+            : "Configure your device"}
       </div>
     </aside>
   );

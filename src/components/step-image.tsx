@@ -15,7 +15,6 @@ export function StepImage({
   localFileName,
   onPickLocal,
   canProceed,
-  onBack,
   onNext,
 }: {
   sourceKind: SourceKind;
@@ -26,14 +25,12 @@ export function StepImage({
   localFileName: string | null;
   onPickLocal: () => void;
   canProceed: boolean;
-  onBack: () => void;
   onNext: () => void;
 }) {
   return (
     <StepShell
       heading="Choose the image"
       description="Pick the operating system image to write."
-      back={{ onClick: onBack }}
       next={{ label: "Next", onClick: onNext, disabled: !canProceed }}
     >
       <div className="flex flex-col gap-3">
