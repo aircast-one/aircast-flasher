@@ -490,6 +490,7 @@ mod tests {
                 password: "password".into(),
                 country: "US".into(),
             }),
+            tailscale: None,
             init_format: InitFormat::CloudInit,
         }
     }
@@ -553,6 +554,7 @@ mod tests {
                 password: "password".into(),
                 country: "US".into(),
             }),
+            tailscale: None,
             init_format: InitFormat::FirstRun,
         };
         let params = FlashParams { image_len, verify: false };

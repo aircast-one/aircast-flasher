@@ -18,5 +18,5 @@ pub mod win;
 pub use device::AlignedDevice;
 pub use engine::{flash, BlockDevice, FlashParams, FlashStage, BLOCK};
 
-pub use model::{InitFormat, ProvisionConfig, WifiConfig};
+pub use model::{InitFormat, ProvisionConfig, TailscaleConfig, WifiConfig};
 pub use provision::{plan, ProvisionFile, ProvisionPlan};

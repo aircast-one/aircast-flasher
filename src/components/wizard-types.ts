@@ -1,4 +1,10 @@
-import type { DownloadProgress, FlashProgress, Release, WifiConfig } from "@/types";
+import type {
+  DownloadProgress,
+  FlashProgress,
+  Release,
+  TailscaleConfig,
+  WifiConfig,
+} from "@/types";
 
 export type SourceKind = "aircast" | "local";
 
@@ -23,4 +29,5 @@ export interface FlashVars {
   targetDisk: string;
   wifi: WifiConfig | null;
   hostname: string | null;
+  tailscale: TailscaleConfig | null;
 }

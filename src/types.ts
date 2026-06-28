@@ -63,6 +63,11 @@ export interface WifiConfig {
   country: string;
 }
 
+export interface TailscaleConfig {
+  controlServer: string;
+  authKey: string;
+}
+
 export interface WifiNetworks {
   current: string | null;
   known: string[];

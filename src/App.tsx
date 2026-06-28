@@ -1,9 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import {
-  useMutation,
-  useQuery,
-  useQueryClient,
-} from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   cancelFlash,
   downloadImage,
@@ -15,7 +11,13 @@ import {
   onFlashProgress,
   pickLocalImage,
 } from "@/api";
-import type { BlockDevice, InitFormat, Release, WifiConfig } from "@/types";
+import type {
+  BlockDevice,
+  InitFormat,
+  Release,
+  TailscaleConfig,
+  WifiConfig,
+} from "@/types";
 import { errorMessage } from "@/lib/format";
 import { useLocalStorage } from "@/lib/use-local-storage";
 import { UpdateBanner } from "@/components/update-banner";
@@ -54,6 +56,14 @@ function App() {
   const [password, setPassword] = useLocalStorage("aircast.wifi.password", "");
   const [showPassword, setShowPassword] = useState(false);
   const [hostname, setHostname] = useLocalStorage("aircast.hostname", "");
+
+  // Tailscale/Headscale enrollment. The control server is convenient to reuse
+  // across flashes, but the pre-auth key is a secret — keep it in memory only.
+  const [controlServer, setControlServer] = useLocalStorage(
+    "aircast.tailscale.controlServer",
+    "",
+  );
+  const [authKey, setAuthKey] = useState("");
 
   // Wizard
   const [step, setStep] = useState<WizardStep>(STEP.os);
@@ -173,6 +183,7 @@ function App() {
         targetDisk: vars.targetDisk,
         wifi: vars.wifi,
         hostname: vars.hostname,
+        tailscale: vars.tailscale,
         initFormat: "cloud-init" satisfies InitFormat,
       });
     },
@@ -217,6 +228,12 @@ function App() {
     const trimmedHostname = hostname.trim();
     const hostnameValue = trimmedHostname === "" ? null : trimmedHostname;
 
+    const trimmedKey = authKey.trim();
+    const tailscale: TailscaleConfig | null =
+      trimmedKey === ""
+        ? null
+        : { controlServer: controlServer.trim(), authKey: trimmedKey };
+
     flashMutation.mutate({
       sourceKind,
       release,
@@ -224,6 +241,7 @@ function App() {
       targetDisk: selectedDisk,
       wifi,
       hostname: hostnameValue,
+      tailscale,
     });
   }
 
@@ -257,59 +275,63 @@ function App() {
           onSelect={(s) => setStep(s)}
         />
 
-      <main className="flex min-h-0 min-w-0 flex-1 flex-col">
-        {step === STEP.os ? (
-          <StepImage
-            sourceKind={sourceKind}
-            onSourceKind={setSourceKind}
-            release={release}
-            releaseLoading={releasesQuery.isLoading}
-            releaseError={releaseError}
-            localFileName={localFileName}
-            onPickLocal={handlePickLocal}
-            canProceed={sourceReady}
-            onNext={() => setStep(STEP.network)}
-          />
-        ) : step === STEP.network ? (
-          <StepNetwork
-            ssid={ssid}
-            onSsid={setSsid}
-            knownNetworks={wifiQuery.data?.known ?? []}
-            scanning={wifiQuery.isFetching}
-            onRescan={() => void wifiQuery.refetch()}
-            password={password}
-            onPassword={setPassword}
-            showPassword={showPassword}
-            onToggleShowPassword={() => setShowPassword((v) => !v)}
-            hostname={hostname}
-            onHostname={setHostname}
-            onBack={() => setStep(STEP.os)}
-            onNext={() => setStep(STEP.storage)}
-          />
-        ) : step === STEP.storage ? (
-          <StepStorage
-            devices={devices}
-            devicesLoading={devicesQuery.isLoading}
-            selectedDisk={selectedDisk}
-            onSelectDisk={setSelectedDisk}
-            canProceed={canProceed}
-            onBack={() => setStep(STEP.network)}
-            onFlash={handleFlash}
-          />
-        ) : (
-          <JobView
-            success={flashMutation.isSuccess}
-            error={
-              flashMutation.isError
-                ? errorMessage(flashMutation.error, "Flashing failed.")
-                : null
-            }
-            progress={progress}
-            onCancel={handleCancel}
-            onReset={flashAnother}
-          />
-        )}
-      </main>
+        <main className="flex min-h-0 min-w-0 flex-1 flex-col">
+          {step === STEP.os ? (
+            <StepImage
+              sourceKind={sourceKind}
+              onSourceKind={setSourceKind}
+              release={release}
+              releaseLoading={releasesQuery.isLoading}
+              releaseError={releaseError}
+              localFileName={localFileName}
+              onPickLocal={handlePickLocal}
+              canProceed={sourceReady}
+              onNext={() => setStep(STEP.network)}
+            />
+          ) : step === STEP.network ? (
+            <StepNetwork
+              ssid={ssid}
+              onSsid={setSsid}
+              knownNetworks={wifiQuery.data?.known ?? []}
+              scanning={wifiQuery.isFetching}
+              onRescan={() => void wifiQuery.refetch()}
+              password={password}
+              onPassword={setPassword}
+              showPassword={showPassword}
+              onToggleShowPassword={() => setShowPassword((v) => !v)}
+              hostname={hostname}
+              onHostname={setHostname}
+              controlServer={controlServer}
+              onControlServer={setControlServer}
+              authKey={authKey}
+              onAuthKey={setAuthKey}
+              onBack={() => setStep(STEP.os)}
+              onNext={() => setStep(STEP.storage)}
+            />
+          ) : step === STEP.storage ? (
+            <StepStorage
+              devices={devices}
+              devicesLoading={devicesQuery.isLoading}
+              selectedDisk={selectedDisk}
+              onSelectDisk={setSelectedDisk}
+              canProceed={canProceed}
+              onBack={() => setStep(STEP.network)}
+              onFlash={handleFlash}
+            />
+          ) : (
+            <JobView
+              success={flashMutation.isSuccess}
+              error={
+                flashMutation.isError
+                  ? errorMessage(flashMutation.error, "Flashing failed.")
+                  : null
+              }
+              progress={progress}
+              onCancel={handleCancel}
+              onReset={flashAnother}
+            />
+          )}
+        </main>
       </div>
     </div>
   );

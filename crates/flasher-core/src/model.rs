@@ -26,17 +26,31 @@ pub enum InitFormat {
     FirstRun,
 }
 
+/// Control plane + pre-auth key for zero-touch Tailscale/Headscale enrollment.
+/// Provisioned into aircastd's store so the device joins the tailnet on first
+/// boot with no interactive sign-in.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TailscaleConfig {
+    /// Login server URL, e.g. `https://headscale.example.com`. Empty for
+    /// Tailscale's own coordination server.
+    pub control_server: String,
+    /// Reusable pre-auth key minted on the control server.
+    pub auth_key: String,
+}
+
 /// What to provision. Any `None` field is left untouched.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProvisionConfig {
     pub hostname: Option<String>,
     pub wifi: Option<WifiConfig>,
+    pub tailscale: Option<TailscaleConfig>,
     pub init_format: InitFormat,
 }
 
 impl ProvisionConfig {
-    /// True when there is nothing to write (no hostname, no WiFi).
+    /// True when there is nothing to write (no hostname, no WiFi, no Tailscale).
     pub fn is_empty(&self) -> bool {
-        self.hostname.is_none() && self.wifi.is_none()
+        self.hostname.is_none() && self.wifi.is_none() && self.tailscale.is_none()
     }
 }
