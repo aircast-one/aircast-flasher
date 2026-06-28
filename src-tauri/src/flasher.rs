@@ -12,7 +12,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager};
 
-use flasher_core::{ProvisionConfig, WifiConfig};
+use flasher_core::{ProvisionConfig, TailscaleConfig, WifiConfig};
 
 const PROGRESS_THROTTLE_MS: u128 = 100;
 const MIN_TEMP_SPACE_BYTES: u64 = 4_500_000_000; // ~4.5 GB
@@ -695,6 +695,7 @@ pub async fn flash_image(
     target_disk: String,
     wifi: Option<WifiConfig>,
     hostname: Option<String>,
+    tailscale: Option<TailscaleConfig>,
     init_format: flasher_core::InitFormat,
 ) -> Result<(), String> {
     validate_disk_path(&target_disk)?;
@@ -733,6 +734,7 @@ pub async fn flash_image(
     let config = ProvisionConfig {
         hostname,
         wifi,
+        tailscale,
         init_format,
     };
     let provision_b64 = {

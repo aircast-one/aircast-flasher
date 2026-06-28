@@ -12,6 +12,7 @@ import type {
   InitFormat,
   ListReleasesResponse,
   Release,
+  TailscaleConfig,
   WifiConfig,
   WifiNetworks,
 } from "./types";
@@ -47,6 +48,7 @@ export function flashImage(args: {
   targetDisk: string;
   wifi: WifiConfig | null;
   hostname: string | null;
+  tailscale: TailscaleConfig | null;
   initFormat: InitFormat;
 }): Promise<void> {
   return invoke<void>("flash_image", {
@@ -54,6 +56,7 @@ export function flashImage(args: {
     targetDisk: args.targetDisk,
     wifi: args.wifi,
     hostname: args.hostname,
+    tailscale: args.tailscale,
     initFormat: args.initFormat,
   });
 }

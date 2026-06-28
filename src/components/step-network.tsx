@@ -1,4 +1,5 @@
-import { Eye, EyeOff, RefreshCw, Wifi } from "lucide-react";
+import { useState } from "react";
+import { ChevronDown, Eye, EyeOff, Plus, RefreshCw, Wifi } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -12,11 +13,30 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { StepShell } from "@/components/step-shell";
+import {
+  isValidControlServer,
+  isValidHostname,
+  needsAuthKey,
+} from "@/components/step-network.validation";
 
-const HOSTNAME_PATTERN = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/;
-
-export function isValidHostname(value: string): boolean {
-  return HOSTNAME_PATTERN.test(value.trim());
+interface StepNetworkProps {
+  ssid: string;
+  onSsid: (v: string) => void;
+  knownNetworks: string[];
+  scanning: boolean;
+  onRescan: () => void;
+  password: string;
+  onPassword: (v: string) => void;
+  showPassword: boolean;
+  onToggleShowPassword: () => void;
+  hostname: string;
+  onHostname: (v: string) => void;
+  controlServer: string;
+  onControlServer: (v: string) => void;
+  authKey: string;
+  onAuthKey: (v: string) => void;
+  onBack: () => void;
+  onNext: () => void;
 }
 
 export function StepNetwork({
@@ -31,33 +51,44 @@ export function StepNetwork({
   onToggleShowPassword,
   hostname,
   onHostname,
+  controlServer,
+  onControlServer,
+  authKey,
+  onAuthKey,
   onBack,
   onNext,
-}: {
-  ssid: string;
-  onSsid: (v: string) => void;
-  knownNetworks: string[];
-  scanning: boolean;
-  onRescan: () => void;
-  password: string;
-  onPassword: (v: string) => void;
-  showPassword: boolean;
-  onToggleShowPassword: () => void;
-  hostname: string;
-  onHostname: (v: string) => void;
-  onBack: () => void;
-  onNext: () => void;
-}) {
+}: StepNetworkProps) {
   const trimmedHostname = hostname.trim();
   const hostnameEmpty = trimmedHostname === "";
   const hostnameValid = isValidHostname(hostname);
+  const controlServerValid = isValidControlServer(controlServer);
+  const missingAuthKey = needsAuthKey(controlServer, authKey);
+  const remoteAccessValid = controlServerValid && !missingAuthKey;
+
+  const [remoteOpen, setRemoteOpen] = useState(
+    () => controlServer.trim() !== "" || authKey.trim() !== "",
+  );
+  const remoteExpanded = remoteOpen || !remoteAccessValid;
+
+  const [showControlServer, setShowControlServer] = useState(
+    () => controlServer.trim() !== "",
+  );
+
+  function useTailscaleInstead() {
+    onControlServer("");
+    setShowControlServer(false);
+  }
 
   return (
     <StepShell
-      heading="WiFi & hostname"
+      heading="Network & access"
       description="These settings are written to the card so the device connects on first boot."
       back={{ onClick: onBack }}
-      next={{ label: "Next", onClick: onNext, disabled: !hostnameValid }}
+      next={{
+        label: "Next",
+        onClick: onNext,
+        disabled: !hostnameValid || !remoteAccessValid,
+      }}
     >
       <div className="flex max-w-xl flex-col gap-5">
         <div className="flex flex-col gap-2">
@@ -143,11 +174,13 @@ export function StepNetwork({
           <p id="hostname-help" className="text-sm text-muted-foreground">
             {!hostnameEmpty && !hostnameValid ? (
               <span className="text-destructive">
-                Use lowercase letters, numbers, and hyphens only (e.g. falcon-01).
+                Use lowercase letters, numbers, and hyphens only (e.g.
+                falcon-01).
               </span>
             ) : (
               <>
-                This becomes your drone's name on the network — you'll reach it at{" "}
+                This becomes your drone's name on the network — you'll reach it
+                at{" "}
                 <span className="font-medium text-foreground">
                   {trimmedHostname === "" ? "falcon-01" : trimmedHostname}.local
                 </span>
@@ -155,6 +188,127 @@ export function StepNetwork({
               </>
             )}
           </p>
+        </div>
+
+        <div className="flex flex-col gap-2 border-t border-border pt-5">
+          <button
+            type="button"
+            onClick={() => setRemoteOpen((v) => !v)}
+            aria-expanded={remoteExpanded}
+            className="flex items-center gap-1.5 text-sm font-medium text-foreground"
+          >
+            Remote access (optional)
+            <ChevronDown
+              className={`size-4 text-muted-foreground transition-transform ${
+                remoteExpanded ? "rotate-180" : ""
+              }`}
+            />
+          </button>
+          {remoteExpanded && (
+            <div className="flex flex-col gap-4">
+              <p className="text-sm text-muted-foreground">
+                Reach this drone from anywhere over a private{" "}
+                {showControlServer ? "Headscale" : "Tailscale"} network.
+              </p>
+
+              {showControlServer && (
+                <div className="flex flex-col gap-2">
+                  <div className="flex items-baseline justify-between">
+                    <Label htmlFor="control-server">
+                      Control server (Headscale)
+                    </Label>
+                    <button
+                      type="button"
+                      onClick={useTailscaleInstead}
+                      className="text-sm text-muted-foreground underline hover:text-foreground"
+                    >
+                      Use Tailscale
+                    </button>
+                  </div>
+                  <Input
+                    id="control-server"
+                    value={controlServer}
+                    onChange={(e) => onControlServer(e.currentTarget.value)}
+                    placeholder="https://headscale.example.com"
+                    autoCapitalize="none"
+                    autoCorrect="off"
+                    spellCheck={false}
+                    aria-invalid={!controlServerValid}
+                    aria-describedby="control-server-error"
+                  />
+                  {!controlServerValid && (
+                    <p
+                      id="control-server-error"
+                      className="text-sm text-destructive"
+                    >
+                      Enter a full URL starting with http:// or https://.
+                    </p>
+                  )}
+                </div>
+              )}
+
+              <div className="flex flex-col gap-2">
+                <div className="flex items-baseline justify-between">
+                  <Label htmlFor="auth-key">Pre-auth key</Label>
+                  {!showControlServer && (
+                    <a
+                      href="https://login.tailscale.com/admin/settings/keys"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-sm text-muted-foreground underline hover:text-foreground"
+                    >
+                      Get a key
+                    </a>
+                  )}
+                </div>
+                <Input
+                  id="auth-key"
+                  type="password"
+                  value={authKey}
+                  onChange={(e) => onAuthKey(e.currentTarget.value)}
+                  placeholder={
+                    showControlServer
+                      ? "Pre-auth key from your control server"
+                      : "tskey-auth-…"
+                  }
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  aria-invalid={missingAuthKey}
+                  aria-describedby="auth-key-help"
+                />
+                {missingAuthKey ? (
+                  <p id="auth-key-help" className="text-sm text-destructive">
+                    A control server needs a pre-auth key — without one, nothing
+                    is written. Clear the server to use Tailscale instead.
+                  </p>
+                ) : (
+                  <p
+                    id="auth-key-help"
+                    className="text-sm text-muted-foreground"
+                  >
+                    The device joins automatically on first boot — no sign-in.
+                    The key is written to the card, so use a{" "}
+                    <span className="font-medium text-foreground">
+                      short-expiry or ephemeral
+                    </span>{" "}
+                    key. Leave blank to set it up later from the dashboard.
+                  </p>
+                )}
+              </div>
+
+              {!showControlServer && (
+                <button
+                  type="button"
+                  onClick={() => setShowControlServer(true)}
+                  className="flex items-center gap-1.5 self-start text-sm text-muted-foreground hover:text-foreground"
+                >
+                  <Plus className="size-4" />
+                  Use a self-hosted control server (Headscale)
+                </button>
+              )}
+            </div>
+          )}
         </div>
       </div>
     </StepShell>
