@@ -24,12 +24,15 @@ import { StepStorage } from "@/components/step-storage";
 import { StepImage } from "@/components/step-image";
 import { StepNetwork } from "@/components/step-network";
 import { JobView } from "@/components/job-view";
-import type {
-  FlashProgressState,
-  FlashVars,
-  SourceKind,
-  WizardStep,
+import {
+  STEP,
+  type FlashProgressState,
+  type FlashVars,
+  type SourceKind,
+  type WizardStep,
 } from "@/components/wizard-types";
+
+const DEVICE_POLL_INTERVAL_MS = 2000;
 
 function pickDefaultRelease(releases: Release[]): Release | null {
   return releases.find((r) => !r.prerelease) ?? releases[0] ?? null;
@@ -53,16 +56,24 @@ function App() {
   const [hostname, setHostname] = useLocalStorage("aircast.hostname", "");
 
   // Wizard
-  const [step, setStep] = useState<WizardStep>(1);
+  const [step, setStep] = useState<WizardStep>(STEP.os);
 
   // Live progress from Tauri events.
   const [progress, setProgress] = useState<FlashProgressState>({
     phase: "idle",
   });
 
+  // Poll for storage devices only while the user is on the storage step, so an
+  // inserted SD card is detected automatically without a manual refresh. The
+  // query is disabled everywhere else (notably during the write) to keep
+  // diskutil/lsblk off the target device and out of app startup.
+  const onStorageStep = step === STEP.storage;
   const devicesQuery = useQuery({
     queryKey: ["devices"],
     queryFn: listBlockDevices,
+    enabled: onStorageStep,
+    refetchInterval: onStorageStep ? DEVICE_POLL_INTERVAL_MS : false,
+    refetchOnWindowFocus: onStorageStep,
   });
 
   const releasesQuery = useQuery({
@@ -94,12 +105,15 @@ function App() {
       ? "No releases available."
       : null;
 
-  // Keep the selected disk valid as the device list changes.
+  // Keep the selected disk valid as the device list changes. Depends on the
+  // raw query data — not the `devices` array, which is a fresh reference each
+  // render and would re-run this on every render until data loads.
   useEffect(() => {
+    const list = devicesQuery.data ?? [];
     setSelectedDisk((prev) =>
-      devices.some((d) => d.path === prev) ? prev : (devices[0]?.path ?? ""),
+      list.some((d) => d.path === prev) ? prev : (list[0]?.path ?? ""),
     );
-  }, [devices]);
+  }, [devicesQuery.data]);
 
   // Subscribe to download/flash progress events for the lifetime of the app.
   useEffect(() => {
@@ -187,7 +201,7 @@ function App() {
   function handleFlash() {
     if (!canProceed) return;
 
-    setStep(4);
+    setStep(STEP.write);
 
     const trimmedSsid = ssid.trim();
     // Country/regulatory domain is auto-detected on the backend; fall back to US.
@@ -224,7 +238,7 @@ function App() {
   function flashAnother() {
     flashMutation.reset();
     setProgress({ phase: "idle" });
-    setStep(1);
+    setStep(STEP.os);
     void queryClient.invalidateQueries({ queryKey: ["devices"] });
   }
 
@@ -244,17 +258,7 @@ function App() {
         />
 
       <main className="flex min-h-0 min-w-0 flex-1 flex-col">
-        {step === 1 ? (
-          <StepStorage
-            devices={devices}
-            devicesLoading={devicesQuery.isFetching}
-            selectedDisk={selectedDisk}
-            onSelectDisk={setSelectedDisk}
-            onRefresh={() => void devicesQuery.refetch()}
-            canProceed={selectedDisk !== ""}
-            onNext={() => setStep(2)}
-          />
-        ) : step === 2 ? (
+        {step === STEP.os ? (
           <StepImage
             sourceKind={sourceKind}
             onSourceKind={setSourceKind}
@@ -264,10 +268,9 @@ function App() {
             localFileName={localFileName}
             onPickLocal={handlePickLocal}
             canProceed={sourceReady}
-            onBack={() => setStep(1)}
-            onNext={() => setStep(3)}
+            onNext={() => setStep(STEP.network)}
           />
-        ) : step === 3 ? (
+        ) : step === STEP.network ? (
           <StepNetwork
             ssid={ssid}
             onSsid={setSsid}
@@ -280,7 +283,17 @@ function App() {
             onToggleShowPassword={() => setShowPassword((v) => !v)}
             hostname={hostname}
             onHostname={setHostname}
-            onBack={() => setStep(2)}
+            onBack={() => setStep(STEP.os)}
+            onNext={() => setStep(STEP.storage)}
+          />
+        ) : step === STEP.storage ? (
+          <StepStorage
+            devices={devices}
+            devicesLoading={devicesQuery.isLoading}
+            selectedDisk={selectedDisk}
+            onSelectDisk={setSelectedDisk}
+            canProceed={canProceed}
+            onBack={() => setStep(STEP.network)}
             onFlash={handleFlash}
           />
         ) : (

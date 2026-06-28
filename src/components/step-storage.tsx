@@ -1,10 +1,8 @@
-import { AlertTriangle, HardDrive, RefreshCw } from "lucide-react";
+import { AlertTriangle, HardDrive } from "lucide-react";
 
 import { Alert, AlertTitle } from "@/components/ui/alert";
-import { Button } from "@/components/ui/button";
 import { SelectableCard } from "@/components/selectable-card";
 import { StepShell } from "@/components/step-shell";
-import { cn } from "@/lib/utils";
 import type { BlockDevice } from "@/types";
 
 export function StepStorage({
@@ -12,42 +10,33 @@ export function StepStorage({
   devicesLoading,
   selectedDisk,
   onSelectDisk,
-  onRefresh,
   canProceed,
-  onNext,
+  onBack,
+  onFlash,
 }: {
   devices: BlockDevice[];
   devicesLoading: boolean;
   selectedDisk: string;
   onSelectDisk: (path: string) => void;
-  onRefresh: () => void;
   canProceed: boolean;
-  onNext: () => void;
+  onBack: () => void;
+  onFlash: () => void;
 }) {
   return (
     <StepShell
       heading="Select your storage device"
-      description="Choose the SD card or drive you want to write the image to."
-      headerAction={
-        <Button
-          type="button"
-          variant="secondary"
-          size="sm"
-          onClick={onRefresh}
-          disabled={devicesLoading}
-        >
-          <RefreshCw className={cn(devicesLoading && "animate-spin")} />
-          {devicesLoading ? "Refreshing…" : "Refresh"}
-        </Button>
-      }
-      next={{ label: "Next", onClick: onNext, disabled: !canProceed }}
+      description="Insert your SD card now — it'll be detected automatically — then write the image."
+      back={{ onClick: onBack }}
+      next={{ label: "Flash SD Card", onClick: onFlash, disabled: !canProceed }}
     >
       <div className="flex flex-col gap-4">
         {devices.length === 0 ? (
           <div className="flex flex-col items-center gap-2 rounded-xl border border-dashed border-border py-14 text-center">
             <HardDrive className="size-8 text-muted-foreground/60" />
             <p className="text-sm text-muted-foreground">
-              Insert an SD card and click Refresh.
+              {devicesLoading
+                ? "Scanning for storage devices…"
+                : "Insert an SD card — it'll be detected automatically."}
             </p>
           </div>
         ) : (

@@ -32,7 +32,7 @@ export function StepNetwork({
   hostname,
   onHostname,
   onBack,
-  onFlash,
+  onNext,
 }: {
   ssid: string;
   onSsid: (v: string) => void;
@@ -46,19 +46,18 @@ export function StepNetwork({
   hostname: string;
   onHostname: (v: string) => void;
   onBack: () => void;
-  onFlash: () => void;
+  onNext: () => void;
 }) {
   const trimmedHostname = hostname.trim();
   const hostnameEmpty = trimmedHostname === "";
   const hostnameValid = isValidHostname(hostname);
-  const canFlash = hostnameValid;
 
   return (
     <StepShell
       heading="WiFi & hostname"
       description="These settings are written to the card so the device connects on first boot."
       back={{ onClick: onBack }}
-      next={{ label: "Flash SD Card", onClick: onFlash, disabled: !canFlash }}
+      next={{ label: "Next", onClick: onNext, disabled: !hostnameValid }}
     >
       <div className="flex max-w-xl flex-col gap-5">
         <div className="flex flex-col gap-2">
