@@ -4,6 +4,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { check, type Update } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
 import type {
+  AccessConfig,
   BlockDevice,
   Channel,
   DownloadProgress,
@@ -49,6 +50,7 @@ export function flashImage(args: {
   wifi: WifiConfig | null;
   hostname: string | null;
   tailscale: TailscaleConfig | null;
+  access: AccessConfig | null;
   initFormat: InitFormat;
 }): Promise<void> {
   return invoke<void>("flash_image", {
@@ -57,6 +59,7 @@ export function flashImage(args: {
     wifi: args.wifi,
     hostname: args.hostname,
     tailscale: args.tailscale,
+    access: args.access,
     initFormat: args.initFormat,
   });
 }

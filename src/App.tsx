@@ -12,9 +12,11 @@ import {
   pickLocalImage,
 } from "@/api";
 import type {
+  AccessConfig,
   BlockDevice,
   InitFormat,
   Release,
+  SshMode,
   TailscaleConfig,
   WifiConfig,
 } from "@/types";
@@ -38,6 +40,24 @@ const DEVICE_POLL_INTERVAL_MS = 2000;
 
 function pickDefaultRelease(releases: Release[]): Release | null {
   return releases.find((r) => !r.prerelease) ?? releases[0] ?? null;
+}
+
+// Build the access config to send, or null when the chosen mode has no input
+// yet (so the image's default pi/raspberry is left untouched). "disabled" always
+// applies.
+function buildAccess(
+  mode: SshMode,
+  sshKey: string,
+  password: string,
+): AccessConfig | null {
+  if (mode === "disabled") {
+    return { ssh: "disabled" };
+  }
+  if (mode === "key-only") {
+    const key = sshKey.trim();
+    return key === "" ? null : { ssh: "key-only", authorizedKey: key };
+  }
+  return password === "" ? null : { ssh: "password", password };
 }
 
 function App() {
@@ -64,6 +84,12 @@ function App() {
     "",
   );
   const [authKey, setAuthKey] = useState("");
+
+  // Device access (SSH). The public key is reusable across flashes, so it's
+  // persisted; the device password is a secret — keep it in memory only.
+  const [sshMode, setSshMode] = useState<SshMode>("key-only");
+  const [sshKey, setSshKey] = useLocalStorage("aircast.ssh.authorizedKey", "");
+  const [devicePassword, setDevicePassword] = useState("");
 
   // Wizard
   const [step, setStep] = useState<WizardStep>(STEP.os);
@@ -184,6 +210,7 @@ function App() {
         wifi: vars.wifi,
         hostname: vars.hostname,
         tailscale: vars.tailscale,
+        access: vars.access,
         initFormat: "cloud-init" satisfies InitFormat,
       });
     },
@@ -234,6 +261,8 @@ function App() {
         ? null
         : { controlServer: controlServer.trim(), authKey: trimmedKey };
 
+    const access = buildAccess(sshMode, sshKey, devicePassword);
+
     flashMutation.mutate({
       sourceKind,
       release,
@@ -242,6 +271,7 @@ function App() {
       wifi,
       hostname: hostnameValue,
       tailscale,
+      access,
     });
   }
 
@@ -305,6 +335,12 @@ function App() {
               onControlServer={setControlServer}
               authKey={authKey}
               onAuthKey={setAuthKey}
+              sshMode={sshMode}
+              onSshMode={setSshMode}
+              sshKey={sshKey}
+              onSshKey={setSshKey}
+              devicePassword={devicePassword}
+              onDevicePassword={setDevicePassword}
               onBack={() => setStep(STEP.os)}
               onNext={() => setStep(STEP.storage)}
             />

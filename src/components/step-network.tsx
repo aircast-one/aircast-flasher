@@ -14,10 +14,20 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { StepShell } from "@/components/step-shell";
 import {
+  isInvalidSshKey,
   isValidControlServer,
   isValidHostname,
+  isWeakDevicePassword,
+  MIN_DEVICE_PASSWORD,
   needsAuthKey,
 } from "@/components/step-network.validation";
+import type { SshMode } from "@/types";
+
+const SSH_MODES: { value: SshMode; label: string }[] = [
+  { value: "key-only", label: "SSH key" },
+  { value: "password", label: "Password" },
+  { value: "disabled", label: "Disabled" },
+];
 
 interface StepNetworkProps {
   ssid: string;
@@ -35,6 +45,12 @@ interface StepNetworkProps {
   onControlServer: (v: string) => void;
   authKey: string;
   onAuthKey: (v: string) => void;
+  sshMode: SshMode;
+  onSshMode: (v: SshMode) => void;
+  sshKey: string;
+  onSshKey: (v: string) => void;
+  devicePassword: string;
+  onDevicePassword: (v: string) => void;
   onBack: () => void;
   onNext: () => void;
 }
@@ -55,6 +71,12 @@ export function StepNetwork({
   onControlServer,
   authKey,
   onAuthKey,
+  sshMode,
+  onSshMode,
+  sshKey,
+  onSshKey,
+  devicePassword,
+  onDevicePassword,
   onBack,
   onNext,
 }: StepNetworkProps) {
@@ -64,6 +86,9 @@ export function StepNetwork({
   const controlServerValid = isValidControlServer(controlServer);
   const missingAuthKey = needsAuthKey(controlServer, authKey);
   const remoteAccessValid = controlServerValid && !missingAuthKey;
+  const sshKeyInvalid = sshMode === "key-only" && isInvalidSshKey(sshKey);
+  const devicePasswordWeak =
+    sshMode === "password" && isWeakDevicePassword(devicePassword);
 
   const [remoteOpen, setRemoteOpen] = useState(
     () => controlServer.trim() !== "" || authKey.trim() !== "",
@@ -87,7 +112,11 @@ export function StepNetwork({
       next={{
         label: "Next",
         onClick: onNext,
-        disabled: !hostnameValid || !remoteAccessValid,
+        disabled:
+          !hostnameValid ||
+          !remoteAccessValid ||
+          sshKeyInvalid ||
+          devicePasswordWeak,
       }}
     >
       <div className="flex max-w-xl flex-col gap-5">
@@ -308,6 +337,101 @@ export function StepNetwork({
                 </button>
               )}
             </div>
+          )}
+        </div>
+
+        <div className="flex flex-col gap-3 border-t border-border pt-5">
+          <Label>Device access (SSH)</Label>
+          <p className="text-sm text-muted-foreground">
+            How you log into this drone over SSH. Leave it as-is to keep the
+            image's built-in login.
+          </p>
+          <div className="flex gap-2">
+            {SSH_MODES.map((m) => (
+              <Button
+                key={m.value}
+                type="button"
+                variant={sshMode === m.value ? "default" : "secondary"}
+                onClick={() => onSshMode(m.value)}
+                aria-pressed={sshMode === m.value}
+              >
+                {m.label}
+              </Button>
+            ))}
+          </div>
+
+          {sshMode === "key-only" && (
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="ssh-key">Public key</Label>
+              <Input
+                id="ssh-key"
+                value={sshKey}
+                onChange={(e) => onSshKey(e.currentTarget.value)}
+                placeholder="ssh-ed25519 AAAA… you@host"
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
+                aria-invalid={sshKeyInvalid}
+                aria-describedby="ssh-key-help"
+              />
+              <p id="ssh-key-help" className="text-sm text-muted-foreground">
+                {sshKeyInvalid ? (
+                  <span className="text-destructive">
+                    That doesn't look like an SSH public key — it should start
+                    with ssh-ed25519, ssh-rsa, …
+                  </span>
+                ) : (
+                  <>
+                    Paste your SSH{" "}
+                    <span className="font-medium text-foreground">public</span>{" "}
+                    key. Password login is disabled. Leave blank to keep the
+                    image default.
+                  </>
+                )}
+              </p>
+            </div>
+          )}
+
+          {sshMode === "password" && (
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="device-password">Device password</Label>
+              <Input
+                id="device-password"
+                type="password"
+                value={devicePassword}
+                onChange={(e) => onDevicePassword(e.currentTarget.value)}
+                placeholder="New password for the pi account"
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
+                aria-invalid={devicePasswordWeak}
+                aria-describedby="device-password-help"
+              />
+              <p
+                id="device-password-help"
+                className="text-sm text-muted-foreground"
+              >
+                {devicePasswordWeak ? (
+                  <span className="text-destructive">
+                    Use at least {MIN_DEVICE_PASSWORD} characters.
+                  </span>
+                ) : (
+                  <>
+                    Sets the{" "}
+                    <span className="font-medium text-foreground">pi</span>{" "}
+                    account password, replacing the default. Leave blank to keep
+                    the image default.
+                  </>
+                )}
+              </p>
+            </div>
+          )}
+
+          {sshMode === "disabled" && (
+            <p className="text-sm text-muted-foreground">
+              SSH is turned off. Manage this drone from its web dashboard
+              instead.
+            </p>
           )}
         </div>
       </div>

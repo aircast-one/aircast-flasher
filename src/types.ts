@@ -68,6 +68,16 @@ export interface TailscaleConfig {
   authKey: string;
 }
 
+export type SshMode = "key-only" | "password" | "disabled";
+
+// Discriminated on `ssh` so illegal field combos (a key-only entry carrying a
+// password, etc.) can't be represented. Serializes to the shape the Rust
+// AccessConfig expects (its unused fields default to None).
+export type AccessConfig =
+  | { ssh: "key-only"; authorizedKey: string }
+  | { ssh: "password"; password: string }
+  | { ssh: "disabled" };
+
 export interface WifiNetworks {
   current: string | null;
   known: string[];

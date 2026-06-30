@@ -2,7 +2,7 @@
 //! the FAT boot partition. Pure: no I/O. The Tauri app mounts the partition and
 //! applies the returned [`ProvisionPlan`].
 
-use crate::{psk, InitFormat, ProvisionConfig, TailscaleConfig, WifiConfig};
+use crate::{psk, AccessConfig, InitFormat, ProvisionConfig, SshMode, TailscaleConfig, WifiConfig};
 
 const TS_STATE_PATH: &str = "/var/lib/aircastd/tailscale.json";
 const TS_KEY_PATH: &str = "/var/lib/aircastd/tailscale.authkey";
@@ -111,39 +111,103 @@ fn cloud_init_files(config: &ProvisionConfig) -> Vec<ProvisionFile> {
 }
 
 fn cloud_init_user_data(config: &ProvisionConfig) -> Option<String> {
-    let mut body = String::new();
+    let mut top = String::new();
+    let mut write_files: Vec<String> = Vec::new();
+    let mut runcmd: Vec<String> = Vec::new();
+    let mut scrub = false;
+
     if let Some(host) = &config.hostname {
-        body.push_str(&format!("hostname: {host}\npreserve_hostname: false\n"));
+        top.push_str(&format!("hostname: {host}\npreserve_hostname: false\n"));
     }
+
+    if let Some(access) = config.access.as_ref().filter(|a| a.is_effective()) {
+        // Returns true when it wrote a plaintext secret (a password) that must
+        // not linger on the card.
+        scrub |= access_cloud_init(access, &mut top, &mut runcmd);
+    }
+
     if let Some((control, key)) = config.tailscale.as_ref().and_then(provisioned_tailscale) {
-        body.push_str(&cloud_init_tailscale_write_files(&control, &key));
-        body.push_str(TAILSCALE_SCRUB_RUNCMD);
+        write_files.push(tailscale_write_files_entry(&control, &key));
+        scrub = true;
     }
-    if body.is_empty() {
+
+    if scrub {
+        runcmd.push(SCRUB_USERDATA_ITEM.to_string());
+    }
+
+    if top.is_empty() && write_files.is_empty() && runcmd.is_empty() {
         return None;
+    }
+
+    let mut body = top;
+    if !write_files.is_empty() {
+        body.push_str("write_files:\n");
+        for entry in &write_files {
+            body.push_str(entry);
+        }
+    }
+    if !runcmd.is_empty() {
+        body.push_str("runcmd:\n");
+        for entry in &runcmd {
+            body.push_str(entry);
+        }
     }
     Some(format!("#cloud-config\n{body}"))
 }
 
-/// Removes the seed + cloud-init's ext4 cache of user-data after first boot, so
-/// the pre-auth key doesn't linger in plaintext on the card or root filesystem.
-/// Runs after `write_files` has already placed the key in aircastd's store, so
-/// it never affects enrollment.
-const TAILSCALE_SCRUB_RUNCMD: &str = "runcmd:\n\
-     \x20 - [ sh, -c, \"rm -f /boot/firmware/user-data /var/lib/cloud/instance/user-data.txt /var/lib/cloud/instances/*/user-data.txt 2>/dev/null; true\" ]\n";
+/// Emits the SSH/credential cloud-config into `top` (and a disable-ssh item into
+/// `runcmd`). Returns true if a plaintext secret (password) was written, so the
+/// caller can scrub `user-data` after first boot. The public key is not a secret.
+fn access_cloud_init(access: &AccessConfig, top: &mut String, runcmd: &mut Vec<String>) -> bool {
+    match access.ssh {
+        SshMode::KeyOnly => {
+            if let Some(key) = sanitized(&access.authorized_key) {
+                top.push_str("ssh_pwauth: false\n");
+                top.push_str(&format!("ssh_authorized_keys:\n  - {}\n", json_string(&key)));
+            }
+            false
+        }
+        SshMode::Password => {
+            if let Some(pw) = sanitized(&access.password) {
+                top.push_str("ssh_pwauth: true\n");
+                top.push_str(&format!(
+                    "chpasswd:\n  expire: false\n  users:\n    - {{name: pi, password: {}, type: text}}\n",
+                    json_string(&pw)
+                ));
+                return true;
+            }
+            false
+        }
+        SshMode::Disabled => {
+            // Disable both the service and the socket: on socket-activated SSH,
+            // stopping only ssh.service would leave ssh.socket listening. The
+            // `; true` tolerates a system that has only one of them.
+            runcmd.push(
+                "  - [ sh, -c, \"systemctl disable --now ssh.socket ssh.service 2>/dev/null; true\" ]\n"
+                    .to_string(),
+            );
+            false
+        }
+    }
+}
 
-fn cloud_init_tailscale_write_files(control_server: &str, auth_key: &str) -> String {
+/// One sanitized, non-blank line, or `None`. Strips control characters so a
+/// pasted value can't break out of the surrounding YAML.
+fn sanitized(v: &Option<String>) -> Option<String> {
+    let s = sanitize_line(v.as_deref().unwrap_or_default());
+    let s = s.trim().to_string();
+    (!s.is_empty()).then_some(s)
+}
+
+/// Removes the seed + cloud-init's cache of user-data after first boot, so a
+/// plaintext secret (Tailscale key, device password) doesn't linger on the card
+/// or root filesystem. Runs after cloud-init has already applied everything.
+const SCRUB_USERDATA_ITEM: &str = "  - [ sh, -c, \"rm -f /boot/firmware/user-data /var/lib/cloud/instance/user-data.txt /var/lib/cloud/instances/*/user-data.txt 2>/dev/null; true\" ]\n";
+
+fn tailscale_write_files_entry(control_server: &str, auth_key: &str) -> String {
     let json = tailscale_state_json(control_server);
     format!(
-        "write_files:\n\
-         \x20 - path: {TS_STATE_PATH}\n\
-         \x20   permissions: '0644'\n\
-         \x20   content: |\n\
-         \x20     {json}\n\
-         \x20 - path: {TS_KEY_PATH}\n\
-         \x20   permissions: '0600'\n\
-         \x20   content: |\n\
-         \x20     {key}\n",
+        "  - path: {TS_STATE_PATH}\n    permissions: '0644'\n    content: |\n      {json}\n  - path: {TS_KEY_PATH}\n    permissions: '0600'\n    content: |\n      {key}\n",
         key = auth_key,
     )
 }
@@ -217,10 +281,56 @@ fn firstrun_script(config: &ProvisionConfig) -> String {
         ));
     }
 
+    if let Some(access) = config.access.as_ref().filter(|a| a.is_effective()) {
+        s.push_str(&firstrun_access(access));
+    }
+
     s.push_str("rm -f /boot/firstrun.sh\n");
     s.push_str("sed -i 's| systemd.run=.*||g' /boot/cmdline.txt 2>/dev/null || true\n");
     s.push_str("exit 0\n");
     s
+}
+
+/// Shell for the legacy firstrun path that applies the same SSH/credential
+/// posture as [`access_cloud_init`]. Values are single-quoted in the shell and
+/// pre-sanitized of control characters so a pasted value can't break out.
+fn firstrun_access(access: &AccessConfig) -> String {
+    match access.ssh {
+        SshMode::KeyOnly => {
+            let Some(key) = sanitized(&access.authorized_key) else {
+                return String::new();
+            };
+            format!(
+                "install -d -m 700 -o pi -g pi /home/pi/.ssh\n\
+                 printf '%s\\n' '{key}' >>/home/pi/.ssh/authorized_keys\n\
+                 chmod 600 /home/pi/.ssh/authorized_keys\n\
+                 chown pi:pi /home/pi/.ssh/authorized_keys\n\
+                 sed -i 's/^#\\?PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config\n\
+                 systemctl enable ssh\n\n",
+                key = shell_single_quote(&key),
+            )
+        }
+        SshMode::Password => {
+            let Some(pw) = sanitized(&access.password) else {
+                return String::new();
+            };
+            format!(
+                "printf 'pi:%s\\n' '{pw}' | chpasswd\n\
+                 sed -i 's/^#\\?PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config\n\
+                 systemctl enable ssh\n\n",
+                pw = shell_single_quote(&pw),
+            )
+        }
+        SshMode::Disabled => {
+            "systemctl disable --now ssh.socket ssh.service 2>/dev/null || true\n\n".to_string()
+        }
+    }
+}
+
+/// Escapes a sanitized value for safe inclusion inside a shell single-quoted
+/// string (`'...'`), turning each `'` into `'\''`.
+fn shell_single_quote(s: &str) -> String {
+    s.replace('\'', "'\\''")
 }
 
 #[cfg(test)]
@@ -236,6 +346,7 @@ mod tests {
                 country: "US".into(),
             }),
             tailscale: None,
+            access: None,
             init_format: init,
         }
     }
@@ -248,8 +359,30 @@ mod tests {
                 control_server: "https://headscale.example.com".into(),
                 auth_key: "hskey-auth-abc123".into(),
             }),
+            access: None,
             init_format: init,
         }
+    }
+
+    fn access_cfg(init: InitFormat, access: AccessConfig) -> ProvisionConfig {
+        ProvisionConfig {
+            hostname: None,
+            wifi: None,
+            tailscale: None,
+            access: Some(access),
+            init_format: init,
+        }
+    }
+
+    fn cloud_user_data(config: &ProvisionConfig) -> String {
+        let ProvisionPlan::CloudInit { files } = plan(config) else {
+            panic!("expected CloudInit plan");
+        };
+        files
+            .into_iter()
+            .find(|f| f.name == "user-data")
+            .expect("user-data file")
+            .contents
     }
 
     #[test]
@@ -347,6 +480,112 @@ mod tests {
     #[test]
     fn json_string_escapes_quotes_and_backslashes() {
         assert_eq!(json_string("a\"b\\c"), "\"a\\\"b\\\\c\"");
+    }
+
+    fn access(ssh: SshMode, key: Option<&str>, pw: Option<&str>) -> AccessConfig {
+        AccessConfig {
+            ssh,
+            authorized_key: key.map(String::from),
+            password: pw.map(String::from),
+        }
+    }
+
+    #[test]
+    fn access_key_only_with_no_key_is_noop() {
+        let config = access_cfg(InitFormat::CloudInit, access(SshMode::KeyOnly, None, None));
+        assert!(config.is_empty());
+        assert_eq!(plan(&config), ProvisionPlan::Noop);
+    }
+
+    #[test]
+    fn access_password_with_no_password_is_noop() {
+        let config = access_cfg(InitFormat::CloudInit, access(SshMode::Password, None, None));
+        assert!(config.is_empty());
+    }
+
+    #[test]
+    fn access_disabled_is_always_effective() {
+        let config = access_cfg(InitFormat::CloudInit, access(SshMode::Disabled, None, None));
+        assert!(!config.is_empty());
+        let ud = cloud_user_data(&config);
+        assert!(ud.contains("runcmd:"));
+        assert!(ud.contains("systemctl disable --now ssh.socket ssh.service"));
+    }
+
+    #[test]
+    fn access_key_only_disables_password_auth_and_adds_key() {
+        let config = access_cfg(
+            InitFormat::CloudInit,
+            access(SshMode::KeyOnly, Some("ssh-ed25519 AAAAkey operator@base"), None),
+        );
+        let ud = cloud_user_data(&config);
+        assert!(ud.contains("ssh_pwauth: false"));
+        assert!(ud.contains("ssh_authorized_keys:"));
+        assert!(ud.contains("\"ssh-ed25519 AAAAkey operator@base\""));
+        // A public key is not a secret — user-data is not scrubbed for it.
+        assert!(!ud.contains("rm -f /boot/firmware/user-data"));
+    }
+
+    #[test]
+    fn access_password_sets_pi_password_and_scrubs_userdata() {
+        let config = access_cfg(
+            InitFormat::CloudInit,
+            access(SshMode::Password, None, Some("s3cret-pass")),
+        );
+        let ud = cloud_user_data(&config);
+        assert!(ud.contains("ssh_pwauth: true"));
+        assert!(ud.contains("chpasswd:"));
+        assert!(ud.contains("{name: pi, password: \"s3cret-pass\", type: text}"));
+        // The plaintext password must be removed from the card after first boot.
+        assert!(ud.contains("rm -f /boot/firmware/user-data"));
+    }
+
+    #[test]
+    fn access_value_newlines_are_stripped() {
+        let config = access_cfg(
+            InitFormat::CloudInit,
+            access(SshMode::KeyOnly, Some("ssh-ed25519 KEY\nssh_pwauth: true"), None),
+        );
+        let ud = cloud_user_data(&config);
+        // The injected newline is stripped, so it can't become its own YAML key.
+        assert!(ud.contains("\"ssh-ed25519 KEYssh_pwauth: true\""));
+    }
+
+    #[test]
+    fn disabled_ssh_and_tailscale_share_one_runcmd() {
+        let mut config = ts_cfg(InitFormat::CloudInit, None);
+        config.access = Some(access(SshMode::Disabled, None, None));
+        let ud = cloud_user_data(&config);
+        // Exactly one runcmd: block, carrying both the disable and the scrub.
+        assert_eq!(ud.matches("runcmd:").count(), 1);
+        assert!(ud.contains("systemctl disable --now ssh.socket ssh.service"));
+        assert!(ud.contains("rm -f /boot/firmware/user-data"));
+    }
+
+    #[test]
+    fn firstrun_password_sets_pi_password() {
+        let config = access_cfg(
+            InitFormat::FirstRun,
+            access(SshMode::Password, None, Some("s3cret")),
+        );
+        let ProvisionPlan::FirstRun { script, .. } = plan(&config) else {
+            panic!("expected FirstRun plan");
+        };
+        assert!(script.contents.contains("printf 'pi:%s\\n' 's3cret' | chpasswd"));
+        assert!(script.contents.contains("PasswordAuthentication yes"));
+    }
+
+    #[test]
+    fn firstrun_key_only_escapes_single_quotes() {
+        let config = access_cfg(
+            InitFormat::FirstRun,
+            access(SshMode::KeyOnly, Some("key-with-'quote"), None),
+        );
+        let ProvisionPlan::FirstRun { script, .. } = plan(&config) else {
+            panic!("expected FirstRun plan");
+        };
+        assert!(script.contents.contains(r"key-with-'\''quote"));
+        assert!(script.contents.contains("PasswordAuthentication no"));
     }
 
     #[test]
