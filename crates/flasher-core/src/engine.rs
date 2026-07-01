@@ -491,6 +491,7 @@ mod tests {
                 country: "US".into(),
             }),
             tailscale: None,
+            access: None,
             init_format: InitFormat::CloudInit,
         }
     }
@@ -555,6 +556,7 @@ mod tests {
                 country: "US".into(),
             }),
             tailscale: None,
+            access: None,
             init_format: InitFormat::FirstRun,
         };
         let params = FlashParams { image_len, verify: false };

@@ -1,4 +1,5 @@
 import type {
+  AccessConfig,
   DownloadProgress,
   FlashProgress,
   Release,
@@ -30,4 +31,5 @@ export interface FlashVars {
   wifi: WifiConfig | null;
   hostname: string | null;
   tailscale: TailscaleConfig | null;
+  access: AccessConfig | null;
 }

@@ -4,6 +4,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { check, type Update } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
 import type {
+  AccessConfig,
   BlockDevice,
   Channel,
   DownloadProgress,
@@ -12,6 +13,7 @@ import type {
   InitFormat,
   ListReleasesResponse,
   Release,
+  SshPublicKey,
   TailscaleConfig,
   WifiConfig,
   WifiNetworks,
@@ -49,6 +51,7 @@ export function flashImage(args: {
   wifi: WifiConfig | null;
   hostname: string | null;
   tailscale: TailscaleConfig | null;
+  access: AccessConfig | null;
   initFormat: InitFormat;
 }): Promise<void> {
   return invoke<void>("flash_image", {
@@ -57,12 +60,29 @@ export function flashImage(args: {
     wifi: args.wifi,
     hostname: args.hostname,
     tailscale: args.tailscale,
+    access: args.access,
     initFormat: args.initFormat,
   });
 }
 
 export function listWifiNetworks(): Promise<WifiNetworks> {
   return invoke<WifiNetworks>("list_wifi_networks");
+}
+
+export function detectSshKeys(): Promise<SshPublicKey[]> {
+  return invoke<SshPublicKey[]>("detect_ssh_keys");
+}
+
+// Open a file picker for a .pub key and return its trimmed contents, or null if
+// the user cancelled.
+export async function pickAndReadPublicKey(): Promise<string | null> {
+  const path = await open({
+    multiple: false,
+    directory: false,
+    filters: [{ name: "SSH public key", extensions: ["pub"] }],
+  });
+  if (typeof path !== "string") return null;
+  return invoke<string>("read_public_key", { path });
 }
 
 export function cancelFlash(): Promise<void> {

@@ -31,14 +31,16 @@ pub fn run_flash_helper() -> ! {
     let device = get("--device");
     let image = get("--image");
     let progress_file = get("--progress-file");
-    let provision_b64 = get("--provision");
+    let provision_file = get("--provision-file");
     let no_verify = args.iter().any(|a| a == "--no-verify");
 
-    let (device, image, progress_file, provision_b64) =
-        match (device, image, progress_file, provision_b64) {
+    let (device, image, progress_file, provision_file) =
+        match (device, image, progress_file, provision_file) {
             (Some(d), Some(i), Some(p), Some(c)) => (d, i, p, c),
             _ => {
-                eprintln!("flash-helper: missing --device/--image/--progress-file/--provision");
+                eprintln!(
+                    "flash-helper: missing --device/--image/--progress-file/--provision-file"
+                );
                 std::process::exit(2);
             }
         };
@@ -54,6 +56,23 @@ pub fn run_flash_helper() -> ! {
         }
         println!("{line}");
         let _ = std::io::stdout().flush();
+    };
+
+    // The provision blob carries secrets (device password, Tailscale key) so it
+    // is passed by file path, not on the command line where `ps` could read it.
+    // Read it once, then remove the file so it doesn't linger.
+    let provision_b64 = match std::fs::read_to_string(&provision_file) {
+        Ok(s) => {
+            let _ = std::fs::remove_file(&provision_file);
+            s.trim().to_string()
+        }
+        Err(e) => {
+            let escaped = e.to_string().replace('\\', "\\\\").replace('"', "\\\"");
+            append(&format!(
+                "{{\"error\":\"Failed to read provision file: {escaped}\"}}"
+            ));
+            std::process::exit(1);
+        }
     };
 
     match flash(&device, &image, &provision_b64, no_verify, &append) {

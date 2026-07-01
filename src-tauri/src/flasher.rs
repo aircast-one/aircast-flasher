@@ -696,6 +696,7 @@ pub async fn flash_image(
     wifi: Option<WifiConfig>,
     hostname: Option<String>,
     tailscale: Option<TailscaleConfig>,
+    access: Option<flasher_core::AccessConfig>,
     init_format: flasher_core::InitFormat,
 ) -> Result<(), String> {
     validate_disk_path(&target_disk)?;
@@ -735,6 +736,7 @@ pub async fn flash_image(
         hostname,
         wifi,
         tailscale,
+        access,
         init_format,
     };
     let provision_b64 = {
@@ -830,7 +832,19 @@ async fn run_elevated_flash(
         }
     });
 
-    let launch = launch_helper(&exe, target_disk, image, &progress_file, provision_b64).await;
+    // The provision blob holds secrets (device password, Tailscale key), so it
+    // goes to the helper as a 0600 file path — never on the command line, where
+    // any local user could read it via `ps`.
+    sweep_stale_provision_files();
+    let provision_file = std::env::temp_dir().join(format!(
+        "{PROVISION_FILE_PREFIX}{}.b64",
+        std::process::id()
+    ));
+    write_secret_file(&provision_file, provision_b64)?;
+    let provision_arg = provision_file.to_string_lossy().to_string();
+
+    let launch = launch_helper(&exe, target_disk, image, &progress_file, &provision_arg).await;
+    let _ = std::fs::remove_file(&provision_file);
 
     // Stop the tailer regardless of outcome.
     stop.store(true, Ordering::SeqCst);
@@ -858,6 +872,73 @@ async fn run_elevated_flash(
     }
 }
 
+const PROVISION_FILE_PREFIX: &str = "aircast-provision-";
+
+/// Writes `contents` to `path` as a `0600` file (owner-only on Unix), replacing
+/// any existing file. Used for the secret-bearing provision blob.
+fn write_secret_file(path: &std::path::Path, contents: &str) -> Result<(), String> {
+    use std::io::Write as _;
+    let _ = std::fs::remove_file(path);
+    let mut f = {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt as _;
+            std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .mode(0o600)
+                .open(path)
+        }
+        // Windows has no mode bits here; the file lands in the user's temp dir
+        // (readable by the same user and admins). The argv exposure is what
+        // mattered — a locked-down ACL would need the windows-acl crate.
+        #[cfg(not(unix))]
+        {
+            std::fs::File::create(path)
+        }
+    }
+    .map_err(|e| format!("Failed to create provision file: {e}"))?;
+    f.write_all(contents.as_bytes())
+        .map_err(|e| format!("Failed to write provision file: {e}"))?;
+    Ok(())
+}
+
+/// No live flash runs anywhere near this long, so a provision blob older than
+/// this is an orphan from a crashed flasher.
+const STALE_PROVISION_AGE: std::time::Duration = std::time::Duration::from_secs(3600);
+
+/// Best-effort removal of orphaned provision blobs in the temp dir, left by a
+/// flasher that crashed between writing the file and cleaning it up. Only files
+/// older than [`STALE_PROVISION_AGE`] are removed, so a concurrently-running
+/// flasher's in-flight blob is never deleted.
+fn sweep_stale_provision_files() {
+    sweep_provision_files_in(&std::env::temp_dir(), STALE_PROVISION_AGE);
+}
+
+fn sweep_provision_files_in(dir: &std::path::Path, max_age: std::time::Duration) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        if !entry
+            .file_name()
+            .to_string_lossy()
+            .starts_with(PROVISION_FILE_PREFIX)
+        {
+            continue;
+        }
+        let too_old = entry
+            .metadata()
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|t| t.elapsed().ok())
+            .is_some_and(|age| age >= max_age);
+        if too_old {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
+}
+
 /// Per-OS elevation launcher. Returns `Ok(true)` if the helper exited 0,
 /// `Ok(false)` on a non-zero exit, `Err` if the launcher itself failed.
 #[cfg(target_os = "macos")]
@@ -866,7 +947,7 @@ async fn launch_helper(
     target_disk: &str,
     image: &std::path::Path,
     progress_file: &std::path::Path,
-    provision_b64: &str,
+    provision_file: &str,
 ) -> Result<bool, String> {
     use crate::macos_auth::Authorization;
 
@@ -874,7 +955,7 @@ async fn launch_helper(
     let device = target_disk.to_string();
     let image = image.to_string_lossy().to_string();
     let pf = progress_file.to_string_lossy().to_string();
-    let provision = provision_b64.to_string();
+    let provision = provision_file.to_string();
 
     // One Touch ID prompt; the helper inherits root and holds the device open.
     tokio::task::spawn_blocking(move || -> Result<bool, String> {
@@ -889,7 +970,7 @@ async fn launch_helper(
                 &image,
                 "--progress-file",
                 &pf,
-                "--provision",
+                "--provision-file",
                 &provision,
             ],
         ) {
@@ -914,7 +995,7 @@ async fn launch_helper(
     target_disk: &str,
     image: &std::path::Path,
     progress_file: &std::path::Path,
-    provision_b64: &str,
+    provision_file: &str,
 ) -> Result<bool, String> {
     let status = tokio::process::Command::new("pkexec")
         .arg(exe)
@@ -926,8 +1007,8 @@ async fn launch_helper(
             &image.to_string_lossy(),
             "--progress-file",
             &progress_file.to_string_lossy(),
-            "--provision",
-            provision_b64,
+            "--provision-file",
+            provision_file,
         ])
         .status()
         .await
@@ -951,19 +1032,19 @@ async fn launch_helper(
     target_disk: &str,
     image: &std::path::Path,
     progress_file: &std::path::Path,
-    provision_b64: &str,
+    provision_file: &str,
 ) -> Result<bool, String> {
     // Windows has no pkexec/Authorization-Services: re-exec this binary elevated
     // via PowerShell's Start-Process -Verb RunAs (UAC) and wait for it.
     let ps_cmd = format!(
         "$p = Start-Process -FilePath '{exe}' -ArgumentList \
-         '--flash-helper','--device','{device}','--image','{image}','--progress-file','{pf}','--provision','{provision}' \
+         '--flash-helper','--device','{device}','--image','{image}','--progress-file','{pf}','--provision-file','{provision}' \
          -Verb RunAs -Wait -PassThru; exit $p.ExitCode",
         exe = ps_escape(&exe.to_string_lossy()),
         device = ps_escape(target_disk),
         image = ps_escape(&image.to_string_lossy()),
         pf = ps_escape(&progress_file.to_string_lossy()),
-        provision = ps_escape(provision_b64),
+        provision = ps_escape(provision_file),
     );
 
     let status = hidden_command("powershell")
@@ -1336,6 +1417,65 @@ fn format_bytes(bytes: u64) -> String {
 }
 
 // ---------------------------------------------------------------------------
+// Command: SSH public keys (auto-detect + read a picked file)
+// ---------------------------------------------------------------------------
+
+#[derive(serde::Serialize)]
+pub struct SshPublicKey {
+    pub label: String,
+    pub contents: String,
+}
+
+fn home_dir() -> Option<std::path::PathBuf> {
+    std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .map(std::path::PathBuf::from)
+}
+
+/// The operator's `~/.ssh/*.pub` public keys, so the UI can offer them instead
+/// of making the user cat-and-paste. Best-effort: returns empty on any error.
+#[tauri::command]
+pub fn detect_ssh_keys() -> Vec<SshPublicKey> {
+    match home_dir() {
+        Some(home) => detect_ssh_keys_in(&home.join(".ssh")),
+        None => Vec::new(),
+    }
+}
+
+fn detect_ssh_keys_in(ssh: &std::path::Path) -> Vec<SshPublicKey> {
+    let Ok(entries) = std::fs::read_dir(ssh) else {
+        return Vec::new();
+    };
+    let mut keys: Vec<SshPublicKey> = entries
+        .flatten()
+        .filter(|e| e.path().extension().and_then(|x| x.to_str()) == Some("pub"))
+        .filter_map(|e| {
+            let contents = std::fs::read_to_string(e.path()).ok()?.trim().to_string();
+            (!contents.is_empty()).then(|| SshPublicKey {
+                label: e.file_name().to_string_lossy().to_string(),
+                contents,
+            })
+        })
+        .collect();
+    keys.sort_by(|a, b| a.label.cmp(&b.label));
+    keys
+}
+
+const MAX_PUBKEY_BYTES: u64 = 64 * 1024;
+
+/// Reads a public-key file the user picked in the file dialog. Capped so a
+/// misclick on a huge file can't be slurped into memory.
+#[tauri::command]
+pub fn read_public_key(path: String) -> Result<String, String> {
+    let meta = std::fs::metadata(&path).map_err(|e| format!("Cannot read key file: {e}"))?;
+    if meta.len() > MAX_PUBKEY_BYTES {
+        return Err("That file is too large to be an SSH public key.".to_string());
+    }
+    let contents = std::fs::read_to_string(&path).map_err(|e| format!("Cannot read key file: {e}"))?;
+    Ok(contents.trim().to_string())
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -1349,6 +1489,87 @@ mod tests {
         assert!(validate_disk_path("/dev/disk2$(whoami)").is_err());
         assert!(validate_disk_path("../../etc/passwd").is_err());
         assert!(validate_disk_path("").is_err());
+    }
+
+    // A unique temp subdir per test so the sweep test can't race sibling tests.
+    fn isolated_dir(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("aircast-flasher-test-{name}"));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn write_secret_file_round_trips_contents() {
+        let dir = isolated_dir("roundtrip");
+        let path = dir.join(format!("{PROVISION_FILE_PREFIX}x.b64"));
+        write_secret_file(&path, "secret-blob").unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "secret-blob");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn write_secret_file_is_owner_only() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let dir = isolated_dir("mode");
+        let path = dir.join(format!("{PROVISION_FILE_PREFIX}x.b64"));
+        write_secret_file(&path, "secret-blob").unwrap();
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode();
+        // The secret-bearing blob must not be world/group readable.
+        assert_eq!(mode & 0o777, 0o600, "provision file must be 0600");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn sweep_removes_stale_provision_files() {
+        let dir = isolated_dir("sweep-stale");
+        let stale = dir.join(format!("{PROVISION_FILE_PREFIX}x.b64"));
+        write_secret_file(&stale, "x").unwrap();
+        // Zero threshold: every matching file counts as stale.
+        sweep_provision_files_in(&dir, std::time::Duration::ZERO);
+        assert!(!stale.exists(), "sweep must remove orphaned provision files");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn detect_ssh_keys_reads_pub_files_only() {
+        let dir = isolated_dir("ssh-detect");
+        std::fs::write(dir.join("id_ed25519.pub"), "  ssh-ed25519 AAAAKEY me@host  \n").unwrap();
+        std::fs::write(dir.join("id_ed25519"), "PRIVATE KEY").unwrap();
+        std::fs::write(dir.join("empty.pub"), "   \n").unwrap();
+
+        let keys = detect_ssh_keys_in(&dir);
+
+        assert_eq!(keys.len(), 1, "only non-empty .pub files, never private keys");
+        assert_eq!(keys[0].label, "id_ed25519.pub");
+        assert_eq!(keys[0].contents, "ssh-ed25519 AAAAKEY me@host");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn read_public_key_trims_and_caps_size() {
+        let dir = isolated_dir("ssh-read");
+        let ok = dir.join("k.pub");
+        std::fs::write(&ok, "ssh-ed25519 AAAA me@host\n").unwrap();
+        assert_eq!(read_public_key(ok.to_string_lossy().into()).unwrap(), "ssh-ed25519 AAAA me@host");
+
+        let big = dir.join("big.pub");
+        std::fs::write(&big, vec![b'a'; (MAX_PUBKEY_BYTES + 1) as usize]).unwrap();
+        assert!(read_public_key(big.to_string_lossy().into()).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn sweep_keeps_recent_provision_files() {
+        let dir = isolated_dir("sweep-recent");
+        let fresh = dir.join(format!("{PROVISION_FILE_PREFIX}x.b64"));
+        write_secret_file(&fresh, "x").unwrap();
+        // A just-written file is younger than the threshold: a concurrent
+        // flash's in-flight blob must survive.
+        sweep_provision_files_in(&dir, std::time::Duration::from_secs(3600));
+        assert!(fresh.exists(), "sweep must not delete an in-flight provision file");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
