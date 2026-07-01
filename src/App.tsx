@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   cancelFlash,
+  detectSshKeys,
   downloadImage,
   flashImage,
   listBlockDevices,
@@ -9,6 +10,7 @@ import {
   listWifiNetworks,
   onDownloadProgress,
   onFlashProgress,
+  pickAndReadPublicKey,
   pickLocalImage,
 } from "@/api";
 import type {
@@ -85,11 +87,13 @@ function App() {
   );
   const [authKey, setAuthKey] = useState("");
 
-  // Device access (SSH). The public key is reusable across flashes, so it's
-  // persisted; the device password is a secret — keep it in memory only.
-  const [sshMode, setSshMode] = useState<SshMode>("key-only");
+  // Device access (SSH). Defaults to password auth with the image's stock
+  // password prefilled, so a device is reachable out of the box; the operator
+  // changes it (or switches to a key) for anything deployed. The public key is
+  // reusable across flashes, so it's persisted; the password stays in memory.
+  const [sshMode, setSshMode] = useState<SshMode>("password");
   const [sshKey, setSshKey] = useLocalStorage("aircast.ssh.authorizedKey", "");
-  const [devicePassword, setDevicePassword] = useState("");
+  const [devicePassword, setDevicePassword] = useState("raspberry");
 
   // Wizard
   const [step, setStep] = useState<WizardStep>(STEP.os);
@@ -121,6 +125,16 @@ function App() {
     queryKey: ["wifi"],
     queryFn: listWifiNetworks,
   });
+
+  const sshKeysQuery = useQuery({
+    queryKey: ["ssh-keys"],
+    queryFn: detectSshKeys,
+  });
+
+  async function handleChooseKeyFile() {
+    const contents = await pickAndReadPublicKey();
+    if (contents) setSshKey(contents);
+  }
 
   // Prefill the currently-joined network once, while the field is empty. The
   // WiFi country is detected on the backend and applied at flash time — never
@@ -339,6 +353,8 @@ function App() {
               onSshMode={setSshMode}
               sshKey={sshKey}
               onSshKey={setSshKey}
+              detectedKeys={sshKeysQuery.data ?? []}
+              onChooseKeyFile={handleChooseKeyFile}
               devicePassword={devicePassword}
               onDevicePassword={setDevicePassword}
               onBack={() => setStep(STEP.os)}

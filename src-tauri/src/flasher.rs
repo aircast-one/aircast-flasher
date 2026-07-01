@@ -1417,6 +1417,65 @@ fn format_bytes(bytes: u64) -> String {
 }
 
 // ---------------------------------------------------------------------------
+// Command: SSH public keys (auto-detect + read a picked file)
+// ---------------------------------------------------------------------------
+
+#[derive(serde::Serialize)]
+pub struct SshPublicKey {
+    pub label: String,
+    pub contents: String,
+}
+
+fn home_dir() -> Option<std::path::PathBuf> {
+    std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .map(std::path::PathBuf::from)
+}
+
+/// The operator's `~/.ssh/*.pub` public keys, so the UI can offer them instead
+/// of making the user cat-and-paste. Best-effort: returns empty on any error.
+#[tauri::command]
+pub fn detect_ssh_keys() -> Vec<SshPublicKey> {
+    match home_dir() {
+        Some(home) => detect_ssh_keys_in(&home.join(".ssh")),
+        None => Vec::new(),
+    }
+}
+
+fn detect_ssh_keys_in(ssh: &std::path::Path) -> Vec<SshPublicKey> {
+    let Ok(entries) = std::fs::read_dir(ssh) else {
+        return Vec::new();
+    };
+    let mut keys: Vec<SshPublicKey> = entries
+        .flatten()
+        .filter(|e| e.path().extension().and_then(|x| x.to_str()) == Some("pub"))
+        .filter_map(|e| {
+            let contents = std::fs::read_to_string(e.path()).ok()?.trim().to_string();
+            (!contents.is_empty()).then(|| SshPublicKey {
+                label: e.file_name().to_string_lossy().to_string(),
+                contents,
+            })
+        })
+        .collect();
+    keys.sort_by(|a, b| a.label.cmp(&b.label));
+    keys
+}
+
+const MAX_PUBKEY_BYTES: u64 = 64 * 1024;
+
+/// Reads a public-key file the user picked in the file dialog. Capped so a
+/// misclick on a huge file can't be slurped into memory.
+#[tauri::command]
+pub fn read_public_key(path: String) -> Result<String, String> {
+    let meta = std::fs::metadata(&path).map_err(|e| format!("Cannot read key file: {e}"))?;
+    if meta.len() > MAX_PUBKEY_BYTES {
+        return Err("That file is too large to be an SSH public key.".to_string());
+    }
+    let contents = std::fs::read_to_string(&path).map_err(|e| format!("Cannot read key file: {e}"))?;
+    Ok(contents.trim().to_string())
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -1470,6 +1529,34 @@ mod tests {
         // Zero threshold: every matching file counts as stale.
         sweep_provision_files_in(&dir, std::time::Duration::ZERO);
         assert!(!stale.exists(), "sweep must remove orphaned provision files");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn detect_ssh_keys_reads_pub_files_only() {
+        let dir = isolated_dir("ssh-detect");
+        std::fs::write(dir.join("id_ed25519.pub"), "  ssh-ed25519 AAAAKEY me@host  \n").unwrap();
+        std::fs::write(dir.join("id_ed25519"), "PRIVATE KEY").unwrap();
+        std::fs::write(dir.join("empty.pub"), "   \n").unwrap();
+
+        let keys = detect_ssh_keys_in(&dir);
+
+        assert_eq!(keys.len(), 1, "only non-empty .pub files, never private keys");
+        assert_eq!(keys[0].label, "id_ed25519.pub");
+        assert_eq!(keys[0].contents, "ssh-ed25519 AAAAKEY me@host");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn read_public_key_trims_and_caps_size() {
+        let dir = isolated_dir("ssh-read");
+        let ok = dir.join("k.pub");
+        std::fs::write(&ok, "ssh-ed25519 AAAA me@host\n").unwrap();
+        assert_eq!(read_public_key(ok.to_string_lossy().into()).unwrap(), "ssh-ed25519 AAAA me@host");
+
+        let big = dir.join("big.pub");
+        std::fs::write(&big, vec![b'a'; (MAX_PUBKEY_BYTES + 1) as usize]).unwrap();
+        assert!(read_public_key(big.to_string_lossy().into()).is_err());
         let _ = std::fs::remove_dir_all(&dir);
     }
 

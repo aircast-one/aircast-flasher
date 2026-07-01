@@ -13,6 +13,7 @@ import type {
   InitFormat,
   ListReleasesResponse,
   Release,
+  SshPublicKey,
   TailscaleConfig,
   WifiConfig,
   WifiNetworks,
@@ -66,6 +67,22 @@ export function flashImage(args: {
 
 export function listWifiNetworks(): Promise<WifiNetworks> {
   return invoke<WifiNetworks>("list_wifi_networks");
+}
+
+export function detectSshKeys(): Promise<SshPublicKey[]> {
+  return invoke<SshPublicKey[]>("detect_ssh_keys");
+}
+
+// Open a file picker for a .pub key and return its trimmed contents, or null if
+// the user cancelled.
+export async function pickAndReadPublicKey(): Promise<string | null> {
+  const path = await open({
+    multiple: false,
+    directory: false,
+    filters: [{ name: "SSH public key", extensions: ["pub"] }],
+  });
+  if (typeof path !== "string") return null;
+  return invoke<string>("read_public_key", { path });
 }
 
 export function cancelFlash(): Promise<void> {

@@ -30,6 +30,8 @@ async fn main() {
             flasher::flash_image,
             flasher::list_wifi_networks,
             flasher::cancel_flash,
+            flasher::detect_ssh_keys,
+            flasher::read_public_key,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

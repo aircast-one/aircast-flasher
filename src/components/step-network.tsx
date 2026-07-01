@@ -21,11 +21,11 @@ import {
   MIN_DEVICE_PASSWORD,
   needsAuthKey,
 } from "@/components/step-network.validation";
-import type { SshMode } from "@/types";
+import type { SshMode, SshPublicKey } from "@/types";
 
 const SSH_MODES: { value: SshMode; label: string }[] = [
-  { value: "key-only", label: "SSH key" },
   { value: "password", label: "Password" },
+  { value: "key-only", label: "SSH key" },
   { value: "disabled", label: "Disabled" },
 ];
 
@@ -49,6 +49,8 @@ interface StepNetworkProps {
   onSshMode: (v: SshMode) => void;
   sshKey: string;
   onSshKey: (v: string) => void;
+  detectedKeys: SshPublicKey[];
+  onChooseKeyFile: () => void;
   devicePassword: string;
   onDevicePassword: (v: string) => void;
   onBack: () => void;
@@ -75,6 +77,8 @@ export function StepNetwork({
   onSshMode,
   sshKey,
   onSshKey,
+  detectedKeys,
+  onChooseKeyFile,
   devicePassword,
   onDevicePassword,
   onBack,
@@ -94,6 +98,12 @@ export function StepNetwork({
     () => controlServer.trim() !== "" || authKey.trim() !== "",
   );
   const remoteExpanded = remoteOpen || !remoteAccessValid;
+
+  const [accessOpen, setAccessOpen] = useState(false);
+  // Force it open if there's a validation error, so the operator can see/fix it.
+  const accessExpanded = accessOpen || sshKeyInvalid || devicePasswordWeak;
+
+  const [showDevicePassword, setShowDevicePassword] = useState(false);
 
   const [showControlServer, setShowControlServer] = useState(
     () => controlServer.trim() !== "",
@@ -208,12 +218,11 @@ export function StepNetwork({
               </span>
             ) : (
               <>
-                This becomes your drone's name on the network — you'll reach it
-                at{" "}
+                Reachable at{" "}
                 <span className="font-medium text-foreground">
                   {trimmedHostname === "" ? "falcon-01" : trimmedHostname}.local
-                </span>
-                . Pick something you'll recognise in a fleet.
+                </span>{" "}
+                — pick a name you'll spot in a fleet.
               </>
             )}
           </p>
@@ -341,12 +350,28 @@ export function StepNetwork({
         </div>
 
         <div className="flex flex-col gap-3 border-t border-border pt-5">
-          <Label>Device access (SSH)</Label>
-          <p className="text-sm text-muted-foreground">
-            How you log into this drone over SSH. Leave it as-is to keep the
-            image's built-in login.
-          </p>
-          <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={() => setAccessOpen((v) => !v)}
+            aria-expanded={accessExpanded}
+            className="flex items-center gap-1.5 text-sm font-medium text-foreground"
+          >
+            Device access (optional)
+            <ChevronDown
+              className={`size-4 text-muted-foreground transition-transform ${
+                accessExpanded ? "rotate-180" : ""
+              }`}
+            />
+          </button>
+          {accessExpanded && (
+            <>
+              <p className="text-sm text-muted-foreground">
+                Default login is{" "}
+                <span className="font-medium text-foreground">pi</span> /{" "}
+                <span className="font-medium text-foreground">raspberry</span> —
+                set a key or password before deploying.
+              </p>
+              <div className="flex gap-2">
             {SSH_MODES.map((m) => (
               <Button
                 key={m.value}
@@ -363,8 +388,31 @@ export function StepNetwork({
           {sshMode === "key-only" && (
             <div className="flex flex-col gap-2">
               <Label htmlFor="ssh-key">Public key</Label>
+              <div className="flex flex-wrap gap-2">
+                {detectedKeys.map((k) => (
+                  <Button
+                    key={k.label}
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => onSshKey(k.contents)}
+                    aria-pressed={sshKey.trim() === k.contents.trim()}
+                  >
+                    Use {k.label}
+                  </Button>
+                ))}
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={onChooseKeyFile}
+                >
+                  Choose file…
+                </Button>
+              </div>
               <Input
                 id="ssh-key"
+                className="font-mono"
                 value={sshKey}
                 onChange={(e) => onSshKey(e.currentTarget.value)}
                 placeholder="ssh-ed25519 AAAA… you@host"
@@ -381,12 +429,7 @@ export function StepNetwork({
                     with ssh-ed25519, ssh-rsa, …
                   </span>
                 ) : (
-                  <>
-                    Paste your SSH{" "}
-                    <span className="font-medium text-foreground">public</span>{" "}
-                    key. Password login is disabled. Leave blank to keep the
-                    image default.
-                  </>
+                  <>Password login is off. Leave blank to keep the default.</>
                 )}
               </p>
             </div>
@@ -395,18 +438,32 @@ export function StepNetwork({
           {sshMode === "password" && (
             <div className="flex flex-col gap-2">
               <Label htmlFor="device-password">Device password</Label>
-              <Input
-                id="device-password"
-                type="password"
-                value={devicePassword}
-                onChange={(e) => onDevicePassword(e.currentTarget.value)}
-                placeholder="New password for the pi account"
-                autoCapitalize="none"
-                autoCorrect="off"
-                spellCheck={false}
-                aria-invalid={devicePasswordWeak}
-                aria-describedby="device-password-help"
-              />
+              <div className="flex gap-2">
+                <Input
+                  id="device-password"
+                  type={showDevicePassword ? "text" : "password"}
+                  value={devicePassword}
+                  onChange={(e) => onDevicePassword(e.currentTarget.value)}
+                  placeholder="New password for the pi account"
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  aria-invalid={devicePasswordWeak}
+                  aria-describedby="device-password-help"
+                  className="flex-1"
+                />
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="icon"
+                  onClick={() => setShowDevicePassword((v) => !v)}
+                  aria-label={
+                    showDevicePassword ? "Hide password" : "Show password"
+                  }
+                >
+                  {showDevicePassword ? <EyeOff /> : <Eye />}
+                </Button>
+              </div>
               <p
                 id="device-password-help"
                 className="text-sm text-muted-foreground"
@@ -427,11 +484,13 @@ export function StepNetwork({
             </div>
           )}
 
-          {sshMode === "disabled" && (
-            <p className="text-sm text-muted-foreground">
-              SSH is turned off. Manage this drone from its web dashboard
-              instead.
-            </p>
+              {sshMode === "disabled" && (
+                <p className="text-sm text-muted-foreground">
+                  SSH is turned off. Manage this drone from its web dashboard
+                  instead.
+                </p>
+              )}
+            </>
           )}
         </div>
       </div>

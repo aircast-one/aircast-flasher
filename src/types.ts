@@ -83,3 +83,8 @@ export interface WifiNetworks {
   known: string[];
   country: string | null;
 }
+
+export interface SshPublicKey {
+  label: string;
+  contents: string;
+}
