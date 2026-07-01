@@ -1,14 +1,19 @@
-// Point the Tauri updater at the right channel's latest.json.
+// Configure the Tauri updater for a release build.
 //
-// Each release channel (stable / staging / development) serves its own
-// latest.json under its own downloads domain, so the built bundle must embed
-// the endpoint for the channel it's being built for. Reads DOWNLOADS_URL from
-// the environment (set by the release workflow) and rewrites
-// plugins.updater.endpoints in src-tauri/tauri.conf.json.
+// Two release-only concerns live here, both keyed off DOWNLOADS_URL (set by the
+// release workflow, unset for local/CI builds):
+//
+//   1. Endpoint  — each release channel (stable / staging / development) serves
+//      its own latest.json under its own downloads domain, so the built bundle
+//      must embed the endpoint for the channel it's being built for.
+//   2. Signed artifacts — bundle.createUpdaterArtifacts is committed as `false`
+//      so a plain `tauri build` (CI checks, local dev) doesn't demand a signing
+//      key. It's flipped on here so release bundles emit the signed .sig updater
+//      artifacts the embedded pubkey verifies against.
 //
 //   DOWNLOADS_URL=https://downloads.dev.aircast.one node scripts/configure-updater.mjs
 //
-// No-ops gracefully (exit 0) when DOWNLOADS_URL is unset — e.g. local builds.
+// No-ops gracefully (exit 0) when DOWNLOADS_URL is unset — e.g. local/CI builds.
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -30,6 +35,9 @@ if (!config.plugins?.updater) {
   process.exit(1);
 }
 config.plugins.updater.endpoints = [endpoint];
+config.bundle ??= {};
+config.bundle.createUpdaterArtifacts = true;
 writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2) + "\n");
 
 console.log(`updater endpoint -> ${endpoint}`);
+console.log("createUpdaterArtifacts -> true");

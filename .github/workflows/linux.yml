@@ -52,12 +52,7 @@ jobs:
       - run: npm ci
 
       - name: Build app
-        # This CI build only uploads installers as artifacts; it never publishes
-        # to the update endpoint. The committed config has createUpdaterArtifacts
-        # = true + a pubkey, which makes the raw `tauri build` CLI fail when no
-        # TAURI_SIGNING_PRIVATE_KEY is set. Override it off here — updater signing
-        # belongs to the release pipeline (desktop-release.yml via tauri-action).
-        run: npm run tauri build -- --config '{"bundle":{"createUpdaterArtifacts":false}}'
+        run: npm run tauri build
 
       - name: Upload bundles
         uses: actions/upload-artifact@v4
