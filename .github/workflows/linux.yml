@@ -47,19 +47,32 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: src-tauri -> target
+          workspaces: . -> target
 
       - run: npm ci
 
       - name: Build app
+        # The committed config has createUpdaterArtifacts=true + a pubkey, so
+        # `tauri build` signs the .sig updater artifacts and needs the minisign
+        # key. Same secret the release pipeline uses; here the installers are
+        # only uploaded as CI artifacts, never published to the update endpoint.
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: npm run tauri build
 
       - name: Upload bundles
         uses: actions/upload-artifact@v4
         with:
           name: aircast-flasher-linux-x86_64
+          # Workspace target dir is at the repo root (root Cargo.toml is the
+          # [workspace]), not src-tauri/target. The .sig files are the signed
+          # updater artifacts produced by createUpdaterArtifacts.
           path: |
-            src-tauri/target/release/bundle/appimage/*.AppImage
-            src-tauri/target/release/bundle/deb/*.deb
-            src-tauri/target/release/bundle/rpm/*.rpm
+            target/release/bundle/appimage/*.AppImage
+            target/release/bundle/appimage/*.AppImage.sig
+            target/release/bundle/deb/*.deb
+            target/release/bundle/deb/*.deb.sig
+            target/release/bundle/rpm/*.rpm
+            target/release/bundle/rpm/*.rpm.sig
           if-no-files-found: error
