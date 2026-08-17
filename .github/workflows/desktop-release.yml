@@ -5,8 +5,15 @@ name: Desktop Release
 # under a `flasher/` path with a `releases.json` catalog — mirroring the
 # aircast-web desktop-release pipeline.
 #
-# Required repo/org secrets: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY.
-# (Uses the built-in GITHUB_TOKEN for the GitHub release — no PAT needed.)
+# Required repo/org secrets: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY,
+# RELEASE_TOKEN.
+#
+# RELEASE_TOKEN is a PAT with contents:write (fine-grained: Contents = Read and
+# write on this repo; classic: `repo`). The built-in GITHUB_TOKEN cannot be used:
+# the releases API answers "Resource not accessible by integration" (403) for it
+# on this repo even though the job is granted `Contents: write`, because the org
+# and repo default workflow permissions are read-only. v0.1.2 failed that way
+# with all three platforms built and nothing published.
 
 permissions:
   contents: write
@@ -36,6 +43,17 @@ jobs:
       downloads_url: ${{ steps.config.outputs.downloads_url }}
       release_id: ${{ steps.release.outputs.id }}
     steps:
+      - name: Require a release token
+        env:
+          RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+        run: |
+          if [ -z "$RELEASE_TOKEN" ]; then
+            echo "::error::RELEASE_TOKEN is not set. The built-in GITHUB_TOKEN gets 403" \
+                 "from the releases API on this repo, so publishing needs a PAT with" \
+                 "contents:write stored as the RELEASE_TOKEN secret."
+            exit 1
+          fi
+
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
@@ -82,7 +100,7 @@ jobs:
       - name: Ensure the GitHub release exists
         id: release
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
           V: ${{ steps.config.outputs.version }}
           PRODUCTION: ${{ steps.config.outputs.is_production }}
         run: |
@@ -174,7 +192,7 @@ jobs:
       - name: Build + release
         uses: tauri-apps/tauri-action@v0
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN }}
           # Updater signing. The minisign private key + its password sign the
           # updater artifacts so the embedded pubkey can verify them. Empty
           # secrets => tauri-action skips updater signing and the build still
@@ -214,7 +232,7 @@ jobs:
 
       - name: Download release assets
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
         run: |
           sleep 20
           mkdir -p assets && cd assets
@@ -261,7 +279,7 @@ jobs:
 
       - name: Update flasher/releases.json
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
         run: |
           cd assets
           V="${{ needs.setup.outputs.version }}"
@@ -326,7 +344,7 @@ jobs:
 
       - name: Cleanup old releases
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
         run: |
           P="${{ needs.setup.outputs.s3_path }}"
           ENV="${{ needs.setup.outputs.environment }}"
