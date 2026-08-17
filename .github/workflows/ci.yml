@@ -1,0 +1,67 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev libjavascriptcoregtk-4.1-dev libsoup-3.0-dev \
+            libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev \
+            build-essential curl wget file libssl-dev libxdo-dev patchelf xvfb
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+          cache-on-failure: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Frontend build (tsc + vite)
+        run: npm run build
+
+      - name: Frontend unit tests
+        run: npm run test:unit
+
+      - name: Release script tests
+        run: npm run test:scripts
+
+      - name: Rust tests
+        run: cargo test --workspace
+
+      - name: E2E typecheck
+        run: npx tsc -p e2e/tsconfig.json
+
+      - name: Build app with the WebDriver feature
+        run: cargo build --features wdio --manifest-path src-tauri/Cargo.toml
+
+      - name: E2E (real app, embedded WebDriver)
+        run: xvfb-run --auto-servernum npx wdio run ./wdio.conf.ts
+
+      - name: Upload e2e logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-logs
+          path: logs/
+          if-no-files-found: ignore
