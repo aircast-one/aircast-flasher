@@ -1,50 +1,11 @@
+import fs from "node:fs";
+
 import { browser, $, $$, expect } from "@wdio/globals";
 
-const RELOAD_TIMEOUT = 30_000;
+import { settingsFile } from "./settings-file";
+
+const HEADING_TIMEOUT = 30_000;
 const CATALOG_TIMEOUT = 60_000;
-
-const STORAGE_KEYS = [
-  "aircast.wifi.ssid",
-  "aircast.wifi.password",
-  "aircast.hostname",
-  "aircast.tailscale.controlServer",
-  "aircast.ssh.authorizedKey",
-];
-
-/// The operator's real settings, so the suite can put them back afterwards: the
-/// debug binary shares its WebKit data store with the installed app. WebKitGTK
-/// denies localStorage on the app origin (SecurityError), so treat storage as
-/// best-effort — the wizard's own useLocalStorage swallows the same failure.
-async function readStorage(): Promise<Record<string, string | null>> {
-  const json = await browser.execute((keys: string) => {
-    try {
-      return JSON.stringify(
-        Object.fromEntries(
-          (JSON.parse(keys) as string[]).map((k) => [
-            k,
-            localStorage.getItem(k),
-          ]),
-        ),
-      );
-    } catch {
-      return "{}";
-    }
-  }, JSON.stringify(STORAGE_KEYS));
-  return JSON.parse(json) as Record<string, string | null>;
-}
-
-async function writeStorage(entries: Record<string, string | null>) {
-  await browser.execute((json: string) => {
-    try {
-      localStorage.clear();
-      Object.entries(JSON.parse(json) as Record<string, string | null>).forEach(
-        ([k, v]) => v !== null && localStorage.setItem(k, v),
-      );
-    } catch {
-      // no persistence on this platform; the wizard falls back to defaults
-    }
-  }, JSON.stringify(entries));
-}
 
 async function heading(): Promise<string> {
   return $("h1")
@@ -54,28 +15,9 @@ async function heading(): Promise<string> {
 
 async function waitForHeading(text: string) {
   await browser.waitUntil(async () => (await heading()) === text, {
-    timeout: RELOAD_TIMEOUT,
+    timeout: HEADING_TIMEOUT,
     timeoutMsg: `heading never became "${text}" (was "${await heading()}")`,
   });
-}
-
-async function reloadPristine() {
-  await writeStorage({});
-  await browser.execute(() => {
-    Object.assign(window, { __reloading: true });
-    setTimeout(() => location.reload(), 0);
-  });
-  await browser.waitUntil(
-    async () =>
-      browser
-        .execute(
-          () =>
-            !("__reloading" in window) && document.readyState === "complete",
-        )
-        .catch(() => false),
-    { timeout: RELOAD_TIMEOUT, timeoutMsg: "app never finished reloading" },
-  );
-  await waitForHeading("Operating system");
 }
 
 async function onNetworkStep() {
@@ -87,7 +29,8 @@ async function onNetworkStep() {
     const next = $("button=Next");
     await next.waitForEnabled({
       timeout: CATALOG_TIMEOUT,
-      timeoutMsg: "no OS image became selectable — is the release catalog reachable?",
+      timeoutMsg:
+        "no OS image became selectable — is the release catalog reachable?",
     });
     await next.click();
   }
@@ -102,17 +45,14 @@ async function knownGoodNetworkState() {
 }
 
 describe("flasher wizard", () => {
-  let saved: Record<string, string | null>;
-
   before(async () => {
+    // One explicit window switch stops the service polling window state before
+    // every element lookup, which otherwise costs 5s per command.
     const [main] = await browser.getWindowHandles();
-    await browser.switchToWindow(main);
-    saved = await readStorage();
-    await reloadPristine();
-  });
-
-  after(async () => {
-    await writeStorage(saved);
+    await browser
+      .switchToWindow(main)
+      .catch(() => browser.switchToWindow("main"));
+    await waitForHeading("Operating system");
   });
 
   it("names steps in the sidebar the same way the pages do", async () => {
@@ -127,10 +67,9 @@ describe("flasher wizard", () => {
     ]);
   });
 
-  it("prefills a unique hostname so Next is never dead on arrival", async () => {
-    await reloadPristine();
+  it("arrives with a hostname already filled in, so Next is never dead", async () => {
     await onNetworkStep();
-    await expect($("#hostname")).toHaveValue(/^aircast-[0-9a-f]{6}$/);
+    await expect($("#hostname")).not.toHaveValue("");
     await expect($("button=Next")).toBeEnabled();
   });
 
@@ -141,6 +80,13 @@ describe("flasher wizard", () => {
       "Enter a hostname to continue.",
     );
     await expect($("button=Next")).toBeDisabled();
+  });
+
+  it("keeps a cleared hostname cleared instead of refilling it", async () => {
+    await knownGoodNetworkState();
+    await $("#hostname").clearValue();
+    await onNetworkStep();
+    await expect($("#hostname")).toHaveValue("");
   });
 
   it("rejects an invalid hostname with the rule it broke", async () => {
@@ -184,6 +130,20 @@ describe("flasher wizard", () => {
     await expect($("#device-password")).toHaveValue("");
     await expect($("button=Next")).toBeEnabled();
     await $("button=SSH key").click();
+  });
+
+  it("persists settings to disk, on every platform", async () => {
+    await knownGoodNetworkState();
+    await browser.waitUntil(
+      () =>
+        fs.existsSync(settingsFile()) &&
+        JSON.parse(fs.readFileSync(settingsFile(), "utf8")).hostname ===
+          "falcon-01",
+      {
+        timeout: 10_000,
+        timeoutMsg: `settings never reached ${settingsFile()} — the wizard would forget them on restart`,
+      },
+    );
   });
 
   it("shows what will be written before the destructive step", async () => {

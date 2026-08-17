@@ -1,4 +1,7 @@
+import fs from "node:fs";
 import path from "node:path";
+
+import { settingsFile } from "./e2e/settings-file";
 
 const BINARY =
   process.env.FLASHER_BINARY ??
@@ -8,6 +11,8 @@ const BINARY =
     process.env.FLASHER_PROFILE ?? "debug",
     process.platform === "win32" ? "aircast-flasher.exe" : "aircast-flasher",
   );
+
+const BACKUP = `${settingsFile()}.e2e-backup`;
 
 interface TauriCapability {
   browserName: "tauri";
@@ -30,4 +35,22 @@ export const config: WebdriverIO.Config = {
   logLevel: "error",
   specFileRetries: 1,
   waitforTimeout: 15_000,
+
+  // The app reads its settings once at startup, so the suite gets a pristine
+  // wizard by moving the operator's real settings aside before the app launches
+  // — no in-app reload, which WebKitGTK does not survive on a tauri:// origin.
+  onPrepare() {
+    const file = settingsFile();
+    if (fs.existsSync(file)) fs.renameSync(file, BACKUP);
+  },
+
+  onComplete() {
+    const file = settingsFile();
+    if (fs.existsSync(BACKUP)) {
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.renameSync(BACKUP, file);
+    } else {
+      fs.rmSync(file, { force: true });
+    }
+  },
 };

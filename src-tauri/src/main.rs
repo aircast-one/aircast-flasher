@@ -6,6 +6,7 @@ compile_error!("the wdio feature embeds a WebDriver server — never enable it i
 
 mod flasher;
 mod helper;
+mod settings;
 mod telemetry;
 #[cfg(target_os = "macos")]
 mod macos_auth;
@@ -42,6 +43,8 @@ async fn main() {
             flasher::detect_ssh_keys,
             flasher::read_public_key,
             flasher::reveal_event_log,
+            settings::read_settings,
+            settings::write_settings,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

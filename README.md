@@ -65,6 +65,19 @@ Linux). `flash_image` re-validates the target is still a removable device before
 writing, and `validate_disk_path` rejects anything that isn't `/dev/diskN`
 (macOS) / `/dev/sdX` (Linux) — closing command-injection paths into `dd`/`diskutil`.
 
+## Settings
+
+WiFi network + passphrase, hostname, control server and authorized SSH key are
+saved to `<config dir>/one.aircast.flasher/settings.json` (owner-only, 0600 —
+it holds the passphrase) via the `read_settings` / `write_settings` commands.
+Not localStorage: WebKitGTK denies it on the `tauri://` origin, so on Linux
+every save silently no-opped and the wizard forgot everything on restart
+(tauri-apps/tauri#10981). The pre-auth key is never persisted.
+
+`null` means "never set" and is distinct from `""` — that is what lets a
+cleared SSID or hostname stay cleared instead of snapping back to the detected
+network or a generated name.
+
 ## Diagnostics
 
 Each flash writes exactly one wide event (a JSON object per line) to a local log —

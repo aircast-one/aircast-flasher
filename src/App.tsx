@@ -25,8 +25,9 @@ import type {
 } from "@/types";
 import { errorMessage } from "@/lib/format";
 import { defaultHostname } from "@/components/default-hostname";
+import { randomHex } from "@/lib/random-id";
 import { buildSummary } from "@/components/wizard-summary";
-import { useLocalStorage } from "@/lib/use-local-storage";
+import { useSettings } from "@/lib/use-settings";
 import { UpdateBanner } from "@/components/update-banner";
 import { WizardSidebar } from "@/components/wizard-sidebar";
 import { StepStorage } from "@/components/step-storage";
@@ -71,23 +72,20 @@ function App() {
   const [localPath, setLocalPath] = useState<string | null>(null);
   const [selectedDisk, setSelectedDisk] = useState<string>("");
 
-  const [ssid, setSsid] = useLocalStorage("aircast.wifi.ssid", "");
-  const [password, setPassword] = useLocalStorage("aircast.wifi.password", "");
+  const { settings, update } = useSettings();
   const [showPassword, setShowPassword] = useState(false);
-  const [hostname, setHostname] = useLocalStorage(
-    "aircast.hostname",
-    DEFAULT_HOSTNAME,
-  );
-
-  const [controlServer, setControlServer] = useLocalStorage(
-    "aircast.tailscale.controlServer",
-    "",
-  );
   const [authKey, setAuthKey] = useState("");
-
   const [sshMode, setSshMode] = useState<SshMode>("key-only");
-  const [sshKey, setSshKey] = useLocalStorage("aircast.ssh.authorizedKey", "");
   const [devicePassword, setDevicePassword] = useState("");
+
+  const password = settings.wifiPassword;
+  const setPassword = (wifiPassword: string) => update({ wifiPassword });
+  const controlServer = settings.controlServer;
+  const setControlServer = (controlServer: string) => update({ controlServer });
+  const sshKey = settings.authorizedKey;
+  const setSshKey = (authorizedKey: string) => update({ authorizedKey });
+  const setSsid = (ssid: string) => update({ ssid });
+  const setHostname = (hostname: string) => update({ hostname });
 
   const [step, setStep] = useState<WizardStep>(STEP.os);
 
@@ -124,10 +122,8 @@ function App() {
     if (contents) setSshKey(contents);
   }
 
-  useEffect(() => {
-    const current = wifiQuery.data?.current;
-    if (current) setSsid((prev) => (prev === "" ? current : prev));
-  }, [wifiQuery.data]);
+  const ssid = settings.ssid ?? wifiQuery.data?.current ?? "";
+  const hostname = settings.hostname ?? DEFAULT_HOSTNAME;
 
   const devices: BlockDevice[] = devicesQuery.data ?? [];
   const releases: Release[] = releasesQuery.data ?? [];
@@ -277,7 +273,7 @@ function App() {
     const access = buildAccess(sshMode, sshKey, devicePassword);
 
     flashMutation.mutate({
-      jobId: crypto.randomUUID(),
+      jobId: randomHex(8),
       sourceKind,
       release,
       localPath,

@@ -84,6 +84,14 @@ export interface WifiNetworks {
   country: string | null;
 }
 
+export interface Settings {
+  ssid: string | null;
+  hostname: string | null;
+  wifiPassword: string;
+  controlServer: string;
+  authorizedKey: string;
+}
+
 export interface SshPublicKey {
   label: string;
   contents: string;
