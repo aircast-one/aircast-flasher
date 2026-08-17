@@ -76,6 +76,23 @@ rather than in webview localStorage. The pre-auth key is never persisted.
 cleared SSID or hostname stay cleared instead of snapping back to the detected
 network or a generated name.
 
+## Tests
+
+```
+just test    # Rust (flasher-core + app), frontend units, release-script units
+just e2e     # the wizard driven through the real app over WebDriver
+just check   # both
+```
+
+The e2e suite runs on macOS only. On Linux the WebDriver automation session is
+handed a webview that is not the app's — blank, without the asset protocol
+registered — so `tauri://localhost` loads nothing and the app is unreachable,
+with either the embedded or the external (tauri-driver) provider and with
+`TAURI_WEBVIEW_AUTOMATION=true` confirmed in the app process. The app itself is
+fine there: in an ubuntu-22.04 container it renders at 1000x680 with healthy
+WebKit processes. CI therefore builds and unit-tests on Linux and runs e2e on a
+macOS runner.
+
 ## Diagnostics
 
 Each flash writes exactly one wide event (a JSON object per line) to a local log —

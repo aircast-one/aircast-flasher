@@ -98,24 +98,28 @@ async function knownGoodNetworkState() {
 /// the wizard, and switch to it explicitly — that also sets the service's
 /// suppression flag, which stops it polling window state before every element
 /// lookup (5s per command otherwise).
+async function showsApp(): Promise<boolean> {
+  return browser
+    .execute(() => Boolean(document.getElementById("root")))
+    .catch(() => false);
+}
+
 async function attachToAppWindow() {
   await browser.waitUntil(
     async () => {
       const handles = await browser.getWindowHandles();
       for (const handle of handles) {
         await browser.switchToWindow(handle);
-        const isApp = await browser
-          .execute(() => Boolean(document.getElementById("root")))
-          .catch(() => false);
-        if (isApp) return true;
+        if (await showsApp()) return true;
       }
       return false;
     },
-    {
-      timeout: HEADING_TIMEOUT,
-      timeoutMsg: `no window held the app. ${await pageDiagnostics()}`,
-    },
-  );
+    { timeout: HEADING_TIMEOUT },
+  ).catch(async () => {
+    throw new Error(
+      `no window held the app. ${await pageDiagnostics()}`,
+    );
+  });
 }
 
 describe("flasher wizard", () => {
