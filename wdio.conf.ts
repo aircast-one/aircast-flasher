@@ -28,7 +28,12 @@ export const config: WebdriverIO.Config = {
   specs: ["./e2e/**/*.e2e.ts"],
   maxInstances: 1,
   capabilities: capabilities as WebdriverIO.Config["capabilities"],
-  services: ["@wdio/tauri-service"],
+  services: [
+    [
+      "@wdio/tauri-service",
+      { captureBackendLogs: true, captureFrontendLogs: true },
+    ],
+  ],
   framework: "mocha",
   reporters: ["spec"],
   mochaOpts: { ui: "bdd", timeout: 120_000 },

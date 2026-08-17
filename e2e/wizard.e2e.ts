@@ -13,11 +13,59 @@ async function heading(): Promise<string> {
     .catch(() => "");
 }
 
+/// What the webview actually holds, for when the app renders nothing at all —
+/// re-importing an already-failed ES module re-throws, which surfaces a
+/// load-time exception that no console is around to catch.
+async function pageDiagnostics(): Promise<string> {
+  const dump = await browser
+    .execute(() => {
+      const root = document.getElementById("root");
+      return JSON.stringify({
+        href: location.href,
+        readyState: document.readyState,
+        title: document.title,
+        bodyChars: document.body ? document.body.innerHTML.length : -1,
+        rootChars: root ? root.innerHTML.length : -1,
+        scripts: Array.from(document.querySelectorAll("script")).map(
+          (s) => (s as HTMLScriptElement).src || "inline",
+        ),
+        stylesheets: document.querySelectorAll("link[rel=stylesheet]").length,
+        cryptoType: typeof crypto,
+        getRandomValues: typeof crypto?.getRandomValues,
+        isSecureContext: window.isSecureContext,
+      });
+    })
+    .catch((e: unknown) => `execute failed: ${String(e)}`);
+
+  const moduleError = await browser
+    .executeAsync((done: (r: string) => void) => {
+      const src = document
+        .querySelector("script[type=module]")
+        ?.getAttribute("src");
+      if (!src) return done("no module script in the document");
+      import(src)
+        .then(() => done("module evaluated without throwing"))
+        .catch((e: unknown) =>
+          done(
+            `module threw: ${String((e as Error)?.stack ?? (e as Error)?.message ?? e)}`,
+          ),
+        );
+    })
+    .catch((e: unknown) => `module probe failed: ${String(e)}`);
+
+  return `page=${dump} ${moduleError}`;
+}
+
 async function waitForHeading(text: string) {
-  await browser.waitUntil(async () => (await heading()) === text, {
-    timeout: HEADING_TIMEOUT,
-    timeoutMsg: `heading never became "${text}" (was "${await heading()}")`,
-  });
+  await browser
+    .waitUntil(async () => (await heading()) === text, {
+      timeout: HEADING_TIMEOUT,
+    })
+    .catch(async () => {
+      throw new Error(
+        `heading never became "${text}" (was "${await heading()}"). ${await pageDiagnostics()}`,
+      );
+    });
 }
 
 async function onNetworkStep() {
