@@ -11,28 +11,38 @@ const STORAGE_KEYS = [
   "aircast.ssh.authorizedKey",
 ];
 
+/// The operator's real settings, so the suite can put them back afterwards: the
+/// debug binary shares its WebKit data store with the installed app. WebKitGTK
+/// denies localStorage on the app origin (SecurityError), so treat storage as
+/// best-effort — the wizard's own useLocalStorage swallows the same failure.
 async function readStorage(): Promise<Record<string, string | null>> {
-  const json = await browser.execute(
-    (keys: string) =>
-      JSON.stringify(
+  const json = await browser.execute((keys: string) => {
+    try {
+      return JSON.stringify(
         Object.fromEntries(
           (JSON.parse(keys) as string[]).map((k) => [
             k,
             localStorage.getItem(k),
           ]),
         ),
-      ),
-    JSON.stringify(STORAGE_KEYS),
-  );
+      );
+    } catch {
+      return "{}";
+    }
+  }, JSON.stringify(STORAGE_KEYS));
   return JSON.parse(json) as Record<string, string | null>;
 }
 
 async function writeStorage(entries: Record<string, string | null>) {
   await browser.execute((json: string) => {
-    localStorage.clear();
-    Object.entries(JSON.parse(json) as Record<string, string | null>).forEach(
-      ([k, v]) => v !== null && localStorage.setItem(k, v),
-    );
+    try {
+      localStorage.clear();
+      Object.entries(JSON.parse(json) as Record<string, string | null>).forEach(
+        ([k, v]) => v !== null && localStorage.setItem(k, v),
+      );
+    } catch {
+      // no persistence on this platform; the wizard falls back to defaults
+    }
   }, JSON.stringify(entries));
 }
 
