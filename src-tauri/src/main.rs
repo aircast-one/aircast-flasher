@@ -1,8 +1,12 @@
 // Prevent an extra console window on Windows release builds.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+#[cfg(all(feature = "wdio", not(debug_assertions)))]
+compile_error!("the wdio feature embeds a WebDriver server — never enable it in a release build");
+
 mod flasher;
 mod helper;
+mod telemetry;
 #[cfg(target_os = "macos")]
 mod macos_auth;
 
@@ -17,7 +21,12 @@ async fn main() {
         helper::run_flash_helper();
     }
 
-    tauri::Builder::default()
+    let builder = tauri::Builder::default();
+
+    #[cfg(feature = "wdio")]
+    let builder = builder.plugin(tauri_plugin_wdio_webdriver::init());
+
+    builder
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -32,6 +41,7 @@ async fn main() {
             flasher::cancel_flash,
             flasher::detect_ssh_keys,
             flasher::read_public_key,
+            flasher::reveal_event_log,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -10,7 +10,7 @@ export interface SidebarStep {
 
 export const WIZARD_STEPS: SidebarStep[] = [
   { id: STEP.os, label: "Operating system" },
-  { id: STEP.network, label: "Customisation" },
+  { id: STEP.network, label: "Network & access" },
   { id: STEP.storage, label: "Storage" },
   { id: STEP.write, label: "Write" },
 ];
@@ -63,16 +63,15 @@ export function WizardSidebar({
                 !isActive &&
                   isDone &&
                   "text-sidebar-foreground hover:bg-sidebar-accent",
-                !isActive &&
-                  !isDone &&
-                  "text-muted-foreground/60",
+                !isActive && !isDone && "text-muted-foreground/60",
                 isClickable ? "cursor-pointer" : "cursor-default",
               )}
             >
               <span
                 className={cn(
                   "flex size-5 shrink-0 items-center justify-center rounded-full text-[0.7rem] font-semibold",
-                  isActive && "bg-primary-foreground/20 text-primary-foreground",
+                  isActive &&
+                    "bg-primary-foreground/20 text-primary-foreground",
                   !isActive && isDone && "bg-primary/20 text-primary",
                   !isActive &&
                     !isDone &&

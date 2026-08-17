@@ -23,17 +23,18 @@ export function StepShell({
 }) {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex items-start justify-between gap-4 px-8 pt-7 pb-4">
-        <div className="flex flex-col gap-1">
-          <h1 className="text-2xl font-bold tracking-tight">{heading}</h1>
-          {description ? (
-            <p className="text-sm text-muted-foreground">{description}</p>
-          ) : null}
+      <div className="min-h-0 flex-1 overflow-y-auto px-8 pb-4">
+        <div className="flex items-start justify-between gap-4 pt-7 pb-4">
+          <div className="flex flex-col gap-1">
+            <h1 className="text-2xl font-bold tracking-tight">{heading}</h1>
+            {description ? (
+              <p className="text-sm text-muted-foreground">{description}</p>
+            ) : null}
+          </div>
+          {headerAction ? <div className="shrink-0">{headerAction}</div> : null}
         </div>
-        {headerAction ? <div className="shrink-0">{headerAction}</div> : null}
+        {children}
       </div>
-
-      <div className="min-h-0 flex-1 overflow-y-auto px-8 pb-4">{children}</div>
 
       {back || next ? (
         <div className="flex items-center justify-between gap-3 border-t border-border bg-background/60 px-8 py-4">

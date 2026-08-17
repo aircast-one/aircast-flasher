@@ -12,6 +12,7 @@ import {
   onFlashProgress,
   pickAndReadPublicKey,
   pickLocalImage,
+  revealEventLog,
 } from "@/api";
 import type {
   AccessConfig,
@@ -23,6 +24,8 @@ import type {
   WifiConfig,
 } from "@/types";
 import { errorMessage } from "@/lib/format";
+import { defaultHostname } from "@/components/default-hostname";
+import { buildSummary } from "@/components/wizard-summary";
 import { useLocalStorage } from "@/lib/use-local-storage";
 import { UpdateBanner } from "@/components/update-banner";
 import { WizardSidebar } from "@/components/wizard-sidebar";
@@ -40,13 +43,12 @@ import {
 
 const DEVICE_POLL_INTERVAL_MS = 2000;
 
+const DEFAULT_HOSTNAME = defaultHostname();
+
 function pickDefaultRelease(releases: Release[]): Release | null {
   return releases.find((r) => !r.prerelease) ?? releases[0] ?? null;
 }
 
-// Build the access config to send, or null when the chosen mode has no input
-// yet (so the image's default pi/raspberry is left untouched). "disabled" always
-// applies.
 function buildAccess(
   mode: SshMode,
   sshKey: string,
@@ -64,49 +66,35 @@ function buildAccess(
 
 function App() {
   const queryClient = useQueryClient();
-
-  // Image source
   const [sourceKind, setSourceKind] = useState<SourceKind>("aircast");
+  const [selectedVersion, setSelectedVersion] = useState<string | null>(null);
   const [localPath, setLocalPath] = useState<string | null>(null);
-
-  // Drives
   const [selectedDisk, setSelectedDisk] = useState<string>("");
 
-  // Network + identity
-  // Persisted across launches so they don't have to be re-entered each flash.
   const [ssid, setSsid] = useLocalStorage("aircast.wifi.ssid", "");
   const [password, setPassword] = useLocalStorage("aircast.wifi.password", "");
   const [showPassword, setShowPassword] = useState(false);
-  const [hostname, setHostname] = useLocalStorage("aircast.hostname", "");
+  const [hostname, setHostname] = useLocalStorage(
+    "aircast.hostname",
+    DEFAULT_HOSTNAME,
+  );
 
-  // Tailscale/Headscale enrollment. The control server is convenient to reuse
-  // across flashes, but the pre-auth key is a secret — keep it in memory only.
   const [controlServer, setControlServer] = useLocalStorage(
     "aircast.tailscale.controlServer",
     "",
   );
   const [authKey, setAuthKey] = useState("");
 
-  // Device access (SSH). Defaults to password auth with the image's stock
-  // password prefilled, so a device is reachable out of the box; the operator
-  // changes it (or switches to a key) for anything deployed. The public key is
-  // reusable across flashes, so it's persisted; the password stays in memory.
-  const [sshMode, setSshMode] = useState<SshMode>("password");
+  const [sshMode, setSshMode] = useState<SshMode>("key-only");
   const [sshKey, setSshKey] = useLocalStorage("aircast.ssh.authorizedKey", "");
-  const [devicePassword, setDevicePassword] = useState("raspberry");
+  const [devicePassword, setDevicePassword] = useState("");
 
-  // Wizard
   const [step, setStep] = useState<WizardStep>(STEP.os);
 
-  // Live progress from Tauri events.
   const [progress, setProgress] = useState<FlashProgressState>({
     phase: "idle",
   });
 
-  // Poll for storage devices only while the user is on the storage step, so an
-  // inserted SD card is detected automatically without a manual refresh. The
-  // query is disabled everywhere else (notably during the write) to keep
-  // diskutil/lsblk off the target device and out of app startup.
   const onStorageStep = step === STEP.storage;
   const devicesQuery = useQuery({
     queryKey: ["devices"],
@@ -136,36 +124,28 @@ function App() {
     if (contents) setSshKey(contents);
   }
 
-  // Prefill the currently-joined network once, while the field is empty. The
-  // WiFi country is detected on the backend and applied at flash time — never
-  // shown to the user.
   useEffect(() => {
     const current = wifiQuery.data?.current;
     if (current) setSsid((prev) => (prev === "" ? current : prev));
   }, [wifiQuery.data]);
 
   const devices: BlockDevice[] = devicesQuery.data ?? [];
-  const release = useMemo(
-    () => (releasesQuery.data ? pickDefaultRelease(releasesQuery.data) : null),
-    [releasesQuery.data],
-  );
+  const releases: Release[] = releasesQuery.data ?? [];
+  const release = useMemo(() => {
+    const chosen = releases.find((r) => r.version === selectedVersion);
+    return chosen ?? pickDefaultRelease(releases);
+  }, [releases, selectedVersion]);
   const releaseError = releasesQuery.isError
     ? errorMessage(releasesQuery.error, "Failed to load releases.")
     : releasesQuery.isSuccess && !release
       ? "No releases available."
       : null;
-
-  // Keep the selected disk valid as the device list changes. Depends on the
-  // raw query data — not the `devices` array, which is a fresh reference each
-  // render and would re-run this on every render until data loads.
   useEffect(() => {
     const list = devicesQuery.data ?? [];
     setSelectedDisk((prev) =>
       list.some((d) => d.path === prev) ? prev : (list[0]?.path ?? ""),
     );
   }, [devicesQuery.data]);
-
-  // Subscribe to download/flash progress events for the lifetime of the app.
   useEffect(() => {
     let active = true;
     let unlistenDownload: (() => void) | undefined;
@@ -206,6 +186,7 @@ function App() {
         if (!vars.release) throw new Error("No Aircast release available.");
         setProgress({ phase: "downloading", progress: null });
         const result = await downloadImage({
+          jobId: vars.jobId,
           downloadUrl: vars.release.image.download_url,
           checksumUrl: vars.release.image.checksum_url,
         });
@@ -214,11 +195,9 @@ function App() {
         if (!vars.localPath) throw new Error("No local image selected.");
         imagePath = vars.localPath;
       }
-
-      // Customization now happens inside the engine, so WiFi + hostname fold
-      // into the single elevated flash — no separate provision step.
       setProgress({ phase: "flashing", progress: null });
       await flashImage({
+        jobId: vars.jobId,
         imagePath,
         targetDisk: vars.targetDisk,
         wifi: vars.wifi,
@@ -242,6 +221,28 @@ function App() {
     sourceKind === "aircast" ? release !== null : localPath !== null;
   const canProceed = sourceReady && selectedDisk !== "";
 
+  const remoteEnrolled = authKey.trim() !== "";
+  const detectedKeys = sshKeysQuery.data ?? [];
+
+  const imageLabel =
+    sourceKind === "aircast"
+      ? release
+        ? `Aircast OS ${release.version}`
+        : "No release"
+      : (localFileName ?? "No file");
+
+  const summary = buildSummary({
+    image: imageLabel,
+    hostname,
+    ssid,
+    authKey,
+    controlServer,
+    sshMode,
+    sshKey,
+    detectedKeys,
+    devicePassword,
+  });
+
   async function handlePickLocal() {
     const path = await pickLocalImage();
     if (path) {
@@ -256,7 +257,6 @@ function App() {
     setStep(STEP.write);
 
     const trimmedSsid = ssid.trim();
-    // Country/regulatory domain is auto-detected on the backend; fall back to US.
     const detectedCountry = (wifiQuery.data?.country ?? "US").toUpperCase();
     const wifi: WifiConfig | null =
       trimmedSsid === ""
@@ -267,7 +267,6 @@ function App() {
             country: detectedCountry,
           };
     const trimmedHostname = hostname.trim();
-    const hostnameValue = trimmedHostname === "" ? null : trimmedHostname;
 
     const trimmedKey = authKey.trim();
     const tailscale: TailscaleConfig | null =
@@ -278,23 +277,20 @@ function App() {
     const access = buildAccess(sshMode, sshKey, devicePassword);
 
     flashMutation.mutate({
+      jobId: crypto.randomUUID(),
       sourceKind,
       release,
       localPath,
       targetDisk: selectedDisk,
       wifi,
-      hostname: hostnameValue,
+      hostname: trimmedHostname,
       tailscale,
       access,
     });
   }
 
-  async function handleCancel() {
-    try {
-      await cancelFlash();
-    } catch {
-      // ignore — surfaced via the rejected flash/download promise
-    }
+  function handleCancel() {
+    void cancelFlash().catch(() => undefined);
   }
 
   function flashAnother() {
@@ -303,8 +299,6 @@ function App() {
     setStep(STEP.os);
     void queryClient.invalidateQueries({ queryKey: ["devices"] });
   }
-
-  // The write step (4) is reached only once a job has been started.
   const writing = flashMutation.isPending;
 
   return (
@@ -325,6 +319,8 @@ function App() {
               sourceKind={sourceKind}
               onSourceKind={setSourceKind}
               release={release}
+              releases={releases}
+              onSelectVersion={setSelectedVersion}
               releaseLoading={releasesQuery.isLoading}
               releaseError={releaseError}
               localFileName={localFileName}
@@ -345,18 +341,22 @@ function App() {
               onToggleShowPassword={() => setShowPassword((v) => !v)}
               hostname={hostname}
               onHostname={setHostname}
-              controlServer={controlServer}
-              onControlServer={setControlServer}
-              authKey={authKey}
-              onAuthKey={setAuthKey}
-              sshMode={sshMode}
-              onSshMode={setSshMode}
-              sshKey={sshKey}
-              onSshKey={setSshKey}
-              detectedKeys={sshKeysQuery.data ?? []}
-              onChooseKeyFile={handleChooseKeyFile}
-              devicePassword={devicePassword}
-              onDevicePassword={setDevicePassword}
+              remote={{
+                controlServer,
+                onControlServer: setControlServer,
+                authKey,
+                onAuthKey: setAuthKey,
+              }}
+              access={{
+                sshMode,
+                onSshMode: setSshMode,
+                sshKey,
+                onSshKey: setSshKey,
+                detectedKeys,
+                onChooseKeyFile: handleChooseKeyFile,
+                devicePassword,
+                onDevicePassword: setDevicePassword,
+              }}
               onBack={() => setStep(STEP.os)}
               onNext={() => setStep(STEP.storage)}
             />
@@ -366,12 +366,15 @@ function App() {
               devicesLoading={devicesQuery.isLoading}
               selectedDisk={selectedDisk}
               onSelectDisk={setSelectedDisk}
+              summary={summary}
               canProceed={canProceed}
               onBack={() => setStep(STEP.network)}
               onFlash={handleFlash}
             />
           ) : (
             <JobView
+              hostname={hostname.trim()}
+              remoteEnrolled={remoteEnrolled}
               success={flashMutation.isSuccess}
               error={
                 flashMutation.isError
@@ -381,6 +384,7 @@ function App() {
               progress={progress}
               onCancel={handleCancel}
               onReset={flashAnother}
+              onRevealLog={() => void revealEventLog()}
             />
           )}
         </main>

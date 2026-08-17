@@ -2,6 +2,13 @@ import { FileImage, Package } from "lucide-react";
 
 import { SelectableCard } from "@/components/selectable-card";
 import { StepShell } from "@/components/step-shell";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { formatBytes } from "@/lib/format";
 import type { SourceKind } from "@/components/wizard-types";
 import type { Release } from "@/types";
@@ -10,6 +17,8 @@ export function StepImage({
   sourceKind,
   onSourceKind,
   release,
+  releases,
+  onSelectVersion,
   releaseLoading,
   releaseError,
   localFileName,
@@ -20,6 +29,8 @@ export function StepImage({
   sourceKind: SourceKind;
   onSourceKind: (kind: SourceKind) => void;
   release: Release | null;
+  releases: Release[];
+  onSelectVersion: (version: string) => void;
   releaseLoading: boolean;
   releaseError: string | null;
   localFileName: string | null;
@@ -29,8 +40,8 @@ export function StepImage({
 }) {
   return (
     <StepShell
-      heading="Choose the image"
-      description="Pick the operating system image to write."
+      heading="Operating system"
+      description="Pick the image to write to the card."
       next={{ label: "Next", onClick: onNext, disabled: !canProceed }}
     >
       <div className="flex flex-col gap-3">
@@ -50,6 +61,29 @@ export function StepImage({
                   : "No release"}
           </span>
         </SelectableCard>
+
+        {sourceKind === "aircast" && releases.length > 1 && (
+          <div className="flex items-center gap-2 pl-14">
+            <span className="text-sm text-muted-foreground">Version</span>
+            <Select
+              value={release ? release.version : ""}
+              onValueChange={(value) => onSelectVersion(String(value))}
+            >
+              <SelectTrigger size="sm" aria-label="Aircast OS version">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {releases.map((option, index) => (
+                  <SelectItem key={option.version} value={option.version}>
+                    {option.version}
+                    {index === 0 ? " (latest)" : ""}
+                    {option.prerelease ? " · pre-release" : ""}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
 
         <SelectableCard
           icon={<FileImage />}

@@ -65,6 +65,35 @@ Linux). `flash_image` re-validates the target is still a removable device before
 writing, and `validate_disk_path` rejects anything that isn't `/dev/diskN`
 (macOS) / `/dev/sdX` (Linux) — closing command-injection paths into `dd`/`diskutil`.
 
+## Diagnostics
+
+Each flash writes exactly one wide event (a JSON object per line) to a local log —
+nothing is uploaded, ever. The **Show diagnostics** button on a failed flash
+reveals the file:
+
+| OS | Path |
+|----|------|
+| macOS | `~/Library/Logs/one.aircast.flasher/events.jsonl` |
+| Linux | `$XDG_DATA_HOME/one.aircast.flasher/logs/events.jsonl` (usually `~/.local/share/…`) |
+| Windows | `%LOCALAPPDATA%\one.aircast.flasher\logs\events.jsonl` |
+
+One line per download and per flash, correlated by `job_id`:
+
+```json
+{"event":"flash","job_id":"5f2…","app_version":"0.1.1","os":"macos","arch":"aarch64",
+ "outcome":"failed","duration_ms":91000,"error":"write to device: Input/output error",
+ "wifi":true,"hostname":true,"remote":"headscale","ssh":"password","init_format":"cloud-init",
+ "image_bytes":3800000000,"compressed":true,"verified":false,"failed_at":"write",
+ "decompress_ms":21000,"write_ms":70000,"write_mbps":54.3}
+```
+
+Recorded: outcome, the phase a failure happened in, per-phase durations, write
+throughput, image size, and *whether* each setting was used. Never recorded: the
+SSID, the hostname, the WiFi passphrase, the pre-auth key, the device password,
+the SSH key, or the control-server URL — `describe_config` maps configuration to
+booleans and fixed labels, so a secret cannot reach the log by construction
+(`telemetry.rs` tests assert this). The log rolls over at 2 MiB.
+
 ## TODO before shipping
 
 - **Confirm `initFormat`** — the UI defaults to `cloud-init`; it must match the

@@ -14,6 +14,8 @@ use tauri::{AppHandle, Emitter, Manager};
 
 use flasher_core::{ProvisionConfig, TailscaleConfig, WifiConfig};
 
+use crate::telemetry;
+
 const PROGRESS_THROTTLE_MS: u128 = 100;
 const MIN_TEMP_SPACE_BYTES: u64 = 4_500_000_000; // ~4.5 GB
 
@@ -511,6 +513,50 @@ async fn list_block_devices_linux() -> Result<Vec<BlockDevice>, String> {
 pub async fn download_image(
     app_handle: AppHandle,
     state: tauri::State<'_, FlasherState>,
+    job_id: String,
+    download_url: String,
+    checksum_url: String,
+) -> Result<DownloadResult, String> {
+    let started = std::time::Instant::now();
+    let cancelled = state.cancel.clone();
+    let result = download_image_inner(&app_handle, &state, download_url, checksum_url).await;
+    let duration_ms = started.elapsed().as_millis() as u64;
+
+    let bytes = result
+        .as_ref()
+        .ok()
+        .and_then(|r| std::fs::metadata(&r.image_path).ok().map(|m| m.len()))
+        .unwrap_or(0);
+    let cached = result.as_ref().map(|r| r.cached).unwrap_or(false);
+    let outcome = match &result {
+        Ok(_) => "success",
+        Err(_) if cancelled.load(Ordering::SeqCst) => "cancelled",
+        Err(_) => "failed",
+    };
+
+    telemetry::record(
+        &app_handle,
+        &telemetry::DownloadEvent {
+            envelope: telemetry::Envelope::new(
+                "download",
+                job_id,
+                &app_handle,
+                outcome,
+                duration_ms,
+                result.as_ref().err().cloned(),
+            ),
+            bytes,
+            cached,
+            mbps: (!cached).then(|| telemetry::mbps(bytes, duration_ms)).flatten(),
+        },
+    );
+
+    result
+}
+
+async fn download_image_inner(
+    app_handle: &AppHandle,
+    state: &tauri::State<'_, FlasherState>,
     download_url: String,
     checksum_url: String,
 ) -> Result<DownloadResult, String> {
@@ -686,11 +732,19 @@ fn marker_validates(image_path: &std::path::Path, expected: &str) -> bool {
 // Command: flash_image (decompress if needed, then dd)
 // ---------------------------------------------------------------------------
 
+#[derive(Default)]
+struct FlashTrace {
+    image_bytes: u64,
+    compressed: bool,
+    decompress_ms: Option<u64>,
+}
+
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 pub async fn flash_image(
     app_handle: AppHandle,
     state: tauri::State<'_, FlasherState>,
+    job_id: String,
     image_path: String,
     target_disk: String,
     wifi: Option<WifiConfig>,
@@ -698,6 +752,98 @@ pub async fn flash_image(
     tailscale: Option<TailscaleConfig>,
     access: Option<flasher_core::AccessConfig>,
     init_format: flasher_core::InitFormat,
+) -> Result<(), String> {
+    let config = ProvisionConfig {
+        hostname,
+        wifi,
+        tailscale,
+        access,
+        init_format,
+    };
+    let facts = telemetry::describe_config(&config);
+    let phases = Arc::new(std::sync::Mutex::new(telemetry::PhaseLog::default()));
+    let cancelled = state.cancel.clone();
+    let started = std::time::Instant::now();
+    let mut trace = FlashTrace::default();
+
+    let result = flash_image_inner(
+        &app_handle,
+        &state,
+        &config,
+        image_path,
+        target_disk,
+        phases.clone(),
+        &mut trace,
+    )
+    .await;
+
+    let end = std::time::Instant::now();
+    let duration_ms = started.elapsed().as_millis() as u64;
+    let log = phases.lock().expect("phase log poisoned");
+    let write_ms = log.duration_ms("write", end);
+    let outcome = match &result {
+        Ok(()) => "success",
+        Err(_) if cancelled.load(Ordering::SeqCst) => "cancelled",
+        Err(_) => "failed",
+    };
+    let failed_at = result.as_ref().err().map(|_| {
+        log.last_stage().unwrap_or(if trace.decompress_ms.is_some() {
+            "launch"
+        } else if trace.compressed {
+            "decompress"
+        } else {
+            "prepare"
+        })
+    });
+
+    telemetry::record(
+        &app_handle,
+        &telemetry::FlashEvent {
+            envelope: telemetry::Envelope::new(
+                "flash",
+                job_id,
+                &app_handle,
+                outcome,
+                duration_ms,
+                result.as_ref().err().cloned(),
+            ),
+            config: facts,
+            image_bytes: trace.image_bytes,
+            compressed: trace.compressed,
+            verified: log.saw("verify"),
+            failed_at,
+            decompress_ms: trace.decompress_ms,
+            write_ms,
+            verify_ms: log.duration_ms("verify", end),
+            customize_ms: log.duration_ms("customize", end),
+            write_mbps: write_ms.and_then(|ms| telemetry::mbps(trace.image_bytes, ms)),
+        },
+    );
+
+    result
+}
+
+#[tauri::command]
+pub fn reveal_event_log(app_handle: AppHandle) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt as _;
+    let path = telemetry::log_path(&app_handle)?;
+    if !path.exists() {
+        std::fs::write(&path, "").map_err(|e| format!("Failed to create log: {e}"))?;
+    }
+    app_handle
+        .opener()
+        .reveal_item_in_dir(&path)
+        .map_err(|e| format!("Failed to reveal log: {e}"))
+}
+
+async fn flash_image_inner(
+    app_handle: &AppHandle,
+    state: &tauri::State<'_, FlasherState>,
+    config: &ProvisionConfig,
+    image_path: String,
+    target_disk: String,
+    phases: Arc<std::sync::Mutex<telemetry::PhaseLog>>,
+    trace: &mut FlashTrace,
 ) -> Result<(), String> {
     validate_disk_path(&target_disk)?;
     let src_path = validate_image_file(std::path::Path::new(&image_path))?;
@@ -718,44 +864,49 @@ pub async fn flash_image(
 
     // Decompress only if compressed; raw .img is written directly (local files).
     let lower = src_path.to_string_lossy().to_ascii_lowercase();
-    let (write_path, is_temp) = if lower.ends_with(".xz") || lower.ends_with(".gz") {
+    trace.compressed = lower.ends_with(".xz") || lower.ends_with(".gz");
+    let (write_path, is_temp) = if trace.compressed {
         check_available_space(&temp_dir, MIN_TEMP_SPACE_BYTES)?;
         let dst = temp_dir.join("aircast-image.img");
         if dst.exists() {
             let _ = std::fs::remove_file(&dst);
         }
-        decompress(&app_handle, &src_path, &dst, &lower, cancel.clone()).await?;
+        let unpack_started = std::time::Instant::now();
+        decompress(app_handle, &src_path, &dst, &lower, cancel.clone()).await?;
+        trace.decompress_ms = Some(unpack_started.elapsed().as_millis() as u64);
         (dst, true)
     } else {
         (src_path.clone(), false)
     };
 
-    // Customization runs inside the engine, so fold the provisioning config into
-    // the single elevated flash. base64(serde_json(ProvisionConfig)) → helper.
-    let config = ProvisionConfig {
-        hostname,
-        wifi,
-        tailscale,
-        access,
-        init_format,
-    };
     let provision_b64 = {
         use base64::Engine as _;
-        let json = serde_json::to_vec(&config)
+        let json = serde_json::to_vec(config)
             .map_err(|e| format!("Failed to encode provision config: {e}"))?;
         base64::engine::general_purpose::STANDARD.encode(json)
     };
 
     let total = std::fs::metadata(&write_path).map(|m| m.len()).unwrap_or(0);
-    emit_flash_progress(&app_handle, FlashPhase::Writing, 0, total, 0.0);
+    trace.image_bytes = total;
+    emit_flash_progress(app_handle, FlashPhase::Writing, 0, total, 0.0);
 
     let write_result =
-        run_elevated_flash(&app_handle, &target_disk, &write_path, &provision_b64).await;
+        run_elevated_flash(app_handle, &target_disk, &write_path, &provision_b64, phases).await;
 
     if is_temp {
         let _ = std::fs::remove_file(&write_path);
     }
     write_result
+}
+
+/// The helper's stage strings, as `'static` labels for the phase log.
+fn stage_label(stage: &str) -> &'static str {
+    match stage {
+        "write" => "write",
+        "verify" => "verify",
+        "customize" => "customize",
+        _ => "unknown",
+    }
 }
 
 /// Map a helper progress `stage` string to a [`FlashPhase`].
@@ -776,6 +927,7 @@ async fn run_elevated_flash(
     target_disk: &str,
     image: &std::path::Path,
     provision_b64: &str,
+    phases: Arc<std::sync::Mutex<telemetry::PhaseLog>>,
 ) -> Result<(), String> {
     let exe = std::env::current_exe().map_err(|e| format!("Failed to find current exe: {e}"))?;
 
@@ -811,6 +963,9 @@ async fn run_elevated_flash(
                             if let Some(phase) = phase {
                                 let done = v.get("done").and_then(|x| x.as_u64()).unwrap_or(0);
                                 let total = v.get("total").and_then(|x| x.as_u64()).unwrap_or(0);
+                                if let (Some(stage), Ok(mut log)) = (stage, phases.lock()) {
+                                    log.mark(stage_label(stage), done);
+                                }
                                 let percent = if total > 0 {
                                     (done as f64 / total as f64) * 100.0
                                 } else {

@@ -35,6 +35,15 @@ jobs:
       cloudfront_domain: ${{ steps.config.outputs.cloudfront_domain }}
       downloads_url: ${{ steps.config.outputs.downloads_url }}
     steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Test the release scripts
+        run: npm run test:scripts
+
       - id: config
         run: |
           if [ "${{ github.event_name }}" == "push" ]; then
@@ -172,6 +181,12 @@ jobs:
     if: needs.desktop-builds.result == 'success'
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
       - uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
@@ -211,14 +226,19 @@ jobs:
           cd assets
           V="${{ needs.setup.outputs.version }}"
           P="${{ needs.setup.outputs.s3_path }}"
-          # latest.json is what the updater endpoint serves. Publish it at the
-          # channel root (the configured endpoint) and keep a versioned copy.
-          if [ -f latest.json ]; then
-            aws s3 cp latest.json "s3://aircast-artifacts/$P/flasher/latest.json" --acl public-read
-            aws s3 cp latest.json "s3://aircast-artifacts/$P/flasher/$V/updater/latest.json" --acl public-read
-          else
-            echo "No latest.json produced (updater artifacts disabled?) — skipping"
+          URL="${{ needs.setup.outputs.downloads_url }}"
+          # tauri-action writes github.com release-asset URLs into latest.json.
+          # This repo is private, so those 404 for the updater on a user's
+          # machine — the banner shows and the install silently does nothing.
+          # Repoint every platform at the public mirror uploaded above.
+          if [ ! -f latest.json ]; then
+            echo "::error::No latest.json in the release — the updater has nothing to serve." \
+                 "Check TAURI_SIGNING_PRIVATE_KEY is set and createUpdaterArtifacts is on."
+            exit 1
           fi
+          node ../scripts/rewrite-updater-manifest.mjs latest.json "$URL/flasher/$V"
+          aws s3 cp latest.json "s3://aircast-artifacts/$P/flasher/latest.json" --acl public-read --cache-control "no-cache"
+          aws s3 cp latest.json "s3://aircast-artifacts/$P/flasher/$V/updater/latest.json" --acl public-read
 
       - name: Update flasher/releases.json
         env:
@@ -268,6 +288,11 @@ jobs:
           else
             echo "No CloudFront distribution found for $DOMAIN (skipping)"
           fi
+
+      - name: Verify the published updater is installable
+        run: |
+          URL="${{ needs.setup.outputs.downloads_url }}"
+          node scripts/verify-updater-manifest.mjs "$URL/flasher/latest.json"
 
   cleanup-old-releases:
     needs: [setup, desktop-builds, mirror-to-s3]

@@ -38,7 +38,7 @@ function Pane({
       <div className="px-8 pt-7 pb-4">
         <h1 className="text-2xl font-bold tracking-tight">{heading}</h1>
       </div>
-      <div className="flex min-h-0 flex-1 items-center justify-center px-8 pb-8">
+      <div className="flex min-h-0 flex-1 items-center justify-center overflow-y-auto px-8 pb-8">
         <div className="flex w-full max-w-md flex-col items-center gap-6 text-center duration-300 animate-in fade-in-0 zoom-in-95">
           {children}
         </div>
@@ -71,7 +71,6 @@ function IconBadge({
 }: {
   icon: LucideIcon;
   tone: IconTone;
-  /** "spin" only for a real spinner glyph; "pulse" gently breathes the badge. */
   anim?: "spin" | "pulse" | "none";
 }) {
   const t = toneClasses[tone];
@@ -83,7 +82,9 @@ function IconBadge({
         anim === "pulse" && "animate-pulse",
       )}
     >
-      <Icon className={cn("size-8", t.icon, anim === "spin" && "animate-spin")} />
+      <Icon
+        className={cn("size-8", t.icon, anim === "spin" && "animate-spin")}
+      />
     </div>
   );
 }
@@ -107,13 +108,10 @@ function ProgressPanel({
   percent: number;
   detail: string | null;
   determinate: boolean;
-  /** True only for the generic "Starting…" state (a real Loader2 spinner). */
   spinner?: boolean;
   onCancel: () => void;
   showCancel: boolean;
 }) {
-  // Real spinner glyph spins; phase glyphs stay still and the badge pulses
-  // while work is indeterminate; determinate work shows a still icon + bar.
   const anim = spinner ? "spin" : determinate ? "none" : "pulse";
   return (
     <>
@@ -150,17 +148,23 @@ function ProgressPanel({
 }
 
 export function JobView({
+  hostname,
+  remoteEnrolled,
   success,
   error,
   progress,
   onCancel,
   onReset,
+  onRevealLog,
 }: {
+  hostname: string;
+  remoteEnrolled: boolean;
   success: boolean;
   error: string | null;
   progress: FlashProgressState;
   onCancel: () => void;
   onReset: () => void;
+  onRevealLog: () => void;
 }) {
   if (success) {
     return (
@@ -169,9 +173,29 @@ export function JobView({
         <div className="flex flex-col gap-1.5">
           <h2 className="text-xl font-semibold">Ready to go</h2>
           <p className="text-sm text-balance text-muted-foreground">
-            Your SD card has been flashed and verified. You can remove it and
-            boot your device.
+            Your SD card has been flashed and verified. Remove it and boot your
+            device.
           </p>
+        </div>
+        <div className="flex w-full flex-col gap-1 rounded-xl border border-border px-4 py-3">
+          <span className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
+            Find it at
+          </span>
+          <button
+            type="button"
+            className="font-mono text-base break-all hover:text-primary"
+            onClick={() =>
+              void navigator.clipboard?.writeText(`${hostname}.local`)
+            }
+            title="Copy"
+          >
+            {hostname}.local
+          </button>
+          {remoteEnrolled ? (
+            <span className="text-xs text-muted-foreground">
+              It also joins your private network on first boot.
+            </span>
+          ) : null}
         </div>
         <Button type="button" size="lg" className="min-w-45" onClick={onReset}>
           Flash another
@@ -196,9 +220,24 @@ export function JobView({
             {error}
           </AlertDescription>
         </Alert>
-        <Button type="button" size="lg" className="min-w-45" onClick={onReset}>
-          Try again
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            type="button"
+            size="lg"
+            className="min-w-45"
+            onClick={onReset}
+          >
+            Try again
+          </Button>
+          <Button
+            type="button"
+            size="lg"
+            variant="secondary"
+            onClick={onRevealLog}
+          >
+            Show diagnostics
+          </Button>
+        </div>
       </Pane>
     );
   }
@@ -219,7 +258,7 @@ export function JobView({
           icon={HardDriveDownload}
           title="Downloading image…"
           subtitle="Fetching the OS image from Aircast."
-          stepLabel="Step 1 of 3: Download"
+          stepLabel="Download"
           percent={percent}
           detail={detail}
           determinate={determinate}
@@ -234,9 +273,6 @@ export function JobView({
     const p = progress.progress;
     const phase = p?.phase;
     const percent = p ? Math.min(100, Math.round(p.percent)) : 0;
-    // Determinate when we have a byte total: writing (all platforms) and
-    // verifying on Windows (read-back streams progress); macOS/Linux verify is
-    // indeterminate (total_bytes == 0).
     const determinate =
       p !== null &&
       (p.phase === "writing" || p.phase === "verifying") &&
@@ -256,16 +292,20 @@ export function JobView({
         : phase === "verifying"
           ? "Reading the card back to confirm a clean write."
           : phase === "customizing"
-            ? "Writing Wi-Fi and hostname configuration to the card."
+            ? "Writing your network and access settings to the card."
             : "Don't remove the SD card while writing.";
     const stepLabel =
-      phase === "verifying"
-        ? "Step 2 of 3: Verify"
-        : phase === "customizing"
-          ? "Step 3 of 3: Customize"
-          : "Step 2 of 3: Write";
+      phase === "decompressing"
+        ? "Prepare"
+        : phase === "verifying"
+          ? "Verify"
+          : phase === "customizing"
+            ? "Apply settings"
+            : "Write";
     const sizeDetail =
-      p && (p.phase === "writing" || p.phase === "verifying") && p.total_bytes > 0
+      p &&
+      (p.phase === "writing" || p.phase === "verifying") &&
+      p.total_bytes > 0
         ? `${formatBytes(p.bytes_processed)} / ${formatBytes(p.total_bytes)}`
         : null;
 
@@ -290,7 +330,6 @@ export function JobView({
     );
   }
 
-  // Pending but no progress event yet.
   return (
     <Pane heading="Writing">
       <ProgressPanel

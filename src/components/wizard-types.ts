@@ -24,12 +24,13 @@ export type FlashProgressState =
   | { phase: "flashing"; progress: FlashProgress | null };
 
 export interface FlashVars {
+  jobId: string;
   sourceKind: SourceKind;
   release: Release | null;
   localPath: string | null;
   targetDisk: string;
   wifi: WifiConfig | null;
-  hostname: string | null;
+  hostname: string;
   tailscale: TailscaleConfig | null;
   access: AccessConfig | null;
 }

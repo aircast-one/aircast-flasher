@@ -1,7 +1,11 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
-import { check, type Update } from "@tauri-apps/plugin-updater";
+import {
+  check,
+  type DownloadEvent,
+  type Update,
+} from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
 import type {
   AccessConfig,
@@ -36,16 +40,19 @@ export function listBlockDevices(): Promise<BlockDevice[]> {
 }
 
 export function downloadImage(args: {
+  jobId: string;
   downloadUrl: string;
   checksumUrl: string;
 }): Promise<DownloadResult> {
   return invoke<DownloadResult>("download_image", {
+    jobId: args.jobId,
     downloadUrl: args.downloadUrl,
     checksumUrl: args.checksumUrl,
   });
 }
 
 export function flashImage(args: {
+  jobId: string;
   imagePath: string;
   targetDisk: string;
   wifi: WifiConfig | null;
@@ -55,6 +62,7 @@ export function flashImage(args: {
   initFormat: InitFormat;
 }): Promise<void> {
   return invoke<void>("flash_image", {
+    jobId: args.jobId,
     imagePath: args.imagePath,
     targetDisk: args.targetDisk,
     wifi: args.wifi,
@@ -89,6 +97,10 @@ export function cancelFlash(): Promise<void> {
   return invoke<void>("cancel_flash");
 }
 
+export function revealEventLog(): Promise<void> {
+  return invoke<void>("reveal_event_log");
+}
+
 export function onDownloadProgress(
   handler: (progress: DownloadProgress) => void,
 ): Promise<UnlistenFn> {
@@ -119,8 +131,13 @@ export async function checkForUpdate(): Promise<Update | null> {
 }
 
 // Download + install the pending update, then restart into the new version.
-export async function installUpdate(update: Update): Promise<void> {
-  await update.downloadAndInstall();
+// The caller gets the raw download events so it can show progress; a failed
+// download must surface to the user, so nothing is caught here.
+export async function installUpdate(
+  update: Update,
+  onEvent: (event: DownloadEvent) => void,
+): Promise<void> {
+  await update.downloadAndInstall(onEvent);
   await relaunch();
 }
 
