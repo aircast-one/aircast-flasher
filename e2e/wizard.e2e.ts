@@ -92,14 +92,35 @@ async function knownGoodNetworkState() {
   await $("#password").clearValue();
 }
 
+/// The session does not necessarily start on the app: on Linux the first handle
+/// is an about:blank window, which is why a bare switchToWindow(handles[0])
+/// looked exactly like an app that renders nothing. Find the window that holds
+/// the wizard, and switch to it explicitly — that also sets the service's
+/// suppression flag, which stops it polling window state before every element
+/// lookup (5s per command otherwise).
+async function attachToAppWindow() {
+  await browser.waitUntil(
+    async () => {
+      const handles = await browser.getWindowHandles();
+      for (const handle of handles) {
+        await browser.switchToWindow(handle);
+        const isApp = await browser
+          .execute(() => Boolean(document.getElementById("root")))
+          .catch(() => false);
+        if (isApp) return true;
+      }
+      return false;
+    },
+    {
+      timeout: HEADING_TIMEOUT,
+      timeoutMsg: `no window held the app. ${await pageDiagnostics()}`,
+    },
+  );
+}
+
 describe("flasher wizard", () => {
   before(async () => {
-    // One explicit window switch stops the service polling window state before
-    // every element lookup, which otherwise costs 5s per command.
-    const [main] = await browser.getWindowHandles();
-    await browser
-      .switchToWindow(main)
-      .catch(() => browser.switchToWindow("main"));
+    await attachToAppWindow();
     await waitForHeading("Operating system");
   });
 

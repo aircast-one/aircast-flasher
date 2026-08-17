@@ -69,10 +69,8 @@ writing, and `validate_disk_path` rejects anything that isn't `/dev/diskN`
 
 WiFi network + passphrase, hostname, control server and authorized SSH key are
 saved to `<config dir>/one.aircast.flasher/settings.json` (owner-only, 0600 —
-it holds the passphrase) via the `read_settings` / `write_settings` commands.
-Not localStorage: WebKitGTK denies it on the `tauri://` origin, so on Linux
-every save silently no-opped and the wizard forgot everything on restart
-(tauri-apps/tauri#10981). The pre-auth key is never persisted.
+it holds the passphrase) via the `read_settings` / `write_settings` commands,
+rather than in webview localStorage. The pre-auth key is never persisted.
 
 `null` means "never set" and is distinct from `""` — that is what lets a
 cleared SSID or hostname stay cleared instead of snapping back to the detected
