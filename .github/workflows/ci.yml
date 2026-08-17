@@ -52,47 +52,12 @@ jobs:
       - name: E2E typecheck
         run: npx tsc -p e2e/tsconfig.json
 
-      - name: Build the app (Linux)
+      - name: Build the app
         run: cargo build --manifest-path src-tauri/Cargo.toml
 
-  # The e2e suite drives the real app over WebDriver. On Linux the automation
-  # session is handed a webview that is not the app's — blank, without the asset
-  # protocol — so the app is unreachable there regardless of driver provider
-  # (verified locally in an ubuntu-22.04 container: the app itself renders fine,
-  # 1000x680, WebKit processes healthy). Run the suite on macOS, where the
-  # embedded driver attaches to the app's own webview.
-  e2e:
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: dtolnay/rust-toolchain@stable
-
-      - uses: swatinem/rust-cache@v2
-        with:
-          workspaces: ". -> target"
-          cache-on-failure: true
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-
-      - run: npm ci
-
-      - name: Frontend build
-        run: npm run build
-
-      - name: Build app with the WebDriver feature
-        run: cargo build --features wdio --manifest-path src-tauri/Cargo.toml
-
-      - name: E2E (real app, embedded WebDriver)
-        run: npx wdio run ./wdio.conf.ts
-
-      - name: Upload e2e logs
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: e2e-logs
-          path: logs/
-          if-no-files-found: ignore
+      # `just e2e` is not run here. The suite drives the real app over
+      # WebDriver, and on a GitHub-hosted runner the automation session is
+      # handed a blank webview instead of the app's — on Linux regardless of
+      # driver provider, and on macOS runners too, while the same commit passes
+      # 10/10 on a real desktop. It is a pre-push gate (`just check`), not a
+      # CI-skippable step; see the Tests section of the README.

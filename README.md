@@ -84,14 +84,24 @@ just e2e     # the wizard driven through the real app over WebDriver
 just check   # both
 ```
 
-The e2e suite runs on macOS only. On Linux the WebDriver automation session is
-handed a webview that is not the app's — blank, without the asset protocol
-registered — so `tauri://localhost` loads nothing and the app is unreachable,
-with either the embedded or the external (tauri-driver) provider and with
-`TAURI_WEBVIEW_AUTOMATION=true` confirmed in the app process. The app itself is
-fine there: in an ubuntu-22.04 container it renders at 1000x680 with healthy
-WebKit processes. CI therefore builds and unit-tests on Linux and runs e2e on a
-macOS runner.
+`just e2e` is a **pre-push gate, run locally**, not a CI step — run it (or
+`just check`) before pushing. On GitHub-hosted runners the WebDriver automation
+session is handed a blank webview instead of the app's, so the suite cannot
+reach the wizard there:
+
+| Environment | Result |
+|---|---|
+| macOS desktop | 10/10 in <1s |
+| ubuntu-22.04 container, embedded driver | `about:blank`, no asset protocol |
+| ubuntu-22.04 container, tauri-driver | same, with `TAURI_WEBVIEW_AUTOMATION=true` verified in the app process |
+| macos-latest runner | same, on a commit that passes locally |
+
+The app is not at fault: in the same container it renders at 1000x680 with
+healthy `WebKitWebProcess`/`WebKitNetworkProcess`, and an 8s artificial startup
+delay does not reproduce the failure locally, ruling out a launch race. What is
+left is the automation handover inside wry/tauri-driver, and the runner
+environment. CI runs the build, the Rust tests, the frontend units and the
+release-script units on Linux.
 
 ## Diagnostics
 
