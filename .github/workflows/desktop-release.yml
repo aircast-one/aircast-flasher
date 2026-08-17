@@ -34,6 +34,7 @@ jobs:
       s3_path: ${{ steps.config.outputs.s3_path }}
       cloudfront_domain: ${{ steps.config.outputs.cloudfront_domain }}
       downloads_url: ${{ steps.config.outputs.downloads_url }}
+      release_id: ${{ steps.release.outputs.id }}
     steps:
       - uses: actions/checkout@v4
 
@@ -73,6 +74,28 @@ jobs:
             echo "downloads_url=https://downloads.dev.aircast.one" >> "$GITHUB_OUTPUT"
           fi
           echo "Release: $VERSION"
+
+      # Create the release once, here, instead of letting the three build jobs
+      # race to create it by tag — that race is what failed v0.1.2, with two of
+      # them getting "Resource not accessible by integration" from the releases
+      # API after building successfully.
+      - name: Ensure the GitHub release exists
+        id: release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          V: ${{ steps.config.outputs.version }}
+          PRODUCTION: ${{ steps.config.outputs.is_production }}
+        run: |
+          if ! gh release view "$V" >/dev/null 2>&1; then
+            PRE=""
+            [ "$PRODUCTION" = "true" ] || PRE="--prerelease"
+            gh release create "$V" $PRE \
+              --title "Aircast Flasher $V" \
+              --notes "See the assets below to download this version."
+          fi
+          ID=$(gh api "repos/${{ github.repository }}/releases/tags/$V" --jq .id)
+          echo "id=$ID" >> "$GITHUB_OUTPUT"
+          echo "Release id: $ID"
 
   desktop-builds:
     needs: setup
@@ -168,11 +191,7 @@ jobs:
           # Windows Authenticode is config-driven: add
           # `bundle.windows.certificateThumbprint` to tauri.conf.json + a runner cert.
         with:
-          tagName: ${{ needs.setup.outputs.version }}
-          releaseName: ${{ format('Aircast Flasher {0}', needs.setup.outputs.version) }}
-          releaseBody: "See the assets below to download this version."
-          releaseDraft: false
-          prerelease: ${{ needs.setup.outputs.is_production != 'true' }}
+          releaseId: ${{ needs.setup.outputs.release_id }}
           includeUpdaterJson: true
           args: ${{ matrix.os == 'windows' && format('--target {0} --bundles nsis', steps.target.outputs.target) || format('--target {0}', steps.target.outputs.target) }}
 
