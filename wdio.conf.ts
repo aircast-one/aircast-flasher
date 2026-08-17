@@ -31,7 +31,16 @@ export const config: WebdriverIO.Config = {
   services: [
     [
       "@wdio/tauri-service",
-      { captureBackendLogs: true, captureFrontendLogs: true },
+      {
+        // The embedded (in-app) driver attaches to the app's own webview on
+        // macOS and Windows. On Linux it hands the session a fresh about:blank
+        // window instead, so the app is unreachable — use tauri-driver +
+        // WebKitWebDriver there, which the service can install itself.
+        driverProvider: process.platform === "linux" ? "external" : "embedded",
+        autoInstallTauriDriver: process.platform === "linux",
+        captureBackendLogs: true,
+        captureFrontendLogs: true,
+      },
     ],
   ],
   framework: "mocha",
