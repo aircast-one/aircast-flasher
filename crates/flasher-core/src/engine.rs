@@ -95,6 +95,9 @@ pub fn flash(
     let mut write_hash = Sha256::new();
     write_hash.update(&first_block);
 
+    // ---- 1b. Wipe the card's tail before the image lands on it. ----
+    zero_tail(device)?;
+
     // Skip past where the MBR will eventually go.
     device
         .seek(SeekFrom::Start(BLOCK as u64))
@@ -184,6 +187,30 @@ pub fn flash(
     device.sync().map_err(|e| ioerr("final sync", e))?;
 
     Ok(())
+}
+
+/// Zero the last [`BLOCK`] of the card.
+///
+/// The image only covers its own length, so everything past it survives a
+/// flash — including the backup GPT header a previously GPT-partitioned card
+/// keeps at the very last sector. That backup outranks the fresh MBR for Linux's
+/// partition scanner, so the kernel can end up hunting for partitions that no
+/// longer exist and never finding `root=PARTUUID=…`. Wiping the tail first (the
+/// image overwrites these bytes again if it reaches that far) is what makes a
+/// re-used card behave like a blank one.
+fn zero_tail(device: &mut dyn BlockDevice) -> Result<(), String> {
+    let end = device
+        .seek(SeekFrom::End(0))
+        .map_err(|e| ioerr("seek to end of device", e))?;
+    if end <= BLOCK as u64 {
+        return Ok(());
+    }
+    device
+        .seek(SeekFrom::Start(end - BLOCK as u64))
+        .map_err(|e| ioerr("seek to tail of device", e))?;
+    device
+        .write_all(&vec![0u8; BLOCK])
+        .map_err(|e| ioerr("wipe tail of device", e))
 }
 
 /// Apply the provisioning plan to the FAT boot partition described by the MBR in
@@ -574,6 +601,31 @@ mod tests {
         assert!(
             cmdline.contains("systemd.run=/boot/firstrun.sh"),
             "appended firstrun fragment"
+        );
+    }
+
+    #[test]
+    fn flash_wipes_the_tail_of_a_larger_card() {
+        let image = build_image();
+        let image_len = image.len() as u64;
+        let card_len = image.len() + 4 * BLOCK;
+
+        let mut device = MemDevice::zeroed(card_len);
+        let last_sector = card_len - SECTOR as usize;
+        device.cur.get_mut()[last_sector..last_sector + 8].copy_from_slice(b"EFI PART");
+
+        let cfg = cloud_init_config();
+        let params = FlashParams { image_len, verify: true };
+
+        let mut reader = Cursor::new(image);
+        flash(&mut device, &mut reader, &params, &cfg, &mut |_, _, _| {})
+            .expect("flash onto an oversized card");
+
+        let written = device.into_bytes();
+        assert_eq!(written.len(), card_len, "the card must not grow or shrink");
+        assert!(
+            written[card_len - BLOCK..].iter().all(|&b| b == 0),
+            "a previous card's backup GPT must not survive the flash"
         );
     }
 

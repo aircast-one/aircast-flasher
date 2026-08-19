@@ -20,7 +20,8 @@ use windows::Win32::Storage::FileSystem::{
 use windows::Win32::System::Ioctl::{
     PropertyStandardQuery, StorageDeviceProperty, DISK_EXTENT, DISK_GEOMETRY_EX,
     FSCTL_DISMOUNT_VOLUME, FSCTL_LOCK_VOLUME, FSCTL_UNLOCK_VOLUME,
-    IOCTL_DISK_GET_DRIVE_GEOMETRY_EX, IOCTL_STORAGE_QUERY_PROPERTY, STORAGE_DEVICE_DESCRIPTOR,
+    IOCTL_DISK_DELETE_DRIVE_LAYOUT, IOCTL_DISK_GET_DRIVE_GEOMETRY_EX,
+    IOCTL_DISK_UPDATE_PROPERTIES, IOCTL_STORAGE_QUERY_PROPERTY, STORAGE_DEVICE_DESCRIPTOR,
     STORAGE_PROPERTY_QUERY, VOLUME_DISK_EXTENTS,
 };
 use windows::Win32::System::IO::DeviceIoControl;
@@ -334,6 +335,42 @@ fn unlock_volumes(handles: &[Handle]) {
     }
 }
 
+/// Drop the disk's partition table.
+///
+/// Windows refuses raw writes to any sector claimed by a volume, and it only
+/// gives up that claim when the partition disappears — which is why writing over
+/// a card that still carries an old layout fails with ACCESS_DENIED until the
+/// user deletes the partitions by hand in Disk Management. Deleting the layout
+/// ourselves (what Raspberry Pi Imager does) releases every volume on the disk,
+/// lettered or not, so the whole medium is writable. Best-effort: a blank card
+/// has no layout to delete, and the write is what actually reports failure.
+fn delete_drive_layout(handle: HANDLE) {
+    let mut returned: u32 = 0;
+    unsafe {
+        let _ = DeviceIoControl(
+            handle,
+            IOCTL_DISK_DELETE_DRIVE_LAYOUT,
+            None,
+            0,
+            None,
+            0,
+            Some(&mut returned),
+            None,
+        );
+        // Make the kernel re-read the (now empty) layout and tear the volumes down.
+        let _ = DeviceIoControl(
+            handle,
+            IOCTL_DISK_UPDATE_PROPERTIES,
+            None,
+            0,
+            None,
+            0,
+            Some(&mut returned),
+            None,
+        );
+    }
+}
+
 /// An opened `\\.\PhysicalDriveN` handle the engine drives directly.
 ///
 /// Holds the physical-drive handle plus the locked/dismounted child-volume
@@ -359,8 +396,9 @@ impl Drop for WinDevice {
     }
 }
 
-/// Open `\\.\PhysicalDriveN` for the engine: lock+dismount child volumes, then
-/// open the drive with no buffering + write-through for raw read/write.
+/// Open `\\.\PhysicalDriveN` for the engine: lock+dismount child volumes, open
+/// the drive with no buffering + write-through, then drop its partition table so
+/// no leftover volume can veto a write.
 ///
 /// Requires the calling process to be elevated. The returned [`WinDevice`] is
 /// `Read + Write + Seek` and must be wrapped in [`crate::AlignedDevice`].
@@ -378,6 +416,8 @@ pub fn open_device(device: &str) -> Result<WinDevice, String> {
         (FILE_FLAG_NO_BUFFERING | FILE_FLAG_WRITE_THROUGH).0,
     )
     .ok_or_else(|| format!("Failed to open {id} for read/write (is the app elevated?)"))?;
+
+    delete_drive_layout(disk.raw());
 
     Ok(WinDevice { disk, locked })
 }
