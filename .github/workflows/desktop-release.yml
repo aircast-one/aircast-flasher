@@ -6,9 +6,9 @@ name: Desktop Release
 # aircast-web desktop-release pipeline.
 #
 # Required repo/org secrets: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY,
-# RELEASE_TOKEN.
+# PAT_TOKEN.
 #
-# RELEASE_TOKEN is a PAT with contents:write (fine-grained: Contents = Read and
+# PAT_TOKEN is a PAT with contents:write (fine-grained: Contents = Read and
 # write on this repo; classic: `repo`). The built-in GITHUB_TOKEN cannot be used:
 # the releases API answers "Resource not accessible by integration" (403) for it
 # on this repo even though the job is granted `Contents: write`, because the org
@@ -45,12 +45,12 @@ jobs:
     steps:
       - name: Require a release token
         env:
-          RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          PAT_TOKEN: ${{ secrets.PAT_TOKEN }}
         run: |
-          if [ -z "$RELEASE_TOKEN" ]; then
-            echo "::error::RELEASE_TOKEN is not set. The built-in GITHUB_TOKEN gets 403" \
+          if [ -z "$PAT_TOKEN" ]; then
+            echo "::error::PAT_TOKEN is not set. The built-in GITHUB_TOKEN gets 403" \
                  "from the releases API on this repo, so publishing needs a PAT with" \
-                 "contents:write stored as the RELEASE_TOKEN secret."
+                 "contents:write stored as the PAT_TOKEN secret."
             exit 1
           fi
 
@@ -100,7 +100,7 @@ jobs:
       - name: Ensure the GitHub release exists
         id: release
         env:
-          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          GH_TOKEN: ${{ secrets.PAT_TOKEN }}
           V: ${{ steps.config.outputs.version }}
           PRODUCTION: ${{ steps.config.outputs.is_production }}
         run: |
@@ -192,7 +192,7 @@ jobs:
       - name: Build + release
         uses: tauri-apps/tauri-action@v0
         env:
-          GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}
           # Updater signing. The minisign private key + its password sign the
           # updater artifacts so the embedded pubkey can verify them. Empty
           # secrets => tauri-action skips updater signing and the build still
@@ -232,7 +232,7 @@ jobs:
 
       - name: Download release assets
         env:
-          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          GH_TOKEN: ${{ secrets.PAT_TOKEN }}
         run: |
           sleep 20
           mkdir -p assets && cd assets
@@ -279,7 +279,7 @@ jobs:
 
       - name: Update flasher/releases.json
         env:
-          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          GH_TOKEN: ${{ secrets.PAT_TOKEN }}
         run: |
           cd assets
           V="${{ needs.setup.outputs.version }}"
@@ -344,7 +344,7 @@ jobs:
 
       - name: Cleanup old releases
         env:
-          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          GH_TOKEN: ${{ secrets.PAT_TOKEN }}
         run: |
           P="${{ needs.setup.outputs.s3_path }}"
           ENV="${{ needs.setup.outputs.environment }}"
