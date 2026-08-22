@@ -37,7 +37,7 @@ export function StepStorage({
   return (
     <StepShell
       heading="Storage"
-      description="Insert your SD card now — it'll be detected automatically — then check the settings below and write."
+      description="Insert your SD card and it'll show up here on its own. Check the settings below, then write."
       back={{ onClick: onBack }}
       next={{ label: "Flash SD Card", onClick: onFlash, disabled: !canProceed }}
     >
@@ -48,7 +48,7 @@ export function StepStorage({
             <p className="text-sm text-muted-foreground">
               {devicesLoading
                 ? "Scanning for storage devices…"
-                : "Insert an SD card — it'll be detected automatically."}
+                : "Insert an SD card and it'll show up here."}
             </p>
           </div>
         ) : (
