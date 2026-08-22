@@ -18,8 +18,9 @@ export function ConsentBanner({
     >
       <BarChart3 className="size-4 shrink-0 text-muted-foreground" />
       <span className="text-muted-foreground">
-        Share anonymous diagnostics — which step failed, how fast the card wrote.
-        Never your network name, passphrase, keys or hostname.
+        Share anonymous diagnostics: which step failed and how fast the card
+        wrote. It never includes your network name, passphrase, keys, or
+        hostname.
       </span>
       <Button size="sm" variant="secondary" onClick={() => onAnswer(true)}>
         Share
