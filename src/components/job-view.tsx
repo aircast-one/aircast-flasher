@@ -241,8 +241,11 @@ export function JobView({
               the network, then reboots once.
             </li>
             <li>
-              If it never appears, power-cycle it and check the WiFi name and
-              password you entered.
+              If the WiFi you entered isn't found, the device starts its own
+              hotspot named <span className="font-mono">{hostname}</span>{" "}
+              (password <span className="font-mono">raspberry</span>). Join it
+              and open <span className="font-mono">http://10.42.0.1</span> to
+              set up the network.
             </li>
           </ol>
         </div>
