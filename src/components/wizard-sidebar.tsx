@@ -1,4 +1,6 @@
 import { Check } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+import { getVersion } from "@tauri-apps/api/app";
 
 import { cn } from "@/lib/utils";
 import { STEP, type WizardStep } from "@/components/wizard-types";
@@ -14,6 +16,15 @@ export const WIZARD_STEPS: SidebarStep[] = [
   { id: STEP.storage, label: "Storage" },
   { id: STEP.write, label: "Write" },
 ];
+
+function AppVersion() {
+  const versionQuery = useQuery({
+    queryKey: ["app-version"],
+    queryFn: getVersion,
+    staleTime: Infinity,
+  });
+  return versionQuery.data ? <span>v{versionQuery.data}</span> : null;
+}
 
 export function WizardSidebar({
   current,
@@ -105,6 +116,7 @@ export function WizardSidebar({
         >
           Diagnostics {telemetry ? "on" : "off"}
         </button>
+        <AppVersion />
       </div>
     </aside>
   );
