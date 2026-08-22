@@ -13,7 +13,7 @@ use windows::Win32::Foundation::{
 };
 use windows::Win32::Storage::FileSystem::{
     CreateFileW, FlushFileBuffers, ReadFile, SetFilePointerEx, WriteFile, BusTypeMmc, BusTypeSata,
-    BusTypeSd, BusTypeUsb, FILE_BEGIN, FILE_CURRENT, FILE_END, FILE_FLAGS_AND_ATTRIBUTES,
+    BusTypeSd, BusTypeUsb, FILE_BEGIN, FILE_CURRENT, FILE_FLAGS_AND_ATTRIBUTES,
     FILE_FLAG_NO_BUFFERING, FILE_FLAG_WRITE_THROUGH, FILE_GENERIC_READ, FILE_SHARE_MODE,
     FILE_SHARE_READ, FILE_SHARE_WRITE, IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS, OPEN_EXISTING,
 };
@@ -380,6 +380,10 @@ fn delete_drive_layout(handle: HANDLE) {
 /// `FILE_FLAG_NO_BUFFERING` sector-alignment requirement.
 pub struct WinDevice {
     disk: Handle,
+    /// Disk size in bytes, from IOCTL_DISK_GET_DRIVE_GEOMETRY_EX. A raw
+    /// PhysicalDrive handle rejects `SetFilePointerEx(FILE_END)` with
+    /// ERROR_INVALID_FUNCTION, so end-relative seeks are resolved against this.
+    size: u64,
     /// Locked volume handles, kept open (and unlocked on drop) for the flash.
     locked: Vec<Handle>,
 }
@@ -419,7 +423,10 @@ pub fn open_device(device: &str) -> Result<WinDevice, String> {
 
     delete_drive_layout(disk.raw());
 
-    Ok(WinDevice { disk, locked })
+    let size = query_disk_length(disk.raw())
+        .ok_or_else(|| format!("Failed to query the size of {id}"))?;
+
+    Ok(WinDevice { disk, size, locked })
 }
 
 impl std::io::Read for WinDevice {
@@ -464,7 +471,7 @@ impl std::io::Seek for WinDevice {
         let (method, distance) = match pos {
             SeekFrom::Start(n) => (FILE_BEGIN, n as i64),
             SeekFrom::Current(d) => (FILE_CURRENT, d),
-            SeekFrom::End(d) => (FILE_END, d),
+            SeekFrom::End(d) => (FILE_BEGIN, self.size as i64 + d),
         };
         let mut new_pos: i64 = 0;
         unsafe {
