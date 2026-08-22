@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import type { Update } from "@tauri-apps/plugin-updater";
 import { AlertTriangle, Download, Loader2 } from "lucide-react";
-import { checkForUpdate, installUpdate } from "@/api";
+import { checkForUpdate, installUpdate, track } from "@/api";
 import { Button } from "@/components/ui/button";
 
 export function UpdateBanner({ suspended }: { suspended: boolean }) {
@@ -16,6 +16,10 @@ export function UpdateBanner({ suspended }: { suspended: boolean }) {
     let active = true;
     checkForUpdate().then((u) => {
       if (active) setUpdate(u);
+      // An install that never offers an update is indistinguishable from one
+      // that was never opened; this is what tells a stale fleet from a broken
+      // endpoint.
+      track("update_check", { offered: u !== null, version: u?.version ?? null });
     });
     return () => {
       active = false;
@@ -30,6 +34,7 @@ export function UpdateBanner({ suspended }: { suspended: boolean }) {
     setDownloaded(0);
     setTotal(null);
     setInstalling(true);
+    const started = Date.now();
     try {
       await installUpdate(update, (event) => {
         if (event.event === "Started") setTotal(event.data.contentLength ?? null);
@@ -37,6 +42,12 @@ export function UpdateBanner({ suspended }: { suspended: boolean }) {
           setDownloaded((bytes) => bytes + event.data.chunkLength);
       });
     } catch (cause) {
+      track("update_install", {
+        version: update.version,
+        outcome: "failed",
+        duration_ms: Date.now() - started,
+        error: String(cause),
+      });
       setError(String(cause));
       setInstalling(false);
     }

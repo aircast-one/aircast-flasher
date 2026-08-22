@@ -12,6 +12,8 @@ const EMPTY: Settings = {
   controlServer: "",
   authorizedKey: null,
   noWifi: false,
+  telemetry: null,
+  installId: null,
 };
 
 export function useSettings(): {

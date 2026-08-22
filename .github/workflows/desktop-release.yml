@@ -199,6 +199,10 @@ jobs:
           # succeeds (just without verifiable updates).
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # Baked in at compile time (option_env!). Absent => the build ships
+          # without a telemetry sink and only ever writes the local event log,
+          # which is exactly what a dev build should do.
+          POSTHOG_KEY: ${{ secrets.POSTHOG_KEY }}
           # macOS code signing / notarization is intentionally NOT wired here:
           # passing empty APPLE_CERTIFICATE makes tauri-action attempt
           # `security import` on an empty cert and fail. To enable signing, add a

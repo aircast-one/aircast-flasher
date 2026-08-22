@@ -8,6 +8,10 @@ use tauri::{AppHandle, Manager};
 
 const MAX_LOG_BYTES: u64 = 2 * 1024 * 1024;
 const LOG_FILE: &str = "events.jsonl";
+const SENT_FILE: &str = "events.sent";
+
+const POSTHOG_URL: &str = "https://us.i.posthog.com/batch/";
+const POSTHOG_KEY: Option<&str> = option_env!("POSTHOG_KEY");
 
 pub fn log_path(app: &AppHandle) -> Result<PathBuf, String> {
     let dir = app
@@ -24,6 +28,127 @@ pub fn record<T: Serialize>(app: &AppHandle, event: &T) {
         return;
     };
     append_line(&path, &line);
+    flush(app);
+}
+
+/// Record an event named at runtime. The UI owns the half of the funnel the
+/// backend cannot see — which step the operator reached, whether an update was
+/// offered — so it needs a way in that does not mean a command per event.
+#[tauri::command]
+pub fn track(app_handle: AppHandle, event: String, props: serde_json::Value) {
+    let envelope = serde_json::json!({
+        "event": event,
+        "app_version": app_handle.package_info().version.to_string(),
+        "os": std::env::consts::OS,
+        "arch": std::env::consts::ARCH,
+    });
+    record(&app_handle, &merge(envelope, props));
+}
+
+fn merge(base: serde_json::Value, extra: serde_json::Value) -> serde_json::Value {
+    match (base, extra) {
+        (serde_json::Value::Object(base), serde_json::Value::Object(extra)) => {
+            serde_json::Value::Object(base.into_iter().chain(extra).collect())
+        }
+        (base, _) => base,
+    }
+}
+
+/// Ship everything written since the last successful send. Nothing leaves the
+/// machine until the operator opts in, and a build without a `POSTHOG_KEY`
+/// (every dev build) only ever writes the local log.
+///
+/// The offset lives beside the log rather than in `settings.json` because the
+/// UI rewrites settings on every keystroke, and a lost write here would mean
+/// re-sending the whole log.
+pub fn flush(app: &AppHandle) {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let _ = flush_now(&app).await;
+    });
+}
+
+async fn flush_now(app: &AppHandle) -> Option<()> {
+    let key = POSTHOG_KEY?;
+    let id = crate::settings::telemetry_id(app)?;
+
+    let _guard = flush_lock().lock().await;
+
+    let path = log_path(app).ok()?;
+    let log = std::fs::read_to_string(&path).ok()?;
+    let sent = sent_offset(&path).min(log.len());
+
+    let batch: Vec<serde_json::Value> = log[sent..]
+        .lines()
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .map(|props| {
+            serde_json::json!({
+                "event": props.get("event").and_then(|e| e.as_str()).unwrap_or("event"),
+                "distinct_id": id,
+                "properties": props,
+            })
+        })
+        .collect();
+    if batch.is_empty() {
+        return Some(());
+    }
+
+    reqwest::Client::new()
+        .post(POSTHOG_URL)
+        .json(&serde_json::json!({ "api_key": key, "batch": batch }))
+        .send()
+        .await
+        .ok()
+        .filter(|r| r.status().is_success())?;
+
+    let _ = std::fs::write(path.with_file_name(SENT_FILE), log.len().to_string());
+    Some(())
+}
+
+/// Turn a panic into an event. A crash is the one failure the operator can
+/// never describe and the local log would otherwise never name.
+pub fn record_panics(app: AppHandle) {
+    let previous = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let payload = info
+            .payload()
+            .downcast_ref::<&str>()
+            .map(|s| s.to_string())
+            .or_else(|| info.payload().downcast_ref::<String>().cloned())
+            .unwrap_or_else(|| "panic".into());
+        track(
+            app.clone(),
+            "crash".into(),
+            serde_json::json!({
+                "message": payload,
+                "location": info.location().map(|l| format!("{}:{}", l.file(), l.line())),
+            }),
+        );
+        previous(info);
+    }));
+}
+
+/// Treat the log as already shipped. Consent is "from here on": the events
+/// written before the operator opted in stay on their machine.
+pub fn mark_all_sent(app: &AppHandle) {
+    let Ok(path) = log_path(app) else { return };
+    let len = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+    let _ = std::fs::write(path.with_file_name(SENT_FILE), len.to_string());
+}
+
+/// Bytes of the log already shipped. A rolled-over log is shorter than the
+/// offset it left behind, and [`flush_now`] clamps to the current length rather
+/// than skipping the whole new file.
+fn sent_offset(log: &std::path::Path) -> usize {
+    std::fs::read_to_string(log.with_file_name(SENT_FILE))
+        .ok()
+        .and_then(|raw| raw.trim().parse().ok())
+        .unwrap_or(0)
+}
+
+fn flush_lock() -> &'static tokio::sync::Mutex<()> {
+    static LOCK: std::sync::OnceLock<tokio::sync::Mutex<()>> = std::sync::OnceLock::new();
+    LOCK.get_or_init(Default::default)
 }
 
 /// Append one JSONL line, rolling the file over once it passes [`MAX_LOG_BYTES`]
@@ -405,6 +530,56 @@ mod tests {
                 .contains("device-password"),
             "no secrets in the wide event"
         );
+    }
+
+    #[test]
+    fn a_tracked_event_keeps_its_own_properties_and_gains_none_it_did_not_ask_for() {
+        let merged = merge(
+            serde_json::json!({ "event": "update_check", "os": "macos" }),
+            serde_json::json!({ "offered": true, "version": "0.1.6" }),
+        );
+        assert_eq!(merged["event"], "update_check");
+        assert_eq!(merged["os"], "macos");
+        assert_eq!(merged["offered"], true);
+        assert_eq!(merged["version"], "0.1.6");
+    }
+
+    #[test]
+    fn a_non_object_property_bag_cannot_overwrite_the_envelope() {
+        let merged = merge(
+            serde_json::json!({ "event": "app_start" }),
+            serde_json::json!("not an object"),
+        );
+        assert_eq!(merged["event"], "app_start");
+    }
+
+    #[test]
+    fn only_the_unsent_tail_of_the_log_ships() {
+        let path = temp_log("offset");
+        append_line(&path, r#"{"event":"one"}"#);
+        std::fs::write(path.with_file_name(SENT_FILE), "16").expect("seed offset");
+
+        assert_eq!(sent_offset(&path), 16);
+    }
+
+    #[test]
+    fn a_rolled_over_log_is_not_skipped_by_a_stale_offset() {
+        let path = temp_log("rolled");
+        append_line(&path, r#"{"event":"fresh"}"#);
+        let len = std::fs::metadata(&path).expect("stat").len() as usize;
+        std::fs::write(path.with_file_name(SENT_FILE), "999999").expect("seed offset");
+
+        // flush_now clamps to the log it actually has, so the fresh, shorter
+        // file is sent from the start instead of being read past its end.
+        assert!(sent_offset(&path) > len);
+        assert_eq!(sent_offset(&path).min(len), len);
+    }
+
+    #[test]
+    fn an_absent_offset_ships_the_whole_log() {
+        let path = temp_log("no-offset");
+        append_line(&path, r#"{"event":"one"}"#);
+        assert_eq!(sent_offset(&path), 0);
     }
 
     #[test]

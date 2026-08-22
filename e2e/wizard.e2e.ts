@@ -128,6 +128,25 @@ describe("flasher wizard", () => {
     await waitForHeading("Operating system");
   });
 
+  it("asks before any diagnostics leave the machine, and only once", async () => {
+    const banner = $('[data-testid="consent-banner"]');
+    await expect(banner).toBeDisplayed();
+
+    await banner.$("button=No thanks").click();
+
+    await expect(banner).not.toBeDisplayed();
+    await browser.waitUntil(
+      () =>
+        fs.existsSync(settingsFile()) &&
+        JSON.parse(fs.readFileSync(settingsFile(), "utf8")).telemetry === false,
+      {
+        timeout: 10_000,
+        timeoutMsg:
+          "the answer never reached settings.json — the prompt would return on every launch",
+      },
+    );
+  });
+
   it("names steps in the sidebar the same way the pages do", async () => {
     const labels = await $$(
       'nav[aria-label="Setup steps"] button span:last-child',

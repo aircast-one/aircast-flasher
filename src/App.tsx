@@ -13,6 +13,7 @@ import {
   pickAndReadPublicKey,
   pickLocalImage,
   revealEventLog,
+  track,
 } from "@/api";
 import type {
   AccessConfig,
@@ -29,6 +30,7 @@ import { nextHostname } from "@/components/next-hostname";
 import { randomHex } from "@/lib/random-id";
 import { buildSummary } from "@/components/wizard-summary";
 import { useSettings } from "@/lib/use-settings";
+import { ConsentBanner } from "@/components/consent-banner";
 import { UpdateBanner } from "@/components/update-banner";
 import { WizardSidebar } from "@/components/wizard-sidebar";
 import { StepStorage } from "@/components/step-storage";
@@ -44,6 +46,13 @@ import {
 } from "@/components/wizard-types";
 
 const DEVICE_POLL_INTERVAL_MS = 2000;
+
+const STEP_NAME: Record<WizardStep, string> = {
+  [STEP.os]: "image",
+  [STEP.network]: "network",
+  [STEP.storage]: "storage",
+  [STEP.write]: "write",
+};
 
 const DEFAULT_HOSTNAME = defaultHostname();
 
@@ -141,6 +150,23 @@ function App() {
     : releasesQuery.isSuccess && !release
       ? "No releases available."
       : null;
+  useEffect(() => track("app_start"), []);
+
+  // The wizard's own funnel: which step an operator reached, and where the
+  // ones who never flash stop. Keyed on the step, so a step is counted once
+  // however long they sit on it.
+  useEffect(() => track("step_view", { step: STEP_NAME[step] }), [step]);
+
+  // "No card detected" looks identical to "never tried" in a flash-only log.
+  // Keyed on the count, so the 2s poll does not report the same card forever.
+  useEffect(() => {
+    if (onStorageStep) track("devices_listed", { count: devices.length });
+  }, [onStorageStep, devices.length]);
+
+  useEffect(() => {
+    if (releaseError) track("releases_failed", { error: releaseError });
+  }, [releaseError]);
+
   useEffect(() => {
     const list = devicesQuery.data ?? [];
     setSelectedDisk((prev) =>
@@ -318,6 +344,13 @@ function App() {
     flashMutation.mutate(vars);
   }
 
+  function answerTelemetry(share: boolean) {
+    update({ telemetry: share });
+    // Opting in is itself the first event, and the only one that can confirm a
+    // build's sink works at all.
+    if (share) track("consent", { shared: true });
+  }
+
   function handleCancel() {
     setCancelled(true);
     void cancelFlash().catch(() => undefined);
@@ -344,6 +377,10 @@ function App() {
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-background text-foreground">
+      <ConsentBanner
+        asked={settings.telemetry !== null}
+        onAnswer={answerTelemetry}
+      />
       <UpdateBanner suspended={writing} />
 
       <div className="flex min-h-0 flex-1 overflow-hidden">
@@ -352,6 +389,8 @@ function App() {
           highestReached={step}
           writing={writing}
           onSelect={(s) => setStep(s)}
+          telemetry={settings.telemetry ?? false}
+          onTelemetry={answerTelemetry}
         />
 
         <main className="flex min-h-0 min-w-0 flex-1 flex-col">

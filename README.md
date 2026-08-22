@@ -105,9 +105,8 @@ release-script units on Linux.
 
 ## Diagnostics
 
-Each flash writes exactly one wide event (a JSON object per line) to a local log —
-nothing is uploaded, ever. The **Show diagnostics** button on a failed flash
-reveals the file:
+Every run writes wide events (a JSON object per line) to a local log. The
+**Show diagnostics** button on a failed flash reveals the file:
 
 | OS | Path |
 |----|------|
@@ -115,7 +114,7 @@ reveals the file:
 | Linux | `$XDG_DATA_HOME/one.aircast.flasher/logs/events.jsonl` (usually `~/.local/share/…`) |
 | Windows | `%LOCALAPPDATA%\one.aircast.flasher\logs\events.jsonl` |
 
-One line per download and per flash, correlated by `job_id`:
+One line per event. `download` and `flash` are correlated by `job_id`:
 
 ```json
 {"event":"flash","job_id":"5f2…","app_version":"0.1.1","os":"macos","arch":"aarch64",
@@ -131,6 +130,35 @@ SSID, the hostname, the WiFi passphrase, the pre-auth key, the device password,
 the SSH key, or the control-server URL — `describe_config` maps configuration to
 booleans and fixed labels, so a secret cannot reach the log by construction
 (`telemetry.rs` tests assert this). The log rolls over at 2 MiB.
+
+The events cover the whole run, not just the destructive part — a flash-only log
+cannot tell "no card was ever detected" from "never tried":
+
+| Event | Answers |
+|---|---|
+| `app_start` | how many installs run each version |
+| `consent` | the opt-in itself, and whether a build's sink works at all |
+| `step_view` | which step operators reach, and where the ones who never flash stop |
+| `devices_listed` | whether a card was detected at all, and how many |
+| `releases_failed` | the catalog is unreachable, before anyone reports it |
+| `update_check` | whether an update was offered — a stale fleet looks identical to a broken endpoint without it |
+| `update_install` | updates that fail to apply |
+| `download` / `flash` | the existing wide events, with `job_id`, phases and `diag` |
+| `crash` | panics, with message and location |
+
+### Shipping them
+
+Opt-in, off until the operator answers the consent prompt (and reversible from
+**Diagnostics on/off** in the sidebar). Turning it on mints a random per-install
+id; turning it off drops it. Until then, and in any build without a
+`POSTHOG_KEY`, events only ever reach the local file.
+
+Sink is PostHog (`/batch/`, project key baked in at build time from the
+`POSTHOG_KEY` secret). The log is the queue: every send starts at a byte offset
+kept in `events.sent` beside the log and advances it only on a `2xx`, so a run
+that happened offline or died mid-flush ships on the next launch, and nothing is
+sent twice. Events written *before* consent are never sent — opting in marks the
+existing log as already shipped.
 
 ## TODO before shipping
 

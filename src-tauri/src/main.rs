@@ -33,6 +33,14 @@ async fn main() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .manage(FlasherState::new())
+        .setup(|app| {
+            let handle = app.handle().clone();
+            telemetry::record_panics(handle.clone());
+            // A run that ended offline, or died before its last event shipped,
+            // leaves the tail of the log unsent. This is where it catches up.
+            telemetry::flush(&handle);
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             flasher::list_releases,
             flasher::list_block_devices,
@@ -45,6 +53,7 @@ async fn main() {
             flasher::reveal_event_log,
             settings::read_settings,
             settings::write_settings,
+            telemetry::track,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

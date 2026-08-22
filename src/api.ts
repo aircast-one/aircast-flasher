@@ -38,6 +38,15 @@ export function listBlockDevices(): Promise<BlockDevice[]> {
   return invoke<BlockDevice[]>("list_block_devices");
 }
 
+// Diagnostics must never be able to break the wizard, and outside a Tauri
+// window (unit tests, a browser dev server) there is no command to call at all.
+export function track(
+  event: string,
+  props: Record<string, unknown> = {},
+): void {
+  void invoke("track", { event, props }).catch(() => undefined);
+}
+
 export function downloadImage(args: {
   jobId: string;
   downloadUrl: string;

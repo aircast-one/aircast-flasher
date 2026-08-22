@@ -244,7 +244,7 @@ fn filename_from_url(url_str: &str) -> String {
 /// Hex from the OS CSPRNG, for temp names an attacker must not be able to
 /// predict. The PID is guessable and reused; these paths are read by a root
 /// process, so guessable is the whole problem.
-fn randbits() -> String {
+pub fn randbits() -> String {
     let mut bytes = [0u8; 8];
     getrandom::fill(&mut bytes).expect("OS randomness");
     bytes.iter().map(|b| format!("{b:02x}")).collect()

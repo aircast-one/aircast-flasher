@@ -96,6 +96,9 @@ export interface Settings {
   controlServer: string;
   authorizedKey: string | null;
   noWifi: boolean;
+  /** `null` = never asked, which is what raises the consent prompt once. */
+  telemetry: boolean | null;
+  installId: string | null;
 }
 
 export interface SshPublicKey {

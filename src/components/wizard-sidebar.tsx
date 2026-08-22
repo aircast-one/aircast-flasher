@@ -20,11 +20,15 @@ export function WizardSidebar({
   highestReached,
   writing,
   onSelect,
+  telemetry,
+  onTelemetry,
 }: {
   current: WizardStep;
   highestReached: WizardStep;
   writing: boolean;
   onSelect: (step: WizardStep) => void;
+  telemetry: boolean | null;
+  onTelemetry: (share: boolean) => void;
 }) {
   return (
     <aside className="flex w-[220px] shrink-0 flex-col border-r border-sidebar-border bg-sidebar">
@@ -86,12 +90,21 @@ export function WizardSidebar({
         })}
       </nav>
 
-      <div className="mt-auto px-5 py-4 text-xs text-muted-foreground/60">
-        {writing
-          ? "Writing in progress"
-          : highestReached >= STEP.write
-            ? "Ready to write"
-            : "Configure your device"}
+      <div className="mt-auto flex flex-col gap-1.5 px-5 py-4 text-xs text-muted-foreground/60">
+        <span>
+          {writing
+            ? "Writing in progress"
+            : highestReached >= STEP.write
+              ? "Ready to write"
+              : "Configure your device"}
+        </span>
+        <button
+          type="button"
+          onClick={() => onTelemetry(!telemetry)}
+          className="self-start rounded-sm text-left underline-offset-2 outline-none hover:text-sidebar-foreground hover:underline focus-visible:ring-2 focus-visible:ring-ring/50"
+        >
+          Diagnostics {telemetry ? "on" : "off"}
+        </button>
       </div>
     </aside>
   );

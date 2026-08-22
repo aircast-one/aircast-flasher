@@ -23,6 +23,12 @@ pub struct Settings {
     /// purpose. Persisted like the rest, so a fleet of Ethernet boards does not
     /// re-raise "enter a network name" on every launch.
     pub no_wifi: bool,
+    /// `None` = never asked, which is what raises the consent prompt exactly
+    /// once. Diagnostics leave the machine only on `Some(true)`.
+    pub telemetry: Option<bool>,
+    /// Random per-install id, minted when diagnostics are turned on and never
+    /// derived from anything about the machine or its operator.
+    pub install_id: Option<String>,
 }
 
 fn settings_path(app: &AppHandle) -> Result<PathBuf, String> {
@@ -80,6 +86,32 @@ fn write_owner_only(path: &Path, contents: &str) -> Result<(), String> {
         .map_err(|e| format!("Failed to write settings: {e}"))
 }
 
+/// Turning diagnostics on mints the install id; turning them off drops it, so
+/// an opt-out leaves nothing behind to correlate a later opt-in against.
+fn with_install_id(settings: Settings) -> Settings {
+    match settings.telemetry {
+        Some(true) => Settings {
+            install_id: settings
+                .install_id
+                .filter(|id| !id.is_empty())
+                .or_else(|| Some(crate::flasher::randbits())),
+            ..settings
+        },
+        _ => Settings {
+            install_id: None,
+            ..settings
+        },
+    }
+}
+
+/// The id events are attributed to, or `None` when the operator has not opted
+/// in — the single gate every shipped event passes through.
+pub fn telemetry_id(app: &AppHandle) -> Option<String> {
+    let settings = load_from(&settings_path(app).ok()?);
+    settings.telemetry.unwrap_or(false).then_some(())?;
+    settings.install_id.filter(|id| !id.is_empty())
+}
+
 #[tauri::command]
 pub fn read_settings(app_handle: AppHandle) -> Result<Settings, String> {
     Ok(load_from(&settings_path(&app_handle)?))
@@ -87,7 +119,12 @@ pub fn read_settings(app_handle: AppHandle) -> Result<Settings, String> {
 
 #[tauri::command]
 pub fn write_settings(app_handle: AppHandle, settings: Settings) -> Result<(), String> {
-    save_to(&settings_path(&app_handle)?, &settings)
+    let path = settings_path(&app_handle)?;
+    let next = with_install_id(settings);
+    if next.install_id.is_some() && load_from(&path).install_id.is_none() {
+        crate::telemetry::mark_all_sent(&app_handle);
+    }
+    save_to(&path, &next)
 }
 
 #[cfg(test)]
@@ -109,6 +146,8 @@ mod tests {
             control_server: "https://hs.example.com".into(),
             authorized_key: Some("ssh-ed25519 AAAA pavliha@mac".into()),
             no_wifi: false,
+            telemetry: None,
+            install_id: None,
         }
     }
 
@@ -165,6 +204,44 @@ mod tests {
             let mode = std::fs::metadata(&path).expect("stat").permissions().mode();
             assert_eq!(mode & 0o777, 0o600, "settings must be owner-only");
         }
+    }
+
+    #[test]
+    fn opting_in_mints_an_install_id_and_keeps_it_across_saves() {
+        let opted_in = with_install_id(Settings {
+            telemetry: Some(true),
+            ..sample()
+        });
+        let id = opted_in.install_id.clone().expect("id minted on opt-in");
+        assert!(!id.is_empty());
+        assert_eq!(with_install_id(opted_in).install_id, Some(id));
+    }
+
+    #[test]
+    fn opting_out_drops_the_install_id() {
+        let opted_in = with_install_id(Settings {
+            telemetry: Some(true),
+            ..sample()
+        });
+        for answer in [Some(false), None] {
+            let settings = with_install_id(Settings {
+                telemetry: answer,
+                ..opted_in.clone()
+            });
+            assert_eq!(settings.install_id, None, "answer {answer:?} kept an id");
+        }
+    }
+
+    #[test]
+    fn two_installs_do_not_share_an_id() {
+        let mint = || {
+            with_install_id(Settings {
+                telemetry: Some(true),
+                ..Settings::default()
+            })
+            .install_id
+        };
+        assert_ne!(mint(), mint());
     }
 
     #[test]
