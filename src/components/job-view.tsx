@@ -1,7 +1,11 @@
+import { useEffect, useState } from "react";
 import {
+  Check,
   CheckCircle2,
+  Copy,
   HardDriveDownload,
   Loader2,
+  OctagonX,
   ShieldCheck,
   XCircle,
   type LucideIcon,
@@ -89,6 +93,40 @@ function IconBadge({
   );
 }
 
+const COPIED_FEEDBACK_MS = 2000;
+
+function CopyableHostname({ hostname }: { hostname: string }) {
+  const [copied, setCopied] = useState(false);
+  const address = `${hostname}.local`;
+
+  useEffect(() => {
+    if (!copied) return;
+    const timer = setTimeout(() => setCopied(false), COPIED_FEEDBACK_MS);
+    return () => clearTimeout(timer);
+  }, [copied]);
+
+  return (
+    <button
+      type="button"
+      className="flex items-center gap-2 self-start font-mono text-base break-all hover:text-primary"
+      onClick={() => {
+        navigator.clipboard
+          ?.writeText(address)
+          .then(() => setCopied(true))
+          .catch(() => setCopied(false));
+      }}
+      aria-label={`Copy ${address}`}
+    >
+      {address}
+      {copied ? (
+        <Check className="size-4 shrink-0 text-green-500 dark:text-green-400" />
+      ) : (
+        <Copy className="size-4 shrink-0 text-muted-foreground" />
+      )}
+    </button>
+  );
+}
+
 function ProgressPanel({
   icon,
   title,
@@ -151,18 +189,24 @@ export function JobView({
   hostname,
   remoteEnrolled,
   success,
+  cancelled,
   error,
   progress,
   onCancel,
+  onRetry,
+  onStartOver,
   onReset,
   onRevealLog,
 }: {
   hostname: string;
   remoteEnrolled: boolean;
   success: boolean;
+  cancelled: boolean;
   error: string | null;
   progress: FlashProgressState;
   onCancel: () => void;
+  onRetry: (() => void) | null;
+  onStartOver: () => void;
   onReset: () => void;
   onRevealLog: () => void;
 }) {
@@ -181,25 +225,64 @@ export function JobView({
           <span className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
             Find it at
           </span>
-          <button
-            type="button"
-            className="font-mono text-base break-all hover:text-primary"
-            onClick={() =>
-              void navigator.clipboard?.writeText(`${hostname}.local`)
-            }
-            title="Copy"
-          >
-            {hostname}.local
-          </button>
+          <CopyableHostname hostname={hostname} />
           {remoteEnrolled ? (
             <span className="text-xs text-muted-foreground">
               It also joins your private network on first boot.
             </span>
           ) : null}
         </div>
+        <div className="w-full text-left text-sm text-muted-foreground">
+          <h3 className="mb-1 font-medium text-foreground">What happens next</h3>
+          <ol className="list-decimal space-y-1 pl-5">
+            <li>Put the card in the device and power it on.</li>
+            <li>
+              First boot takes a few minutes — it expands the filesystem, joins
+              the network, then reboots once.
+            </li>
+            <li>
+              If it never appears, power-cycle it and check the WiFi name and
+              password you entered.
+            </li>
+          </ol>
+        </div>
         <Button type="button" size="lg" className="min-w-45" onClick={onReset}>
           Flash another
         </Button>
+      </Pane>
+    );
+  }
+
+  if (cancelled) {
+    return (
+      <Pane heading="Write">
+        <IconBadge icon={OctagonX} tone="destructive" />
+        <div className="flex flex-col gap-1.5">
+          <h2 className="text-xl font-semibold">Stopped</h2>
+          <p className="text-sm text-balance text-muted-foreground">
+            You cancelled the write. The card is partly written and won't boot —
+            flash it again before using it.
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button
+            type="button"
+            size="lg"
+            className="min-w-45"
+            onClick={onRetry ?? undefined}
+            disabled={onRetry === null}
+          >
+            Write again
+          </Button>
+          <Button
+            type="button"
+            size="lg"
+            variant="secondary"
+            onClick={onStartOver}
+          >
+            Change settings
+          </Button>
+        </div>
       </Pane>
     );
   }
@@ -225,7 +308,8 @@ export function JobView({
             type="button"
             size="lg"
             className="min-w-45"
-            onClick={onReset}
+            onClick={onRetry ?? undefined}
+            disabled={onRetry === null}
           >
             Try again
           </Button>
@@ -233,8 +317,11 @@ export function JobView({
             type="button"
             size="lg"
             variant="secondary"
-            onClick={onRevealLog}
+            onClick={onStartOver}
           >
+            Change settings
+          </Button>
+          <Button type="button" size="lg" variant="ghost" onClick={onRevealLog}>
             Show diagnostics
           </Button>
         </div>

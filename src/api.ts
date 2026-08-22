@@ -16,7 +16,6 @@ import type {
   FlashProgress,
   InitFormat,
   ListReleasesResponse,
-  Release,
   Settings,
   SshPublicKey,
   TailscaleConfig,
@@ -27,13 +26,12 @@ import type {
 const DOWNLOAD_PROGRESS_EVENT = "flasher:download-progress";
 const FLASH_PROGRESS_EVENT = "flasher:flash-progress";
 
-export async function listReleases(channel?: Channel): Promise<Release[]> {
+export function listReleases(channel?: Channel): Promise<ListReleasesResponse> {
   // Pass null (not "stable") when no channel is chosen, so the backend runs its
   // stable → staging → development fallback instead of pinning to empty stable.
-  const response = await invoke<ListReleasesResponse>("list_releases", {
+  return invoke<ListReleasesResponse>("list_releases", {
     channel: channel ?? null,
   });
-  return response.releases;
 }
 
 export function listBlockDevices(): Promise<BlockDevice[]> {

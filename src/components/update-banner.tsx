@@ -4,7 +4,7 @@ import { AlertTriangle, Download, Loader2 } from "lucide-react";
 import { checkForUpdate, installUpdate } from "@/api";
 import { Button } from "@/components/ui/button";
 
-export function UpdateBanner() {
+export function UpdateBanner({ suspended }: { suspended: boolean }) {
   const [update, setUpdate] = useState<Update | null>(null);
   const [installing, setInstalling] = useState(false);
   const [dismissed, setDismissed] = useState(false);
@@ -22,7 +22,7 @@ export function UpdateBanner() {
     };
   }, []);
 
-  if (!update || dismissed) return null;
+  if (!update || dismissed || (suspended && !installing)) return null;
 
   async function handleUpdate() {
     if (!update) return;
@@ -60,7 +60,12 @@ export function UpdateBanner() {
           <span className="font-medium text-foreground">v{update.version}</span>
         </span>
       )}
-      <Button size="sm" onClick={handleUpdate} disabled={installing}>
+      <Button
+        size="sm"
+        variant="secondary"
+        onClick={handleUpdate}
+        disabled={installing}
+      >
         {installing ? <Loader2 className="animate-spin" /> : <Download />}
         {installing
           ? percent === null

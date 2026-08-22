@@ -1,20 +1,20 @@
 import { AlertTriangle, HardDrive } from "lucide-react";
 
-import { Alert, AlertTitle } from "@/components/ui/alert";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { SelectableCard } from "@/components/selectable-card";
 import { StepShell } from "@/components/step-shell";
+import { cn } from "@/lib/utils";
+import type { SummaryItem } from "@/components/wizard-summary";
 import type { BlockDevice } from "@/types";
 
-export interface SummaryItem {
-  label: string;
-  value: string;
-}
+export type { SummaryItem };
 
 export function StepStorage({
   devices,
   devicesLoading,
   selectedDisk,
   onSelectDisk,
+  requiredCardBytes,
   summary,
   canProceed,
   onBack,
@@ -24,12 +24,15 @@ export function StepStorage({
   devicesLoading: boolean;
   selectedDisk: string;
   onSelectDisk: (path: string) => void;
+  requiredCardBytes: number | undefined;
   summary: SummaryItem[];
   canProceed: boolean;
   onBack: () => void;
   onFlash: () => void;
 }) {
   const selected = devices.find((d) => d.path === selectedDisk) ?? null;
+  const tooSmall = (d: BlockDevice) =>
+    requiredCardBytes !== undefined && d.size > 0 && d.size < requiredCardBytes;
 
   return (
     <StepShell
@@ -56,11 +59,17 @@ export function StepStorage({
                 icon={<HardDrive />}
                 title={d.name}
                 selected={selectedDisk === d.path}
+                disabled={tooSmall(d)}
                 onClick={() => onSelectDisk(d.path)}
               >
                 <span className="text-sm text-muted-foreground">
                   {d.size_human}
                 </span>
+                {tooSmall(d) ? (
+                  <span className="text-xs text-destructive">
+                    Too small for this image
+                  </span>
+                ) : null}
                 {d.mounted && d.mount_points.length > 0 ? (
                   <span className="text-xs text-muted-foreground">
                     Mounted as {d.mount_points.join(", ")}
@@ -68,6 +77,11 @@ export function StepStorage({
                 ) : null}
               </SelectableCard>
             ))}
+            {selected === null ? (
+              <p className="text-sm text-muted-foreground">
+                Pick the card to write to.
+              </p>
+            ) : null}
           </div>
         )}
 
@@ -88,7 +102,14 @@ export function StepStorage({
                 className="flex items-baseline justify-between gap-4 text-sm"
               >
                 <dt className="shrink-0 text-muted-foreground">{item.label}</dt>
-                <dd className="text-right break-all">{item.value}</dd>
+                <dd
+                  className={cn(
+                    "text-right break-all",
+                    item.warn && "font-medium text-destructive",
+                  )}
+                >
+                  {item.value}
+                </dd>
               </div>
             ))}
           </dl>
@@ -98,8 +119,12 @@ export function StepStorage({
           <Alert variant="destructive">
             <AlertTriangle />
             <AlertTitle>
-              All data on the selected card will be erased.
+              Erase {selected.name} · {selected.size_human}?
             </AlertTitle>
+            <AlertDescription>
+              Everything on {selected.path} is overwritten. This cannot be
+              undone.
+            </AlertDescription>
           </Alert>
         ) : null}
       </div>

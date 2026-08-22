@@ -140,9 +140,16 @@ describe("flasher wizard", () => {
     ]);
   });
 
-  it("arrives with a hostname already filled in, so Next is never dead", async () => {
+  it("arrives with a hostname already filled in", async () => {
     await onNetworkStep();
     await expect($("#hostname")).not.toHaveValue("");
+  });
+
+  it("unblocks Next once the network is named", async () => {
+    await onNetworkStep();
+    await $("#ssid").clearValue();
+    await expect($("button=Next")).toBeDisabled();
+    await $("#ssid").setValue("test-net");
     await expect($("button=Next")).toBeEnabled();
   });
 
@@ -171,13 +178,23 @@ describe("flasher wizard", () => {
     await expect($("button=Next")).toBeDisabled();
   });
 
-  it("refuses a WiFi password with no network name", async () => {
+  it("refuses to write a card with no network at all", async () => {
     await knownGoodNetworkState();
     await $("#ssid").clearValue();
-    await $("#password").setValue("hunter2hunter2");
-    await expect($("#ssid-error")).toHaveText(
-      expect.stringContaining("Add the network name"),
+    await expect($("#ssid-help")).toHaveText(
+      expect.stringContaining("never comes online"),
     );
+    await expect($("button=Next")).toBeDisabled();
+  });
+
+  it("lets a wired device skip WiFi on purpose", async () => {
+    await knownGoodNetworkState();
+    await $("#ssid").clearValue();
+    await $("button*=Ethernet or cellular only").click();
+    await expect($("button=Next")).toBeEnabled();
+
+    await $("button*=Set up WiFi instead").click();
+    await expect($("#ssid")).toBeDisplayed();
     await expect($("button=Next")).toBeDisabled();
   });
 
@@ -198,11 +215,16 @@ describe("flasher wizard", () => {
 
   it("never prefills the stock device password", async () => {
     await knownGoodNetworkState();
-    await $("button*=Device access").click();
     await $("button=Password").click();
     await expect($("#device-password")).toHaveValue("");
     await expect($("button=Next")).toBeEnabled();
     await $("button=SSH key").click();
+  });
+
+  it("shows the login the device will ship with, without being asked", async () => {
+    await onNetworkStep();
+    await expect($("button=SSH key")).toBeDisplayed();
+    await expect($("button=Disabled")).toBeDisplayed();
   });
 
   it("persists settings to disk, on every platform", async () => {

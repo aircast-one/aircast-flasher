@@ -20,8 +20,8 @@ export function needsAuthKey(controlServer: string, authKey: string): boolean {
   return controlServer.trim() !== "" && authKey.trim() === "";
 }
 
-export function needsSsid(ssid: string, password: string): boolean {
-  return password !== "" && ssid.trim() === "";
+export function needsSsid(noWifi: boolean, ssid: string): boolean {
+  return !noWifi && ssid.trim() === "";
 }
 
 const SSH_KEY_PATTERN = /^[a-z][a-z0-9@.-]*\s+[A-Za-z0-9+/]+=*(\s.*)?$/i;

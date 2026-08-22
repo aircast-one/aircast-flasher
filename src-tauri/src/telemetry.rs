@@ -117,6 +117,13 @@ pub struct DownloadEvent {
     pub cached: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mbps: Option<f64>,
+    /// Reconnects the transfer needed, how many of those threw away progress
+    /// because the server would not resume, and how many bytes resuming saved.
+    /// A download that succeeded after eight reconnects is not the same event
+    /// as a clean one, and only these tell them apart.
+    pub retries: usize,
+    pub restarts: usize,
+    pub resumed_bytes: u64,
 }
 
 #[derive(Serialize)]
@@ -140,6 +147,10 @@ pub struct FlashEvent {
     pub customize_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub write_mbps: Option<f64>,
+    /// The helper's timestamped diagnostic lines, kept on failure so an
+    /// events.jsonl alone pinpoints how far the flash got and on what device.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub diag: Option<Vec<String>>,
 }
 
 /// Stage transitions observed on the helper's progress stream, in order. Phase
@@ -149,6 +160,7 @@ pub struct FlashEvent {
 pub struct PhaseLog {
     transitions: Vec<(&'static str, Instant)>,
     pub bytes: u64,
+    pub diag: Vec<String>,
 }
 
 impl PhaseLog {
@@ -374,6 +386,7 @@ mod tests {
             verify_ms: None,
             customize_ms: None,
             write_mbps: Some(54.3),
+            diag: Some(vec!["+12ms opening device \\\\.\\PhysicalDrive2".into()]),
         };
 
         let v: serde_json::Value =

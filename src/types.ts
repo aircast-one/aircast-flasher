@@ -5,7 +5,10 @@ export type InitFormat = "cloud-init" | "first-run";
 export interface ImageInfo {
   filename: string;
   extension: string;
+  /** Size of the download. Never compare this against a card's capacity. */
   size: number;
+  /** Size once unpacked — what the card must hold. Absent on older releases. */
+  uncompressed_size: number | null;
   download_url: string;
   checksum_url: string;
 }
@@ -19,6 +22,8 @@ export interface Release {
 
 export interface ListReleasesResponse {
   releases: Release[];
+  /** Fallback card requirement for releases without an uncompressed_size. */
+  min_card_bytes: number;
 }
 
 export interface BlockDevice {
@@ -89,7 +94,8 @@ export interface Settings {
   hostname: string | null;
   wifiPassword: string;
   controlServer: string;
-  authorizedKey: string;
+  authorizedKey: string | null;
+  noWifi: boolean;
 }
 
 export interface SshPublicKey {

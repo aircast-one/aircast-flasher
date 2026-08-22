@@ -32,6 +32,7 @@ pub fn run_flash_helper() -> ! {
     let image = get("--image");
     let progress_file = get("--progress-file");
     let provision_file = get("--provision-file");
+    let ready_file = get("--image-ready-file");
     let no_verify = args.iter().any(|a| a == "--no-verify");
 
     let (device, image, progress_file, provision_file) =
@@ -46,6 +47,7 @@ pub fn run_flash_helper() -> ! {
         };
 
     // Append a single JSON line to the progress file AND stdout (best-effort).
+    let started = std::time::Instant::now();
     let append = move |line: &str| {
         if let Ok(mut f) = std::fs::OpenOptions::new()
             .create(true)
@@ -56,6 +58,15 @@ pub fn run_flash_helper() -> ! {
         }
         println!("{line}");
         let _ = std::io::stdout().flush();
+    };
+    let diag = {
+        let append = append.clone();
+        move |msg: &str| {
+            let line = serde_json::json!({
+                "diag": format!("+{}ms {msg}", started.elapsed().as_millis()),
+            });
+            append(&line.to_string());
+        }
     };
 
     // The provision blob carries secrets (device password, Tailscale key) so it
@@ -75,7 +86,15 @@ pub fn run_flash_helper() -> ! {
         }
     };
 
-    match flash(&device, &image, &provision_b64, no_verify, &append) {
+    match flash(
+        &device,
+        &image,
+        ready_file.as_deref(),
+        &provision_b64,
+        no_verify,
+        &append,
+        &diag,
+    ) {
         Ok(()) => {
             append("{\"stage\":\"done\"}");
             std::process::exit(0);
@@ -88,26 +107,22 @@ pub fn run_flash_helper() -> ! {
     }
 }
 
-/// Decode config, open device + image, run the engine. Returns the first error.
+/// Decode config, open + probe the device FIRST (fail fast, before the main
+/// process finishes decompressing), then wait for the image and run the engine.
 fn flash(
     device: &str,
     image: &str,
+    ready_file: Option<&str>,
     provision_b64: &str,
     no_verify: bool,
     append: &dyn Fn(&str),
+    diag: &dyn Fn(&str),
 ) -> Result<(), String> {
     let json = base64::engine::general_purpose::STANDARD
         .decode(provision_b64)
         .map_err(|e| format!("Failed to decode provision config: {e}"))?;
     let cfg: ProvisionConfig = serde_json::from_slice(&json)
         .map_err(|e| format!("Failed to parse provision config: {e}"))?;
-
-    let mut image_file =
-        std::fs::File::open(image).map_err(|e| format!("Failed to open image: {e}"))?;
-    let image_len = image_file
-        .metadata()
-        .map(|m| m.len())
-        .map_err(|e| format!("Failed to stat image: {e}"))?;
 
     let mut progress = |stage: FlashStage, done: u64, total: u64| {
         let stage = match stage {
@@ -120,14 +135,13 @@ fn flash(
         ));
     };
 
-    let params = FlashParams {
-        image_len,
-        verify: !no_verify,
-    };
-
     // Open the raw device for this OS, wrap in AlignedDevice, run the engine,
     // then eject/flush. The device handle is held open the whole time.
-    let result = open_and_run(device, &mut image_file, &params, &cfg, &mut progress);
+    append("{\"stage\":\"device\",\"done\":0,\"total\":0}");
+    diag(&format!("opening device {device}"));
+    let result = open_and_run(
+        device, image, ready_file, no_verify, &cfg, &mut progress, diag,
+    );
 
     // Best-effort eject/finalize regardless of outcome.
     eject(device);
@@ -135,36 +149,112 @@ fn flash(
     result
 }
 
-/// Per-OS: open the raw device, wrap in AlignedDevice, drive the engine.
+/// Per-OS: open the raw device, wrap in AlignedDevice, drive the flash.
 fn open_and_run(
     device: &str,
-    image: &mut dyn std::io::Read,
-    params: &FlashParams,
+    image: &str,
+    ready_file: Option<&str>,
+    no_verify: bool,
     cfg: &ProvisionConfig,
     progress: &mut dyn FnMut(FlashStage, u64, u64),
+    diag: &dyn Fn(&str),
 ) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
         let raw = open_device_macos(device)?;
         let mut dev = AlignedDevice::new(raw);
-        engine::flash(&mut dev, image, params, cfg, progress)
+        probe_wait_and_flash(&mut dev, image, ready_file, no_verify, cfg, progress, diag)
     }
     #[cfg(target_os = "linux")]
     {
         let raw = open_device_linux(device)?;
         let mut dev = AlignedDevice::new(raw);
-        engine::flash(&mut dev, image, params, cfg, progress)
+        probe_wait_and_flash(&mut dev, image, ready_file, no_verify, cfg, progress, diag)
     }
     #[cfg(target_os = "windows")]
     {
         let raw = flasher_core::win::open_device(device)?;
         let mut dev = AlignedDevice::new(raw);
-        engine::flash(&mut dev, image, params, cfg, progress)
+        probe_wait_and_flash(&mut dev, image, ready_file, no_verify, cfg, progress, diag)
     }
     #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
     {
-        let _ = (device, image, params, cfg, progress);
+        let _ = (device, image, ready_file, no_verify, cfg, progress, diag);
         Err("Flashing is not supported on this platform".to_string())
+    }
+}
+
+/// Give up waiting for the decompressed image after this long. A ~3 GB xz
+/// unpacks in well under a minute on any machine that can run this app, so
+/// overshooting it means the main process died — and while we wait, a root
+/// process is holding the card's raw device open. Minutes, not half an hour.
+const IMAGE_WAIT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5 * 60);
+
+/// How often [`wait_for_image_ready`] re-reads the handshake file.
+const IMAGE_WAIT_POLL: std::time::Duration = std::time::Duration::from_millis(200);
+
+/// Probe the opened device (seek to its end and back — the exact operation that
+/// used to fail 50 seconds in), wait for the decompressed image if a ready-file
+/// handshake was requested, then run the engine.
+fn probe_wait_and_flash(
+    dev: &mut dyn engine::BlockDevice,
+    image: &str,
+    ready_file: Option<&str>,
+    no_verify: bool,
+    cfg: &ProvisionConfig,
+    progress: &mut dyn FnMut(FlashStage, u64, u64),
+    diag: &dyn Fn(&str),
+) -> Result<(), String> {
+    use std::io::SeekFrom;
+
+    let size = dev
+        .seek(SeekFrom::End(0))
+        .map_err(|e| format!("device probe: seek to end of device: {e}"))?;
+    dev.seek(SeekFrom::Start(0))
+        .map_err(|e| format!("device probe: seek to start of device: {e}"))?;
+    diag(&format!("device open, size {size} bytes"));
+
+    if let Some(rf) = ready_file {
+        diag("waiting for image (decompressing in main process)");
+        wait_for_image_ready(rf, IMAGE_WAIT_TIMEOUT)?;
+        diag("image ready");
+    }
+
+    let mut image_file =
+        std::fs::File::open(image).map_err(|e| format!("Failed to open image: {e}"))?;
+    let image_len = image_file
+        .metadata()
+        .map(|m| m.len())
+        .map_err(|e| format!("Failed to stat image: {e}"))?;
+    diag(&format!("image open, {image_len} bytes"));
+
+    let params = FlashParams {
+        image_len,
+        verify: !no_verify,
+    };
+    engine::flash(dev, &mut image_file, &params, cfg, progress)
+}
+
+/// Poll for the ready file the main process writes after decompression:
+/// contents "ok" → proceed, anything else → the decompress failed or was
+/// cancelled, so exit without touching the card further.
+fn wait_for_image_ready(ready_file: &str, timeout: std::time::Duration) -> Result<(), String> {
+    let started = std::time::Instant::now();
+    loop {
+        if let Ok(s) = std::fs::read_to_string(ready_file) {
+            let s = s.trim();
+            if !s.is_empty() {
+                return if s == "ok" {
+                    Ok(())
+                } else {
+                    Err("Cancelled before writing (image preparation aborted)".to_string())
+                };
+            }
+        }
+        if started.elapsed() > timeout {
+            return Err("Timed out waiting for the decompressed image".to_string());
+        }
+        std::thread::sleep(IMAGE_WAIT_POLL.min(timeout));
     }
 }
 
@@ -321,5 +411,46 @@ fn eject(device: &str) {
     {
         // Windows: the WinDevice Drop already unlocks/flushes; nothing to do.
         let _ = device;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp_path(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "aircast-helper-test-{name}-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir.join("ready.txt")
+    }
+
+    #[test]
+    fn ready_file_ok_lets_the_write_start() {
+        let p = temp_path("ok");
+        std::fs::write(&p, "ok\n").unwrap();
+        assert!(wait_for_image_ready(p.to_str().unwrap(), IMAGE_WAIT_TIMEOUT).is_ok());
+    }
+
+    #[test]
+    fn ready_file_abort_stops_the_write() {
+        let p = temp_path("abort");
+        std::fs::write(&p, "abort").unwrap();
+        let err = wait_for_image_ready(p.to_str().unwrap(), IMAGE_WAIT_TIMEOUT)
+            .expect_err("abort must not proceed to writing");
+        assert!(err.contains("image preparation aborted"), "got: {err}");
+    }
+
+    /// A missing or still-empty file means the main process is mid-decompress:
+    /// wait, then give up rather than hold the card's device open forever.
+    #[test]
+    fn missing_ready_file_times_out_instead_of_writing() {
+        let p = temp_path("timeout");
+        let err = wait_for_image_ready(p.to_str().unwrap(), std::time::Duration::ZERO)
+            .expect_err("a main process that never signals must not start a write");
+        assert!(err.contains("Timed out"), "got: {err}");
     }
 }

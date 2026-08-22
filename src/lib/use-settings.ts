@@ -10,7 +10,8 @@ const EMPTY: Settings = {
   hostname: null,
   wifiPassword: "",
   controlServer: "",
-  authorizedKey: "",
+  authorizedKey: null,
+  noWifi: false,
 };
 
 export function useSettings(): {

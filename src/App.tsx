@@ -25,6 +25,7 @@ import type {
 } from "@/types";
 import { errorMessage } from "@/lib/format";
 import { defaultHostname } from "@/components/default-hostname";
+import { nextHostname } from "@/components/next-hostname";
 import { randomHex } from "@/lib/random-id";
 import { buildSummary } from "@/components/wizard-summary";
 import { useSettings } from "@/lib/use-settings";
@@ -82,12 +83,16 @@ function App() {
   const setPassword = (wifiPassword: string) => update({ wifiPassword });
   const controlServer = settings.controlServer;
   const setControlServer = (controlServer: string) => update({ controlServer });
-  const sshKey = settings.authorizedKey;
   const setSshKey = (authorizedKey: string) => update({ authorizedKey });
   const setSsid = (ssid: string) => update({ ssid });
   const setHostname = (hostname: string) => update({ hostname });
 
+  const noWifi = settings.noWifi;
+  const setNoWifi = (value: boolean) => update({ noWifi: value });
+
   const [step, setStep] = useState<WizardStep>(STEP.os);
+  const [cancelled, setCancelled] = useState(false);
+  const [lastVars, setLastVars] = useState<FlashVars | null>(null);
 
   const [progress, setProgress] = useState<FlashProgressState>({
     phase: "idle",
@@ -126,7 +131,7 @@ function App() {
   const hostname = settings.hostname ?? DEFAULT_HOSTNAME;
 
   const devices: BlockDevice[] = devicesQuery.data ?? [];
-  const releases: Release[] = releasesQuery.data ?? [];
+  const releases: Release[] = releasesQuery.data?.releases ?? [];
   const release = useMemo(() => {
     const chosen = releases.find((r) => r.version === selectedVersion);
     return chosen ?? pickDefaultRelease(releases);
@@ -139,7 +144,11 @@ function App() {
   useEffect(() => {
     const list = devicesQuery.data ?? [];
     setSelectedDisk((prev) =>
-      list.some((d) => d.path === prev) ? prev : (list[0]?.path ?? ""),
+      list.some((d) => d.path === prev)
+        ? prev
+        : list.length === 1
+          ? list[0].path
+          : "",
     );
   }, [devicesQuery.data]);
   useEffect(() => {
@@ -215,10 +224,30 @@ function App() {
 
   const sourceReady =
     sourceKind === "aircast" ? release !== null : localPath !== null;
-  const canProceed = sourceReady && selectedDisk !== "";
+  // The card has to hold the *decompressed* image, which is several times the
+  // download. Releases do not publish that size yet, so the backend hands us a
+  // floor big enough for a real image (and the exact check still runs against
+  // the decompressed file before anything is written).
+  const requiredCardBytes =
+    sourceKind === "aircast" && release !== null
+      ? (release.image.uncompressed_size ?? releasesQuery.data?.min_card_bytes)
+      : undefined;
+  const selectedDevice = devices.find((d) => d.path === selectedDisk) ?? null;
+  const cardTooSmall =
+    requiredCardBytes !== undefined &&
+    selectedDevice !== null &&
+    selectedDevice.size > 0 &&
+    selectedDevice.size < requiredCardBytes;
+  const canProceed = sourceReady && selectedDisk !== "" && !cardTooSmall;
 
   const remoteEnrolled = authKey.trim() !== "";
   const detectedKeys = sshKeysQuery.data ?? [];
+  // Prefill the one detected key, but never fight an operator who cleared it:
+  // null is "never set", "" is "cleared on purpose". Derived at render, so
+  // there is no effect and no state to keep in sync.
+  const sshKey =
+    settings.authorizedKey ??
+    (detectedKeys.length === 1 ? detectedKeys[0].contents : "");
 
   const imageLabel =
     sourceKind === "aircast"
@@ -231,6 +260,7 @@ function App() {
     image: imageLabel,
     hostname,
     ssid,
+    noWifi,
     authKey,
     controlServer,
     sshMode,
@@ -251,11 +281,12 @@ function App() {
     if (!canProceed) return;
 
     setStep(STEP.write);
+    setCancelled(false);
 
     const trimmedSsid = ssid.trim();
     const detectedCountry = (wifiQuery.data?.country ?? "US").toUpperCase();
     const wifi: WifiConfig | null =
-      trimmedSsid === ""
+      noWifi || trimmedSsid === ""
         ? null
         : {
             ssid: trimmedSsid,
@@ -272,7 +303,7 @@ function App() {
 
     const access = buildAccess(sshMode, sshKey, devicePassword);
 
-    flashMutation.mutate({
+    const vars: FlashVars = {
       jobId: randomHex(8),
       sourceKind,
       release,
@@ -282,24 +313,38 @@ function App() {
       hostname: trimmedHostname,
       tailscale,
       access,
-    });
+    };
+    setLastVars(vars);
+    flashMutation.mutate(vars);
   }
 
   function handleCancel() {
+    setCancelled(true);
     void cancelFlash().catch(() => undefined);
   }
 
-  function flashAnother() {
+  function retryFlash(vars: FlashVars) {
+    setCancelled(false);
+    flashMutation.mutate({ ...vars, jobId: randomHex(8) });
+  }
+
+  function startOver() {
     flashMutation.reset();
     setProgress({ phase: "idle" });
+    setCancelled(false);
     setStep(STEP.os);
     void queryClient.invalidateQueries({ queryKey: ["devices"] });
+  }
+
+  function flashAnother() {
+    setHostname(nextHostname(hostname));
+    startOver();
   }
   const writing = flashMutation.isPending;
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-background text-foreground">
-      <UpdateBanner />
+      <UpdateBanner suspended={writing} />
 
       <div className="flex min-h-0 flex-1 overflow-hidden">
         <WizardSidebar
@@ -337,6 +382,8 @@ function App() {
               onToggleShowPassword={() => setShowPassword((v) => !v)}
               hostname={hostname}
               onHostname={setHostname}
+              noWifi={noWifi}
+              onNoWifi={setNoWifi}
               remote={{
                 controlServer,
                 onControlServer: setControlServer,
@@ -362,6 +409,7 @@ function App() {
               devicesLoading={devicesQuery.isLoading}
               selectedDisk={selectedDisk}
               onSelectDisk={setSelectedDisk}
+              requiredCardBytes={requiredCardBytes}
               summary={summary}
               canProceed={canProceed}
               onBack={() => setStep(STEP.network)}
@@ -372,6 +420,7 @@ function App() {
               hostname={hostname.trim()}
               remoteEnrolled={remoteEnrolled}
               success={flashMutation.isSuccess}
+              cancelled={cancelled && flashMutation.isError}
               error={
                 flashMutation.isError
                   ? errorMessage(flashMutation.error, "Flashing failed.")
@@ -379,6 +428,8 @@ function App() {
               }
               progress={progress}
               onCancel={handleCancel}
+              onRetry={lastVars === null ? null : () => retryFlash(lastVars)}
+              onStartOver={startOver}
               onReset={flashAnother}
               onRevealLog={() => void revealEventLog()}
             />

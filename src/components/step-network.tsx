@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Eye, EyeOff, RefreshCw, Wifi } from "lucide-react";
+import { Cable, Eye, EyeOff, RefreshCw, Wifi } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -61,6 +61,8 @@ export function StepNetwork({
   onToggleShowPassword,
   hostname,
   onHostname,
+  noWifi,
+  onNoWifi,
   remote,
   access,
   onBack,
@@ -77,6 +79,8 @@ export function StepNetwork({
   onToggleShowPassword: () => void;
   hostname: string;
   onHostname: (v: string) => void;
+  noWifi: boolean;
+  onNoWifi: (v: boolean) => void;
   remote: RemoteAccessInputs;
   access: DeviceAccessInputs;
   onBack: () => void;
@@ -89,7 +93,7 @@ export function StepNetwork({
   const trimmedHostname = hostname.trim();
   const hostnameEmpty = trimmedHostname === "";
   const hostnameValid = isValidHostname(hostname);
-  const ssidMissing = needsSsid(ssid, password);
+  const ssidMissing = needsSsid(noWifi, ssid);
 
   const controlServerValid = isValidControlServer(remote.controlServer);
   const controlServerMissing = needsControlServer(
@@ -123,82 +127,117 @@ export function StepNetwork({
       }}
     >
       <div className="flex max-w-xl flex-col gap-5">
-        <div className="flex flex-col gap-2">
-          <Label htmlFor="ssid">WiFi network (SSID)</Label>
-          <div className="flex items-start gap-2">
-            <Combobox
-              items={knownNetworks}
-              inputValue={ssid}
-              onInputValueChange={(value) => onSsid(value)}
-            >
-              <ComboboxInput
-                id="ssid"
-                placeholder="Pick a known network or type one"
-                className="flex-1"
-                aria-invalid={ssidMissing}
-                aria-describedby="ssid-error"
-              />
-              <ComboboxContent>
-                <ComboboxEmpty>
-                  No matching network — it'll be saved as typed.
-                </ComboboxEmpty>
-                <ComboboxList>
-                  {(network: string) => (
-                    <ComboboxItem key={network} value={network}>
-                      <Wifi className="text-muted-foreground" />
-                      {network}
-                    </ComboboxItem>
-                  )}
-                </ComboboxList>
-              </ComboboxContent>
-            </Combobox>
-            <Button
-              type="button"
-              variant="secondary"
-              onClick={onRescan}
-              disabled={scanning}
-            >
-              <RefreshCw className={scanning ? "animate-spin" : undefined} />
-              {scanning ? "Scanning…" : "Rescan"}
-            </Button>
-          </div>
-          {ssidMissing && (
-            <p id="ssid-error" className="text-sm text-destructive">
-              Add the network name — a password on its own isn't written to the
-              card.
+        {noWifi ? (
+          <div className="flex flex-col gap-2 rounded-xl border border-border p-4">
+            <p className="text-sm font-medium">
+              No WiFi will be written to the card
             </p>
-          )}
-        </div>
-
-        <div className="flex flex-col gap-2">
-          <Label htmlFor="password">WiFi password</Label>
-          <div className="flex gap-2">
-            <Input
-              id="password"
-              type={showPassword ? "text" : "password"}
-              value={password}
-              onChange={(e) => onPassword(e.currentTarget.value)}
-              className="flex-1"
-            />
-            <Button
+            <p className="text-sm text-muted-foreground">
+              This device gets its network from Ethernet or a cellular modem.
+            </p>
+            <button
               type="button"
-              variant="secondary"
-              size="icon"
-              onClick={onToggleShowPassword}
-              aria-label={showPassword ? "Hide password" : "Show password"}
+              onClick={() => onNoWifi(false)}
+              className="flex items-center gap-1.5 self-start text-sm text-muted-foreground hover:text-foreground"
             >
-              {showPassword ? <EyeOff /> : <Eye />}
-            </Button>
+              <Wifi className="size-4" />
+              Set up WiFi instead
+            </button>
           </div>
-        </div>
+        ) : (
+          <>
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="ssid">WiFi network (SSID)</Label>
+              <div className="flex items-start gap-2">
+                <Combobox
+                  items={knownNetworks}
+                  inputValue={ssid}
+                  onInputValueChange={(value) => onSsid(value)}
+                >
+                  <ComboboxInput
+                    id="ssid"
+                    placeholder="Pick a known network or type one"
+                    className="flex-1"
+                    aria-invalid={ssidMissing}
+                    aria-describedby="ssid-help"
+                  />
+                  <ComboboxContent>
+                    <ComboboxEmpty>
+                      No matching network — it'll be saved as typed.
+                    </ComboboxEmpty>
+                    <ComboboxList>
+                      {(network: string) => (
+                        <ComboboxItem key={network} value={network}>
+                          <Wifi className="text-muted-foreground" />
+                          {network}
+                        </ComboboxItem>
+                      )}
+                    </ComboboxList>
+                  </ComboboxContent>
+                </Combobox>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={onRescan}
+                  disabled={scanning}
+                >
+                  <RefreshCw className={scanning ? "animate-spin" : undefined} />
+                  {scanning ? "Scanning…" : "Rescan"}
+                </Button>
+              </div>
+              <p
+                id="ssid-help"
+                className={
+                  ssidMissing
+                    ? "text-sm text-destructive"
+                    : "text-sm text-muted-foreground"
+                }
+              >
+                {ssidMissing
+                  ? "Enter the network the device joins on first boot — without it the device never comes online."
+                  : "The device joins this network on first boot."}
+              </p>
+            </div>
+
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="password">WiFi password (optional)</Label>
+              <div className="flex gap-2">
+                <Input
+                  id="password"
+                  type={showPassword ? "text" : "password"}
+                  value={password}
+                  onChange={(e) => onPassword(e.currentTarget.value)}
+                  className="flex-1"
+                  aria-describedby="password-help"
+                />
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="icon"
+                  onClick={onToggleShowPassword}
+                  aria-label={showPassword ? "Hide password" : "Show password"}
+                >
+                  {showPassword ? <EyeOff /> : <Eye />}
+                </Button>
+              </div>
+              <p id="password-help" className="text-sm text-muted-foreground">
+                Leave blank for an open network.
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => onNoWifi(true)}
+              className="flex items-center gap-1.5 self-start text-sm text-muted-foreground hover:text-foreground"
+            >
+              <Cable className="size-4" />
+              This device uses Ethernet or cellular only
+            </button>
+          </>
+        )}
 
         <div className="flex flex-col gap-2">
-          <Label htmlFor="hostname">
-            Hostname
-            <span className="text-destructive" aria-hidden="true">
-              *
-            </span>
-          </Label>
+          <Label htmlFor="hostname">Hostname</Label>
           <Input
             id="hostname"
             value={hostname}
@@ -251,9 +290,9 @@ export function StepNetwork({
         </CollapsibleSection>
 
         <CollapsibleSection
-          title="Device access (optional)"
+          title="Device access"
           forceOpen={sshKeyInvalid || devicePasswordWeak}
-          initiallyOpen={false}
+          initiallyOpen
         >
           <DeviceAccessSection
             {...access}

@@ -3,12 +3,14 @@ import type { SshMode, SshPublicKey } from "@/types";
 export interface SummaryItem {
   label: string;
   value: string;
+  warn?: boolean;
 }
 
 export interface SummaryInput {
   image: string;
   hostname: string;
   ssid: string;
+  noWifi: boolean;
   authKey: string;
   controlServer: string;
   sshMode: SshMode;
@@ -48,28 +50,36 @@ function deviceAccess(
   return devicePassword === "" ? IMAGE_DEFAULT_LOGIN : "Password for pi";
 }
 
+function wifi(noWifi: boolean, ssid: string): SummaryItem {
+  if (noWifi) return { label: "WiFi", value: "Ethernet or cellular only" };
+  return ssid === ""
+    ? { label: "WiFi", value: "Not configured", warn: true }
+    : { label: "WiFi", value: ssid };
+}
+
 export function buildSummary(input: SummaryInput): SummaryItem[] {
   const hostname = input.hostname.trim();
-  const ssid = input.ssid.trim();
+  const access = deviceAccess(
+    input.sshMode,
+    input.sshKey,
+    input.detectedKeys,
+    input.devicePassword,
+  );
   return [
     { label: "Image", value: input.image },
     {
       label: "Hostname",
       value: hostname === "" ? "Image default" : `${hostname}.local`,
     },
-    { label: "WiFi", value: ssid === "" ? "Not configured" : ssid },
+    wifi(input.noWifi, input.ssid.trim()),
     {
       label: "Remote access",
       value: remoteAccess(input.authKey, input.controlServer),
     },
     {
       label: "Device access",
-      value: deviceAccess(
-        input.sshMode,
-        input.sshKey,
-        input.detectedKeys,
-        input.devicePassword,
-      ),
+      value: access,
+      warn: access === IMAGE_DEFAULT_LOGIN,
     },
   ];
 }

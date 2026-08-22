@@ -38,6 +38,7 @@ flate2 = "1"
 byte-unit = "5"
 url = "2.5"
 base64 = "0.22"
+getrandom = "0.3"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

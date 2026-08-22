@@ -8,6 +8,7 @@ const base: SummaryInput = {
   image: "Aircast OS v0.3.0",
   hostname: "falcon-01",
   ssid: "field-net",
+  noWifi: false,
   authKey: "",
   controlServer: "",
   sshMode: "key-only",
@@ -16,8 +17,11 @@ const base: SummaryInput = {
   devicePassword: "",
 };
 
+const rowOf = (input: SummaryInput, label: string) =>
+  buildSummary(input).find((i) => i.label === label);
+
 const valueOf = (input: SummaryInput, label: string) =>
-  buildSummary(input).find((i) => i.label === label)?.value;
+  rowOf(input, label)?.value;
 
 test("reports the hostname as the address the device answers on", () => {
   assert.equal(valueOf(base, "Hostname"), "falcon-01.local");
@@ -27,9 +31,25 @@ test("reports the hostname as the address the device answers on", () => {
   );
 });
 
-test("says when WiFi is not configured", () => {
+test("says when WiFi is not configured, and flags it", () => {
   assert.equal(valueOf(base, "WiFi"), "field-net");
+  assert.equal(rowOf(base, "WiFi")?.warn, undefined);
   assert.equal(valueOf({ ...base, ssid: "" }, "WiFi"), "Not configured");
+  assert.equal(rowOf({ ...base, ssid: "" }, "WiFi")?.warn, true);
+});
+
+test("skipping WiFi on purpose is stated, not flagged", () => {
+  const ethernet = { ...base, ssid: "", noWifi: true };
+  assert.equal(valueOf(ethernet, "WiFi"), "Ethernet or cellular only");
+  assert.equal(rowOf(ethernet, "WiFi")?.warn, undefined);
+});
+
+test("the surviving image default login is flagged", () => {
+  assert.equal(rowOf(base, "Device access")?.warn, true);
+  assert.equal(
+    rowOf({ ...base, sshKey: "ssh-rsa AAAAB3Nz" }, "Device access")?.warn,
+    false,
+  );
 });
 
 test("remote access is off without a key, whatever the control server says", () => {

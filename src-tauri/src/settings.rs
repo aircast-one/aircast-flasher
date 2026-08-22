@@ -16,7 +16,13 @@ pub struct Settings {
     pub hostname: Option<String>,
     pub wifi_password: String,
     pub control_server: String,
-    pub authorized_key: String,
+    /// `None` = never set, so a single detected key prefills the field;
+    /// `Some("")` = the operator cleared it and must not be re-prefilled.
+    pub authorized_key: Option<String>,
+    /// The operator flashes wired or cellular devices: WiFi is skipped on
+    /// purpose. Persisted like the rest, so a fleet of Ethernet boards does not
+    /// re-raise "enter a network name" on every launch.
+    pub no_wifi: bool,
 }
 
 fn settings_path(app: &AppHandle) -> Result<PathBuf, String> {
@@ -101,7 +107,8 @@ mod tests {
             hostname: Some("falcon-01".into()),
             wifi_password: "passphrase".into(),
             control_server: "https://hs.example.com".into(),
-            authorized_key: "ssh-ed25519 AAAA pavliha@mac".into(),
+            authorized_key: Some("ssh-ed25519 AAAA pavliha@mac".into()),
+            no_wifi: false,
         }
     }
 
