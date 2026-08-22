@@ -26,6 +26,14 @@ NC='\033[0m'
 log_info() { echo -e "${GREEN}▶${NC} $1"; }
 log_warn() { echo -e "${YELLOW}▶${NC} $1" >&2; }
 
+if [ -n "$(git status --porcelain)" ]; then
+    log_warn "Working tree is not clean — commit or drop changes before releasing."
+    exit 1
+fi
+
+log_info "Fetching tags from origin..."
+git fetch --tags --quiet origin
+
 get_current_version() {
     git tag -l 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1 || echo "v0.0.0"
 }
@@ -104,6 +112,16 @@ case "$TYPE" in
 esac
 
 log_info "New version: $NEW_VERSION"
+
+log_info "Writing version into package.json, tauri.conf.json, Cargo.toml..."
+node scripts/sync-version.mjs "${NEW_VERSION#v}"
+cargo update --workspace --quiet
+git add package.json src-tauri/tauri.conf.json Cargo.toml Cargo.lock
+if ! git diff --cached --quiet; then
+    git commit -m "chore: bump version to ${NEW_VERSION#v}"
+    git push origin HEAD
+fi
+
 log_info "Creating tag..."
 
 git tag -a "$NEW_VERSION" -m "$MESSAGE"

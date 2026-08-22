@@ -177,9 +177,9 @@ jobs:
 
       - run: npm ci
 
-      - name: Sync version from tag
+      - name: Verify repo version matches the tag
         shell: bash
-        run: node scripts/sync-version.mjs "${VERSION#v}"
+        run: node scripts/sync-version.mjs "${VERSION#v}" --check
         env:
           VERSION: ${{ needs.setup.outputs.version }}
 
