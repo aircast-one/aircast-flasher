@@ -7,9 +7,10 @@
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::io::{Read, Write};
+use std::io::{Read, Seek, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager};
 
 use flasher_core::{ProvisionConfig, TailscaleConfig, WifiConfig};
@@ -18,6 +19,21 @@ use crate::telemetry;
 
 const PROGRESS_THROTTLE_MS: u128 = 100;
 const MIN_TEMP_SPACE_BYTES: u64 = 4_500_000_000; // ~4.5 GB
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+const STALL_TIMEOUT: Duration = Duration::from_secs(20);
+const SPEED_WINDOW: Duration = Duration::from_secs(1);
+const DOWNLOAD_RETRIES: usize = 10;
+
+fn http() -> &'static reqwest::Client {
+    static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+    CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .connect_timeout(CONNECT_TIMEOUT)
+            .read_timeout(STALL_TIMEOUT)
+            .build()
+            .unwrap_or_default()
+    })
+}
 
 // ---------------------------------------------------------------------------
 // State
@@ -235,7 +251,9 @@ fn channel_host(channel: &str) -> Result<&'static str, String> {
 async fn fetch_releases(channel: &str) -> Result<ReleasesResponse, String> {
     let host = channel_host(channel)?;
     let url = format!("https://{host}/lite/releases.json");
-    let response = reqwest::get(&url)
+    let response = http()
+        .get(&url)
+        .send()
         .await
         .map_err(|e| format!("Failed to fetch releases: {e}"))?;
     if !response.status().is_success() {
@@ -563,7 +581,9 @@ async fn download_image_inner(
     state.cancel.store(false, Ordering::SeqCst);
     let cancel = state.cancel.clone();
 
-    let checksum_raw = reqwest::get(&checksum_url)
+    let checksum_raw = http()
+        .get(&checksum_url)
+        .send()
         .await
         .map_err(|e| format!("Failed to fetch checksum: {e}"))?
         .text()
@@ -610,57 +630,56 @@ async fn download_image_inner(
         let _ = std::fs::remove_file(marker_path(&image_path));
     }
 
-    let response = reqwest::get(&download_url)
-        .await
-        .map_err(|e| format!("Failed to start download: {e}"))?;
-    if !response.status().is_success() {
-        return Err(format!("Download failed: HTTP {}", response.status()));
-    }
-    let total_bytes = response.content_length().unwrap_or(0);
+    let mut sink = Sink {
+        file: std::fs::File::create(&image_path)
+            .map_err(|e| format!("Failed to create cache file: {e}"))?,
+        hasher: Sha256::new(),
+        written: 0,
+        total: 0,
+        speed_bps: 0,
+    };
 
-    let mut file = std::fs::File::create(&image_path)
-        .map_err(|e| format!("Failed to create cache file: {e}"))?;
-    let mut downloaded_bytes: u64 = 0;
-    let mut hasher = Sha256::new();
-    let mut stream = response.bytes_stream();
-    let start_time = std::time::Instant::now();
-    let mut last_emit = std::time::Instant::now();
+    let mut emit = |s: &Sink| {
+        let _ = app_handle.emit(
+            "flasher:download-progress",
+            DownloadProgress {
+                downloaded_bytes: s.written,
+                total_bytes: s.total,
+                percent: percent_of(s.written, s.total),
+                speed_bps: s.speed_bps,
+            },
+        );
+    };
 
-    while let Some(chunk_result) = stream.next().await {
+    let outcome = {
+        let mut attempt: usize = 0;
+        loop {
+            match stream_into(&mut emit, &cancel, &download_url, &mut sink).await {
+                Ok(()) => break Ok(()),
+                Err(Fail::Fatal(msg)) => break Err(msg),
+                Err(Fail::Transient(msg)) => {
+                    attempt += 1;
+                    if attempt > DOWNLOAD_RETRIES {
+                        break Err(msg);
+                    }
+                    sink.speed_bps = 0;
+                    emit(&sink);
+                    tokio::time::sleep(Duration::from_secs(attempt.min(5) as u64)).await;
+                }
+            }
+        }
+    };
+
+    if let Err(msg) = outcome {
         if cancel.load(Ordering::SeqCst) {
             let _ = std::fs::remove_file(&image_path);
-            return Err("Download cancelled".to_string());
         }
-        let chunk = chunk_result.map_err(|e| format!("Download error: {e}"))?;
-        file.write_all(&chunk)
-            .map_err(|e| format!("Failed to write chunk: {e}"))?;
-        hasher.update(&chunk);
-        downloaded_bytes += chunk.len() as u64;
-
-        if last_emit.elapsed().as_millis() >= PROGRESS_THROTTLE_MS {
-            let elapsed = start_time.elapsed().as_secs_f64();
-            let speed_bps = if elapsed > 0.0 {
-                (downloaded_bytes as f64 / elapsed) as u64
-            } else {
-                0
-            };
-            let percent = if total_bytes > 0 {
-                (downloaded_bytes as f64 / total_bytes as f64) * 100.0
-            } else {
-                0.0
-            };
-            let _ = app_handle.emit(
-                "flasher:download-progress",
-                DownloadProgress {
-                    downloaded_bytes,
-                    total_bytes,
-                    percent,
-                    speed_bps,
-                },
-            );
-            last_emit = std::time::Instant::now();
-        }
+        return Err(msg);
     }
+
+    let downloaded_bytes = sink.written;
+    let total_bytes = sink.total;
+    let hasher = sink.hasher;
 
     let _ = app_handle.emit(
         "flasher:download-progress",
@@ -690,6 +709,111 @@ async fn download_image_inner(
         checksum,
         cached: false,
     })
+}
+
+struct Sink {
+    file: std::fs::File,
+    hasher: Sha256,
+    written: u64,
+    total: u64,
+    speed_bps: u64,
+}
+
+enum Fail {
+    Transient(String),
+    Fatal(String),
+}
+
+fn percent_of(done: u64, total: u64) -> f64 {
+    if total > 0 {
+        (done as f64 / total as f64) * 100.0
+    } else {
+        0.0
+    }
+}
+
+/// One attempt at streaming the image into `sink`, resuming from
+/// `sink.written` via a `Range` request. A dropped or stalled connection —
+/// what a Wi-Fi switch or cellular handover looks like — is `Transient`, so
+/// the caller retries and keeps the bytes already on disk.
+async fn stream_into(
+    progress: &mut (dyn FnMut(&Sink) + Send),
+    cancel: &Arc<AtomicBool>,
+    url: &str,
+    sink: &mut Sink,
+) -> Result<(), Fail> {
+    let request = match sink.written {
+        0 => http().get(url),
+        n => http().get(url).header(reqwest::header::RANGE, format!("bytes={n}-")),
+    };
+
+    let response = request
+        .send()
+        .await
+        .map_err(|e| Fail::Transient(format!("Download error: {e}")))?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let msg = format!("Download failed: HTTP {status}");
+        return Err(if status.is_server_error() {
+            Fail::Transient(msg)
+        } else {
+            Fail::Fatal(msg)
+        });
+    }
+
+    // A server that ignores Range replies 200 with the whole file: rewind and
+    // start over rather than appending a second copy onto the partial one.
+    if sink.written > 0 && response.status() != reqwest::StatusCode::PARTIAL_CONTENT {
+        sink.file
+            .set_len(0)
+            .and_then(|_| sink.file.rewind())
+            .map_err(|e| Fail::Fatal(format!("Failed to restart download: {e}")))?;
+        sink.hasher = Sha256::new();
+        sink.written = 0;
+    }
+
+    if sink.total == 0 {
+        sink.total = response.content_length().unwrap_or(0) + sink.written;
+    }
+
+    let mut stream = response.bytes_stream();
+    let mut last_emit = std::time::Instant::now();
+    let mut window_start = std::time::Instant::now();
+    let mut window_bytes: u64 = 0;
+
+    while let Some(chunk_result) = stream.next().await {
+        if cancel.load(Ordering::SeqCst) {
+            return Err(Fail::Fatal("Download cancelled".to_string()));
+        }
+        let chunk = chunk_result.map_err(|e| Fail::Transient(format!("Download error: {e}")))?;
+        sink.file
+            .write_all(&chunk)
+            .map_err(|e| Fail::Fatal(format!("Failed to write chunk: {e}")))?;
+        sink.hasher.update(&chunk);
+        sink.written += chunk.len() as u64;
+        window_bytes += chunk.len() as u64;
+
+        if window_start.elapsed() >= SPEED_WINDOW {
+            sink.speed_bps = (window_bytes as f64 / window_start.elapsed().as_secs_f64()) as u64;
+            window_start = std::time::Instant::now();
+            window_bytes = 0;
+        }
+
+        if last_emit.elapsed().as_millis() >= PROGRESS_THROTTLE_MS {
+            progress(sink);
+            last_emit = std::time::Instant::now();
+        }
+    }
+
+    if sink.total > 0 && sink.written < sink.total {
+        return Err(Fail::Transient(format!(
+            "Download truncated at {} of {} bytes",
+            sink.written, sink.total
+        )));
+    }
+
+    Ok(())
 }
 
 fn verify_file_checksum(path: &std::path::Path, expected: &str) -> Result<bool, String> {
@@ -850,11 +974,13 @@ async fn flash_image_inner(
 
     // Re-validate the target is still a removable external device.
     let devices = list_block_devices().await?;
-    if !devices.iter().any(|d| d.path == target_disk) {
+    let Some(card) = devices.iter().find(|d| d.path == target_disk) else {
         return Err(format!(
             "Target disk {target_disk} is not a valid removable device"
         ));
-    }
+    };
+    let card_size = card.size;
+    let card_label = format!("{} ({})", card.name, card.size_human);
 
     state.cancel.store(false, Ordering::SeqCst);
     let cancel = state.cancel.clone();
@@ -888,6 +1014,18 @@ async fn flash_image_inner(
 
     let total = std::fs::metadata(&write_path).map(|m| m.len()).unwrap_or(0);
     trace.image_bytes = total;
+
+    if card_size > 0 && total > card_size {
+        if is_temp {
+            let _ = std::fs::remove_file(&write_path);
+        }
+        return Err(format!(
+            "Card too small: the image needs {} but {card_label} holds {}. Nothing was written — use a larger card.",
+            format_bytes(total),
+            format_bytes(card_size)
+        ));
+    }
+
     emit_flash_progress(app_handle, FlashPhase::Writing, 0, total, 0.0);
 
     let write_result =
@@ -1637,6 +1775,95 @@ pub fn read_public_key(path: String) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Serves BODY in two halves: the first connection dies mid-stream (what a
+    /// Wi-Fi/cellular switch does to an in-flight download), the second must
+    /// arrive with `Range: bytes=<half>-` and gets a 206 with the remainder.
+    async fn flaky_server(body: &'static [u8]) -> (String, tokio::task::JoinHandle<bool>) {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/image", listener.local_addr().unwrap());
+        let half = body.len() / 2;
+
+        let handle = tokio::spawn(async move {
+            let mut buf = [0u8; 1024];
+
+            let (mut first, _) = listener.accept().await.unwrap();
+            let _ = first.read(&mut buf).await.unwrap();
+            first
+                .write_all(
+                    format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n", body.len()).as_bytes(),
+                )
+                .await
+                .unwrap();
+            first.write_all(&body[..half]).await.unwrap();
+            first.flush().await.unwrap();
+            drop(first);
+
+            let (mut second, _) = listener.accept().await.unwrap();
+            let n = second.read(&mut buf).await.unwrap();
+            let asked_for_resume =
+                String::from_utf8_lossy(&buf[..n]).contains(&format!("bytes={half}-"));
+            second
+                .write_all(
+                    format!(
+                        "HTTP/1.1 206 Partial Content\r\nContent-Length: {}\r\nContent-Range: bytes {}-{}/{}\r\n\r\n",
+                        body.len() - half,
+                        half,
+                        body.len() - 1,
+                        body.len()
+                    )
+                    .as_bytes(),
+                )
+                .await
+                .unwrap();
+            second.write_all(&body[half..]).await.unwrap();
+            second.flush().await.unwrap();
+            asked_for_resume
+        });
+
+        (url, handle)
+    }
+
+    #[tokio::test]
+    async fn download_resumes_after_the_connection_drops() {
+        const BODY: &[u8] = b"aircast-image-payload-that-spans-two-http-responses";
+
+        let (url, server) = flaky_server(BODY).await;
+        let path = isolated_dir("resume").join("image.img.xz");
+        let cancel = Arc::new(AtomicBool::new(false));
+        let mut sink = Sink {
+            file: std::fs::File::create(&path).unwrap(),
+            hasher: Sha256::new(),
+            written: 0,
+            total: 0,
+            speed_bps: 0,
+        };
+
+        let first = stream_into(&mut |_| {}, &cancel, &url, &mut sink).await;
+        assert!(
+            matches!(first, Err(Fail::Transient(_))),
+            "a mid-stream drop must be retryable, not fatal"
+        );
+        assert!(sink.written > 0 && sink.written < BODY.len() as u64);
+
+        stream_into(&mut |_| {}, &cancel, &url, &mut sink)
+            .await
+            .map_err(|e| match e {
+                Fail::Transient(m) | Fail::Fatal(m) => m,
+            })
+            .expect("the retry must complete the download");
+
+        assert!(server.await.unwrap(), "the retry must send a Range header");
+        assert_eq!(sink.written, BODY.len() as u64);
+        assert_eq!(std::fs::read(&path).unwrap(), BODY, "bytes on disk");
+        assert_eq!(
+            format!("{:x}", sink.hasher.finalize()),
+            format!("{:x}", Sha256::digest(BODY)),
+            "the hash must span both halves exactly once"
+        );
+    }
 
     #[test]
     fn validate_disk_path_rejects_injection() {
