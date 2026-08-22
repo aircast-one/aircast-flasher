@@ -196,7 +196,7 @@ export function JobView({
             <span className="text-sm font-medium">
               Aircast QGC{" "}
               <span className="font-normal text-muted-foreground">
-                — optional
+                (optional)
               </span>
             </span>
             <span className="text-xs text-muted-foreground">
@@ -222,7 +222,7 @@ export function JobView({
           <ol className="list-decimal space-y-1 pl-5">
             <li>Put the card in the device and power it on.</li>
             <li>
-              First boot takes a few minutes — it expands the filesystem, joins
+              First boot takes a few minutes: it expands the filesystem, joins
               the network, then reboots once.
             </li>
           </ol>
@@ -241,8 +241,8 @@ export function JobView({
         <div className="flex flex-col gap-1.5">
           <h2 className="text-xl font-semibold">Stopped</h2>
           <p className="text-sm text-balance text-muted-foreground">
-            You cancelled the write. The card is partly written and won't boot —
-            flash it again before using it.
+            You cancelled the write. The card is partly written and won't boot,
+            so flash it again before using it.
           </p>
         </div>
         <div className="flex items-center gap-2">

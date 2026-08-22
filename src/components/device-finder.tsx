@@ -130,7 +130,7 @@ export function DeviceFinder({
     <div className="flex w-full flex-col gap-3 rounded-xl border border-border px-4 py-3 text-left">
       <div className="flex items-center gap-2 text-sm text-muted-foreground">
         <Loader2 className="size-4 shrink-0 animate-spin" />
-        <span>Waiting for the device — checking these addresses…</span>
+        <span>Waiting for the device. Checking these addresses:</span>
       </div>
       <CopyableAddress address={`${hostname}.local`} />
       <div className="flex flex-col gap-1 text-xs text-muted-foreground">
