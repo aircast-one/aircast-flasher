@@ -278,8 +278,17 @@ jobs:
             exit 1
           fi
           node ../scripts/rewrite-updater-manifest.mjs latest.json "$URL/flasher/$V"
-          aws s3 cp latest.json "s3://aircast-artifacts/$P/flasher/latest.json" --acl public-read --cache-control "no-cache"
           aws s3 cp latest.json "s3://aircast-artifacts/$P/flasher/$V/updater/latest.json" --acl public-read
+          # Never point the updater at an older build: a re-release of v0.34.x
+          # keeps serving whatever newer version is already live.
+          CURRENT=$(aws s3 cp "s3://aircast-artifacts/$P/flasher/latest.json" - 2>/dev/null | jq -r '.version // empty' | sed 's/^v//')
+          NEWER=$(jq -rn --arg a "${CURRENT:-0.0.0}" --arg b "${V#v}" \
+            'def key: [splits("[.-]")] | map(tonumber? // .); ($a | key) < ($b | key)')
+          if [ "$NEWER" = "true" ]; then
+            aws s3 cp latest.json "s3://aircast-artifacts/$P/flasher/latest.json" --acl public-read --cache-control "no-cache"
+          else
+            echo "::warning::updater latest.json stays at $CURRENT; $V is not newer"
+          fi
 
       - name: Update flasher/releases.json
         env:
@@ -315,7 +324,10 @@ jobs:
 
           KEY="$P/flasher/releases.json"
           aws s3 cp "s3://aircast-artifacts/$KEY" existing.json 2>/dev/null || echo '{"releases":[]}' > existing.json
-          jq --slurpfile new new.json '.releases = [$new[0]] + [.releases[] | select(.version != $new[0].version)]' existing.json > releases.json
+          jq --slurpfile new new.json \
+            'def key: .version | ltrimstr("v") | [splits("[.-]")] | map(tonumber? // .);
+             .releases = ([$new[0]] + [.releases[] | select(.version != $new[0].version)] | sort_by(key) | reverse)' \
+            existing.json > releases.json
           aws s3 cp releases.json "s3://aircast-artifacts/$KEY" --acl public-read
 
       - name: Invalidate CloudFront
