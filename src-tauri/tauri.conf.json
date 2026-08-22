@@ -22,11 +22,14 @@
     ],
     "security": {
       "csp": null
-    }
+    },
+    "withGlobalTauri": true
   },
   "plugins": {
     "updater": {
-      "endpoints": ["https://downloads.aircast.one/flasher/latest.json"],
+      "endpoints": [
+        "https://downloads.aircast.one/flasher/latest.json"
+      ],
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDc4NzA2RThGQzcwQkU5NQpSV1NWdm5EODZBYUhCMTZDM2dMVVNyUHhES0VkNGdxcFpZc3RlRDhzakdBcGIwM2VQRWNJRzlZeAo="
     }
   },

@@ -105,6 +105,14 @@ export function cancelFlash(): Promise<void> {
   return invoke<void>("cancel_flash");
 }
 
+export function probeDevice(url: string): Promise<boolean> {
+  return invoke<boolean>("probe_device", { url });
+}
+
+export function joinWifi(ssid: string, password: string): Promise<void> {
+  return invoke<void>("join_wifi", { ssid, password });
+}
+
 export function readSettings(): Promise<Settings> {
   return invoke<Settings>("read_settings");
 }

@@ -1,8 +1,6 @@
-import { useEffect, useState } from "react";
 import {
-  Check,
   CheckCircle2,
-  Copy,
+  Download,
   HardDriveDownload,
   Loader2,
   OctagonX,
@@ -10,9 +8,14 @@ import {
   XCircle,
   type LucideIcon,
 } from "lucide-react";
+import { openUrl } from "@tauri-apps/plugin-opener";
 
+import { track } from "@/api";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { DeviceFinder } from "@/components/device-finder";
+
+const QGC_DOWNLOAD_URL = "https://aircast.one/docs/software/qgroundcontrol";
 import { Progress } from "@/components/ui/progress";
 import { formatBytes, formatSpeed } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -90,40 +93,6 @@ function IconBadge({
         className={cn("size-8", t.icon, anim === "spin" && "animate-spin")}
       />
     </div>
-  );
-}
-
-const COPIED_FEEDBACK_MS = 2000;
-
-function CopyableHostname({ hostname }: { hostname: string }) {
-  const [copied, setCopied] = useState(false);
-  const address = `${hostname}.local`;
-
-  useEffect(() => {
-    if (!copied) return;
-    const timer = setTimeout(() => setCopied(false), COPIED_FEEDBACK_MS);
-    return () => clearTimeout(timer);
-  }, [copied]);
-
-  return (
-    <button
-      type="button"
-      className="flex items-center gap-2 self-start font-mono text-base break-all hover:text-primary"
-      onClick={() => {
-        navigator.clipboard
-          ?.writeText(address)
-          .then(() => setCopied(true))
-          .catch(() => setCopied(false));
-      }}
-      aria-label={`Copy ${address}`}
-    >
-      {address}
-      {copied ? (
-        <Check className="size-4 shrink-0 text-green-500 dark:text-green-400" />
-      ) : (
-        <Copy className="size-4 shrink-0 text-muted-foreground" />
-      )}
-    </button>
   );
 }
 
@@ -221,16 +190,32 @@ export function JobView({
             device.
           </p>
         </div>
-        <div className="flex w-full flex-col gap-1 rounded-xl border border-border px-4 py-3">
-          <span className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
-            Find it at
-          </span>
-          <CopyableHostname hostname={hostname} />
-          {remoteEnrolled ? (
-            <span className="text-xs text-muted-foreground">
-              It also joins your private network on first boot.
+        <DeviceFinder hostname={hostname} remoteEnrolled={remoteEnrolled} />
+        <div className="flex w-full items-center justify-between gap-3 rounded-xl border border-border px-4 py-3 text-left">
+          <div className="flex min-w-0 flex-col gap-0.5">
+            <span className="text-sm font-medium">
+              Aircast QGC{" "}
+              <span className="font-normal text-muted-foreground">
+                — optional
+              </span>
             </span>
-          ) : null}
+            <span className="text-xs text-muted-foreground">
+              QGroundControl with Aircast's low-latency video built in.
+            </span>
+          </div>
+          <Button
+            type="button"
+            size="sm"
+            variant="secondary"
+            className="shrink-0"
+            onClick={() => {
+              track("qgc_download_click");
+              void openUrl(QGC_DOWNLOAD_URL);
+            }}
+          >
+            <Download className="size-4" />
+            Get it
+          </Button>
         </div>
         <div className="w-full text-left text-sm text-muted-foreground">
           <h3 className="mb-1 font-medium text-foreground">What happens next</h3>
@@ -239,13 +224,6 @@ export function JobView({
             <li>
               First boot takes a few minutes — it expands the filesystem, joins
               the network, then reboots once.
-            </li>
-            <li>
-              If the WiFi you entered isn't found, the device starts its own
-              hotspot named <span className="font-mono">{hostname}</span>{" "}
-              (password <span className="font-mono">raspberry</span>). Join it
-              and open <span className="font-mono">http://10.42.0.1</span> to
-              set up the network.
             </li>
           </ol>
         </div>

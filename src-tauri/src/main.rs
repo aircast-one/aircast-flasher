@@ -4,6 +4,7 @@
 #[cfg(all(feature = "wdio", not(debug_assertions)))]
 compile_error!("the wdio feature embeds a WebDriver server — never enable it in a release build");
 
+mod connect;
 mod flasher;
 mod helper;
 mod settings;
@@ -51,6 +52,8 @@ async fn main() {
             flasher::detect_ssh_keys,
             flasher::read_public_key,
             flasher::reveal_event_log,
+            connect::probe_device,
+            connect::join_wifi,
             settings::read_settings,
             settings::write_settings,
             telemetry::track,

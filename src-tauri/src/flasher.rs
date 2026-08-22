@@ -1672,7 +1672,7 @@ async fn launch_helper(
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 #[cfg(target_os = "windows")]
-fn hidden_command(program: &str) -> tokio::process::Command {
+pub(crate) fn hidden_command(program: &str) -> tokio::process::Command {
     let mut cmd = tokio::process::Command::new(program);
     cmd.creation_flags(CREATE_NO_WINDOW);
     cmd
@@ -1936,7 +1936,7 @@ async fn user_locale_windows() -> Option<String> {
 }
 
 #[cfg(target_os = "macos")]
-async fn wifi_device_macos() -> String {
+pub(crate) async fn wifi_device_macos() -> String {
     // Find the Wi-Fi hardware port's device (usually en0), fall back to en0.
     if let Ok(out) = tokio::process::Command::new("networksetup")
         .arg("-listallhardwareports")
