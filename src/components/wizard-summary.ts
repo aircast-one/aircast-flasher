@@ -1,9 +1,11 @@
 import type { SshMode, SshPublicKey } from "@/types";
+import { STEP, type WizardStep } from "@/components/wizard-types";
 
 export interface SummaryItem {
   label: string;
   value: string;
   warn?: boolean;
+  step: WizardStep;
 }
 
 export interface SummaryInput {
@@ -51,10 +53,11 @@ function deviceAccess(
 }
 
 function wifi(noWifi: boolean, ssid: string): SummaryItem {
-  if (noWifi) return { label: "WiFi", value: "Ethernet or cellular only" };
+  const row = { label: "WiFi", step: STEP.network };
+  if (noWifi) return { ...row, value: "Ethernet or cellular only" };
   return ssid === ""
-    ? { label: "WiFi", value: "Not configured", warn: true }
-    : { label: "WiFi", value: ssid };
+    ? { ...row, value: "Not configured", warn: true }
+    : { ...row, value: ssid };
 }
 
 export function buildSummary(input: SummaryInput): SummaryItem[] {
@@ -66,20 +69,23 @@ export function buildSummary(input: SummaryInput): SummaryItem[] {
     input.devicePassword,
   );
   return [
-    { label: "Image", value: input.image },
+    { label: "Image", value: input.image, step: STEP.os },
     {
       label: "Hostname",
       value: hostname === "" ? "Image default" : `${hostname}.local`,
+      step: STEP.network,
     },
     wifi(input.noWifi, input.ssid.trim()),
     {
       label: "Remote access",
       value: remoteAccess(input.authKey, input.controlServer),
+      step: STEP.network,
     },
     {
       label: "Device access",
       value: access,
       warn: access === IMAGE_DEFAULT_LOGIN,
+      step: STEP.network,
     },
   ];
 }

@@ -31,6 +31,16 @@ export function isInvalidSshKey(value: string): boolean {
   return v !== "" && !SSH_KEY_PATTERN.test(v);
 }
 
+const RAW_PSK = /^[0-9a-f]{64}$/i;
+
+export function isInvalidWifiPassword(value: string): boolean {
+  return (
+    value !== "" &&
+    (value.length < 8 || value.length > 63) &&
+    !RAW_PSK.test(value)
+  );
+}
+
 export const MIN_DEVICE_PASSWORD = 8;
 
 export function isWeakDevicePassword(value: string): boolean {

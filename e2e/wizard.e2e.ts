@@ -217,6 +217,19 @@ describe("flasher wizard", () => {
     await expect($("button=Next")).toBeDisabled();
   });
 
+  it("refuses a WiFi password the device could never join with", async () => {
+    await knownGoodNetworkState();
+    await $("#password").setValue("short");
+    await expect($("#password-help")).toHaveText(
+      expect.stringContaining("8–63 characters"),
+    );
+    await expect($("button=Next")).toBeDisabled();
+
+    await $("#password").setValue("longenough");
+    await expect($("button=Next")).toBeEnabled();
+    await $("#password").clearValue();
+  });
+
   it("refuses a Headscale key with no control server", async () => {
     await knownGoodNetworkState();
     await $("button*=Remote access").click();
@@ -271,5 +284,14 @@ describe("flasher wizard", () => {
     await expect(rows).toHaveText(expect.stringContaining("test-net"));
     await expect(rows).toHaveText(expect.stringContaining("Target card"));
     await expect($("button=Flash SD Card")).toBeDisabled();
+  });
+
+  it("sends you back to the step that owns a setting you want to change", async () => {
+    await knownGoodNetworkState();
+    await $("button=Next").click();
+    await waitForHeading("Storage");
+
+    await $('button[aria-label="Change Image"]').click();
+    await waitForHeading("Operating system");
   });
 });

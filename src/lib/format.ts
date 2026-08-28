@@ -6,6 +6,14 @@ export function formatBytes(bytes: number): string {
   return `${mb.toFixed(0)} MB`;
 }
 
+export function formatDate(iso: string): string {
+  return new Date(iso).toLocaleDateString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  });
+}
+
 export function formatSpeed(bps: number): string {
   if (!Number.isFinite(bps) || bps <= 0) return "";
   const mbps = bps / 1000 / 1000;

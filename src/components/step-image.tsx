@@ -9,7 +9,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { formatBytes } from "@/lib/format";
+import { formatBytes, formatDate } from "@/lib/format";
 import type { SourceKind } from "@/components/wizard-types";
 import type { Release } from "@/types";
 
@@ -70,14 +70,19 @@ export function StepImage({
               onValueChange={(value) => onSelectVersion(String(value))}
             >
               <SelectTrigger size="sm" aria-label="Aircast OS version">
-                <SelectValue />
+                <SelectValue>{(value) => String(value)}</SelectValue>
               </SelectTrigger>
-              <SelectContent>
+              <SelectContent className="min-w-64">
                 {releases.map((option, index) => (
                   <SelectItem key={option.version} value={option.version}>
-                    {option.version}
-                    {index === 0 ? " (latest)" : ""}
-                    {option.prerelease ? " · pre-release" : ""}
+                    <span className="flex-1">
+                      {option.version}
+                      {index === 0 ? " (latest)" : ""}
+                      {option.prerelease ? " · pre-release" : ""}
+                    </span>
+                    <span className="text-xs text-muted-foreground">
+                      {formatDate(option.created_at)}
+                    </span>
                   </SelectItem>
                 ))}
               </SelectContent>

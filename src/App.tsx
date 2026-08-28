@@ -452,6 +452,7 @@ function App() {
               summary={summary}
               canProceed={canProceed}
               onBack={() => setStep(STEP.network)}
+              onEditStep={setStep}
               onFlash={handleFlash}
             />
           ) : (

@@ -24,6 +24,7 @@ import {
 } from "@/components/device-access-section";
 import {
   isInvalidSshKey,
+  isInvalidWifiPassword,
   isValidControlServer,
   isValidHostname,
   isWeakDevicePassword,
@@ -31,6 +32,7 @@ import {
   needsControlServer,
   needsSsid,
 } from "@/components/step-network.validation";
+import { GENERATED_HOSTNAME } from "@/components/default-hostname";
 
 type RemoteAccessInputs = Pick<
   RemoteAccessProps,
@@ -89,11 +91,14 @@ export function StepNetwork({
   const [selfHosted, setSelfHosted] = useState(
     () => remote.controlServer.trim() !== "",
   );
+  const [ssidTouched, setSsidTouched] = useState(false);
 
   const trimmedHostname = hostname.trim();
   const hostnameEmpty = trimmedHostname === "";
   const hostnameValid = isValidHostname(hostname);
+  const hostnameGenerated = GENERATED_HOSTNAME.test(trimmedHostname);
   const ssidMissing = needsSsid(noWifi, ssid);
+  const wifiPasswordInvalid = !noWifi && isInvalidWifiPassword(password);
 
   const controlServerValid = isValidControlServer(remote.controlServer);
   const controlServerMissing = needsControlServer(
@@ -121,6 +126,7 @@ export function StepNetwork({
         disabled:
           !hostnameValid ||
           ssidMissing ||
+          wifiPasswordInvalid ||
           !remoteAccessValid ||
           sshKeyInvalid ||
           devicePasswordWeak,
@@ -152,13 +158,17 @@ export function StepNetwork({
                 <Combobox
                   items={knownNetworks}
                   inputValue={ssid}
-                  onInputValueChange={(value) => onSsid(value)}
+                  onInputValueChange={(value) => {
+                    setSsidTouched(true);
+                    onSsid(value);
+                  }}
                 >
                   <ComboboxInput
                     id="ssid"
                     placeholder="Pick a known network or type one"
                     className="flex-1"
-                    aria-invalid={ssidMissing}
+                    onBlur={() => setSsidTouched(true)}
+                    aria-invalid={ssidMissing && ssidTouched}
                     aria-describedby="ssid-help"
                   />
                   <ComboboxContent>
@@ -188,7 +198,7 @@ export function StepNetwork({
               <p
                 id="ssid-help"
                 className={
-                  ssidMissing
+                  ssidMissing && ssidTouched
                     ? "text-sm text-destructive"
                     : "text-sm text-muted-foreground"
                 }
@@ -208,6 +218,7 @@ export function StepNetwork({
                   value={password}
                   onChange={(e) => onPassword(e.currentTarget.value)}
                   className="flex-1"
+                  aria-invalid={wifiPasswordInvalid}
                   aria-describedby="password-help"
                 />
                 <Button
@@ -220,8 +231,17 @@ export function StepNetwork({
                   {showPassword ? <EyeOff /> : <Eye />}
                 </Button>
               </div>
-              <p id="password-help" className="text-sm text-muted-foreground">
-                Leave blank for an open network.
+              <p
+                id="password-help"
+                className={
+                  wifiPasswordInvalid
+                    ? "text-sm text-destructive"
+                    : "text-sm text-muted-foreground"
+                }
+              >
+                {wifiPasswordInvalid
+                  ? "A WiFi password is 8–63 characters — the device cannot join with this one."
+                  : "Leave blank for an open network."}
               </p>
             </div>
 
@@ -265,8 +285,10 @@ export function StepNetwork({
                 Reachable at{" "}
                 <span className="font-medium text-foreground">
                   {trimmedHostname}.local
-                </span>{" "}
-                — pick a name you'll spot in a fleet.
+                </span>
+                {hostnameGenerated
+                  ? " — a generated name, rename it to spot this device in a fleet."
+                  : null}
               </>
             )}
           </p>
