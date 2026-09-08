@@ -1,11 +1,11 @@
 name: Desktop Release
 
 # Builds the Aircast Flasher for macOS/Windows/Linux on a version tag, publishes
-# a GitHub release, and mirrors the installers to S3 (downloads.aircast.one)
+# a GitHub release, and mirrors the installers to R2 (downloads.aircast.one)
 # under a `flasher/` path with a `releases.json` catalog — mirroring the
-# aircast-web desktop-release pipeline.
+# aircast-pi-gen release pipeline.
 #
-# Required repo/org secrets: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY,
+# Required repo/org secrets: R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY,
 # PAT_TOKEN.
 #
 # PAT_TOKEN is a PAT with contents:write (fine-grained: Contents = Read and
@@ -39,7 +39,7 @@ jobs:
       environment: ${{ steps.config.outputs.environment }}
       is_production: ${{ steps.config.outputs.is_production }}
       s3_path: ${{ steps.config.outputs.s3_path }}
-      cloudfront_domain: ${{ steps.config.outputs.cloudfront_domain }}
+      downloads_domain: ${{ steps.config.outputs.downloads_domain }}
       downloads_url: ${{ steps.config.outputs.downloads_url }}
       release_id: ${{ steps.release.outputs.id }}
     steps:
@@ -76,19 +76,19 @@ jobs:
             echo "is_production=true" >> "$GITHUB_OUTPUT"
             echo "environment=production" >> "$GITHUB_OUTPUT"
             echo "s3_path=stable" >> "$GITHUB_OUTPUT"
-            echo "cloudfront_domain=downloads.aircast.one" >> "$GITHUB_OUTPUT"
+            echo "downloads_domain=downloads.aircast.one" >> "$GITHUB_OUTPUT"
             echo "downloads_url=https://downloads.aircast.one" >> "$GITHUB_OUTPUT"
           elif [[ "$VERSION" =~ -staging\. ]]; then
             echo "is_production=false" >> "$GITHUB_OUTPUT"
             echo "environment=staging" >> "$GITHUB_OUTPUT"
             echo "s3_path=staging" >> "$GITHUB_OUTPUT"
-            echo "cloudfront_domain=downloads.staging.aircast.one" >> "$GITHUB_OUTPUT"
+            echo "downloads_domain=downloads.stage.aircast.one" >> "$GITHUB_OUTPUT"
             echo "downloads_url=https://downloads.staging.aircast.one" >> "$GITHUB_OUTPUT"
           else
             echo "is_production=false" >> "$GITHUB_OUTPUT"
             echo "environment=development" >> "$GITHUB_OUTPUT"
             echo "s3_path=development" >> "$GITHUB_OUTPUT"
-            echo "cloudfront_domain=downloads.dev.aircast.one" >> "$GITHUB_OUTPUT"
+            echo "downloads_domain=downloads.dev.aircast.one" >> "$GITHUB_OUTPUT"
             echo "downloads_url=https://downloads.dev.aircast.one" >> "$GITHUB_OUTPUT"
           fi
           echo "Release: $VERSION"
@@ -221,18 +221,18 @@ jobs:
     needs: [setup, desktop-builds]
     if: needs.desktop-builds.result == 'success'
     runs-on: ubuntu-latest
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      AWS_ENDPOINT_URL: https://cb3f7d95c2d311b22c4e57e0759d3a13.r2.cloudflarestorage.com
+      AWS_DEFAULT_REGION: auto
+      AWS_REQUEST_CHECKSUM_CALCULATION: when_required
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-
-      - uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: us-east-1
 
       - name: Download release assets
         env:
@@ -250,17 +250,17 @@ jobs:
             [ -f "$f" ] && sha256sum "$f" > "$f.sha256"
           done || true
 
-      - name: Upload to S3
+      - name: Upload to R2
         run: |
           cd assets
           V="${{ needs.setup.outputs.version }}"
           P="${{ needs.setup.outputs.s3_path }}"
-          base="s3://aircast-artifacts/$P/flasher/$V"
+          base="s3://aircast-artifacts-$P/flasher/$V"
           # Installers + their .sig (the updater downloads the platform artifact
           # plus its detached .sig signature for verification).
-          for f in *.dmg *.dmg.sha256 *.dmg.sig *.app.tar.gz *.app.tar.gz.sha256 *.app.tar.gz.sig; do [ -f "$f" ] && aws s3 cp "$f" "$base/macos/$f" --acl public-read; done || true
-          for f in *.exe *.exe.sha256 *.exe.sig; do [ -f "$f" ] && aws s3 cp "$f" "$base/windows/$f" --acl public-read; done || true
-          for f in *.deb *.deb.sha256 *.rpm *.rpm.sha256 *.AppImage *.AppImage.sha256 *.AppImage.sig; do [ -f "$f" ] && aws s3 cp "$f" "$base/linux/$f" --acl public-read; done || true
+          for f in *.dmg *.dmg.sha256 *.dmg.sig *.app.tar.gz *.app.tar.gz.sha256 *.app.tar.gz.sig; do [ -f "$f" ] && aws s3 cp "$f" "$base/macos/$f"; done || true
+          for f in *.exe *.exe.sha256 *.exe.sig; do [ -f "$f" ] && aws s3 cp "$f" "$base/windows/$f"; done || true
+          for f in *.deb *.deb.sha256 *.rpm *.rpm.sha256 *.AppImage *.AppImage.sha256 *.AppImage.sig; do [ -f "$f" ] && aws s3 cp "$f" "$base/linux/$f"; done || true
 
       - name: Upload updater manifest
         run: |
@@ -278,14 +278,14 @@ jobs:
             exit 1
           fi
           node ../scripts/rewrite-updater-manifest.mjs latest.json "$URL/flasher/$V"
-          aws s3 cp latest.json "s3://aircast-artifacts/$P/flasher/$V/updater/latest.json" --acl public-read
+          aws s3 cp latest.json "s3://aircast-artifacts-$P/flasher/$V/updater/latest.json"
           # Never point the updater at an older build: a re-release of v0.34.x
           # keeps serving whatever newer version is already live.
-          CURRENT=$(aws s3 cp "s3://aircast-artifacts/$P/flasher/latest.json" - 2>/dev/null | jq -r '.version // empty' | sed 's/^v//')
+          CURRENT=$(aws s3 cp "s3://aircast-artifacts-$P/flasher/latest.json" - 2>/dev/null | jq -r '.version // empty' | sed 's/^v//')
           NEWER=$(jq -rn --arg a "${CURRENT:-0.0.0}" --arg b "${V#v}" \
             'def key: [splits("[.-]")] | map(tonumber? // .); ($a | key) < ($b | key)')
           if [ "$NEWER" = "true" ]; then
-            aws s3 cp latest.json "s3://aircast-artifacts/$P/flasher/latest.json" --acl public-read --cache-control "no-cache"
+            aws s3 cp latest.json "s3://aircast-artifacts-$P/flasher/latest.json" --cache-control "no-cache"
           else
             echo "::warning::updater latest.json stays at $CURRENT; $V is not newer"
           fi
@@ -322,25 +322,13 @@ jobs:
           jq -n --arg v "$V" --argjson pre "$PRE" --arg c "$CREATED" --arg n "$NOTES" --arg r "$REL_URL" --argjson p "$PLATFORMS" \
             '{version:$v, prerelease:$pre, created_at:$c, release_notes:$n, github_release_url:$r, platforms:$p}' > new.json
 
-          KEY="$P/flasher/releases.json"
-          aws s3 cp "s3://aircast-artifacts/$KEY" existing.json 2>/dev/null || echo '{"releases":[]}' > existing.json
+          KEY="flasher/releases.json"
+          aws s3 cp "s3://aircast-artifacts-$P/$KEY" existing.json 2>/dev/null || echo '{"releases":[]}' > existing.json
           jq --slurpfile new new.json \
             'def key: .version | ltrimstr("v") | [splits("[.-]")] | map(tonumber? // .);
              .releases = ([$new[0]] + [.releases[] | select(.version != $new[0].version)] | sort_by(key) | reverse)' \
             existing.json > releases.json
-          aws s3 cp releases.json "s3://aircast-artifacts/$KEY" --acl public-read
-
-      - name: Invalidate CloudFront
-        run: |
-          V="${{ needs.setup.outputs.version }}"
-          DOMAIN="${{ needs.setup.outputs.cloudfront_domain }}"
-          ID=$(aws cloudfront list-distributions --query "DistributionList.Items[?contains(Aliases.Items, '$DOMAIN')].Id" --output text)
-          if [ -n "$ID" ]; then
-            aws cloudfront create-invalidation --distribution-id "$ID" --paths "/flasher/releases.json" "/flasher/latest.json" "/flasher/$V/*" >/dev/null
-            echo "Invalidated CloudFront for $DOMAIN"
-          else
-            echo "No CloudFront distribution found for $DOMAIN (skipping)"
-          fi
+          aws s3 cp releases.json "s3://aircast-artifacts-$P/$KEY"
 
       - name: Verify the published updater is installable
         run: |
@@ -351,20 +339,19 @@ jobs:
     needs: [setup, desktop-builds, mirror-to-s3]
     if: always() && needs.desktop-builds.result == 'success'
     runs-on: ubuntu-latest
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      AWS_ENDPOINT_URL: https://cb3f7d95c2d311b22c4e57e0759d3a13.r2.cloudflarestorage.com
+      AWS_DEFAULT_REGION: auto
+      AWS_REQUEST_CHECKSUM_CALCULATION: when_required
     steps:
-      - uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: us-east-1
-
       - name: Cleanup old releases
         env:
           GH_TOKEN: ${{ secrets.PAT_TOKEN }}
         run: |
           P="${{ needs.setup.outputs.s3_path }}"
           ENV="${{ needs.setup.outputs.environment }}"
-          DOMAIN="${{ needs.setup.outputs.cloudfront_domain }}"
           KEEP_COUNT=5
 
           # Match only this channel's tags (double-escaped for jq's regex).
@@ -396,7 +383,7 @@ jobs:
               echo "Processing: $TAG_NAME"
               gh api -X DELETE repos/${{ github.repository }}/releases/$RELEASE_ID || true
               gh api -X DELETE repos/${{ github.repository }}/git/refs/tags/$TAG_NAME || true
-              aws s3 rm "s3://aircast-artifacts/$P/flasher/$TAG_NAME/" --recursive || true
+              aws s3 rm "s3://aircast-artifacts-$P/flasher/$TAG_NAME/" --recursive || true
             done
             echo "Kept latest $KEEP_COUNT releases"
           else
@@ -404,8 +391,8 @@ jobs:
           fi
 
           # Prune deleted versions from releases.json.
-          KEY="$P/flasher/releases.json"
-          if aws s3 cp "s3://aircast-artifacts/$KEY" releases.json 2>/dev/null; then
+          KEY="flasher/releases.json"
+          if aws s3 cp "s3://aircast-artifacts-$P/$KEY" releases.json 2>/dev/null; then
             KEEP_JSON=$(echo "$VERSIONS_TO_KEEP" | jq -R -s 'split("\n") | map(select(length > 0))')
             jq --argjson keep "$KEEP_JSON" \
               '.releases = [.releases[] | select(.version as $v | $keep | index($v))]' \
@@ -414,16 +401,10 @@ jobs:
             AFTER=$(jq '.releases | length' releases-cleaned.json)
             echo "releases.json: $BEFORE -> $AFTER entries"
             if [ "$BEFORE" != "$AFTER" ]; then
-              aws s3 cp releases-cleaned.json "s3://aircast-artifacts/$KEY" --acl public-read
+              aws s3 cp releases-cleaned.json "s3://aircast-artifacts-$P/$KEY"
             fi
           fi
 
-          # Invalidate CloudFront so the pruned catalog is served immediately.
-          ID=$(aws cloudfront list-distributions --query "DistributionList.Items[?contains(Aliases.Items, '$DOMAIN')].Id" --output text)
-          if [ -n "$ID" ]; then
-            aws cloudfront create-invalidation --distribution-id "$ID" --paths "/flasher/releases.json" "/flasher/latest.json" >/dev/null
-            echo "Invalidated CloudFront for $DOMAIN"
-          fi
 
   notify:
     needs: [setup, desktop-builds, mirror-to-s3, cleanup-old-releases]
@@ -435,7 +416,7 @@ jobs:
             echo "## Aircast Flasher Release"
             echo "- **Version:** ${{ needs.setup.outputs.version }} (${{ needs.setup.outputs.environment }})"
             echo "- **Builds:** ${{ needs.desktop-builds.result }}"
-            echo "- **S3 mirror:** ${{ needs.mirror-to-s3.result }}"
+            echo "- **R2 mirror:** ${{ needs.mirror-to-s3.result }}"
             echo "- **Downloads:** ${{ needs.setup.outputs.downloads_url }}/flasher/${{ needs.setup.outputs.version }}/"
             echo "- **Catalog:** ${{ needs.setup.outputs.downloads_url }}/flasher/releases.json"
           } >> "$GITHUB_STEP_SUMMARY"

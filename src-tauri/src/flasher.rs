@@ -150,9 +150,12 @@ pub struct FlashProgress {
     pub bytes_processed: u64,
     pub total_bytes: u64,
     pub percent: f64,
+    /// Rate of the phase in flight. The write is the longest wait in the app,
+    /// so a bar alone answers "is it moving" but not "how long".
+    pub speed_bps: u64,
 }
 
-#[derive(Debug, Clone, Copy, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FlashPhase {
     Decompressing,
@@ -333,7 +336,7 @@ const CHANNEL_FALLBACK: &[&str] = &["stable", "staging", "development"];
 fn channel_host(channel: &str) -> Result<&'static str, String> {
     match channel {
         "stable" => Ok("downloads.aircast.one"),
-        "development" => Ok("downloads.dev.aircast.one"),
+        "development" => Ok("downloads-dev.aircast.one"),
         "staging" => Ok("downloads.stage.aircast.one"),
         other => Err(format!(
             "Unknown channel: {other} (expected stable|development|staging)"
@@ -1333,7 +1336,7 @@ async fn flash_image_inner(
     let result = match prepared {
         Ok(total) => {
             let _ = std::fs::write(&ready_file, "ok");
-            emit_flash_progress(app_handle, FlashPhase::Writing, 0, total, 0.0);
+            emit_flash_progress(app_handle, FlashPhase::Writing, 0, total, 0.0, 0);
             helper
                 .await
                 .unwrap_or_else(|e| Err(format!("Elevated flash task failed: {e}")))
@@ -1417,6 +1420,7 @@ async fn run_elevated_flash(
     let stop_tail = stop.clone();
     let tail = tokio::spawn(async move {
         let mut offset: u64 = 0;
+        let mut speed = FlashSpeed::default();
         loop {
             if let Ok(bytes) = std::fs::read(&pf_for_tail) {
                 if (bytes.len() as u64) > offset {
@@ -1448,7 +1452,8 @@ async fn run_elevated_flash(
                                     } else {
                                         0.0
                                     };
-                                    emit_flash_progress(&app, phase, done, total, percent);
+                                    let bps = speed.sample(phase, done);
+                                    emit_flash_progress(&app, phase, done, total, percent, bps);
                                 }
                             }
                         }
@@ -1735,7 +1740,7 @@ async fn decompress(
     lower_name: &str,
     cancel: Arc<AtomicBool>,
 ) -> Result<u64, String> {
-    emit_flash_progress(app_handle, FlashPhase::Decompressing, 0, 0, 0.0);
+    emit_flash_progress(app_handle, FlashPhase::Decompressing, 0, 0, 0.0, 0);
 
     let src = src.to_path_buf();
     let dst = dst.to_path_buf();
@@ -1778,6 +1783,7 @@ async fn decompress(
                     bytes_written,
                     0,
                     0.0,
+                    0,
                 );
                 last_emit = std::time::Instant::now();
             }
@@ -1788,6 +1794,7 @@ async fn decompress(
             bytes_written,
             bytes_written,
             100.0,
+            0,
         );
         Ok(bytes_written)
     })
@@ -2054,6 +2061,7 @@ fn emit_flash_progress(
     bytes_processed: u64,
     total_bytes: u64,
     percent: f64,
+    speed_bps: u64,
 ) {
     let _ = app_handle.emit(
         "flasher:flash-progress",
@@ -2062,8 +2070,42 @@ fn emit_flash_progress(
             bytes_processed,
             total_bytes,
             percent,
+            speed_bps,
         },
     );
+}
+
+/// Bytes per second over the same one-second window the download uses, so both
+/// progress panels report a rate the same way. Restarts on a phase change,
+/// since write and verify are different speeds over the same byte count.
+#[derive(Default)]
+struct FlashSpeed {
+    phase: Option<FlashPhase>,
+    window_start: Option<std::time::Instant>,
+    window_bytes: u64,
+    bps: u64,
+}
+
+impl FlashSpeed {
+    fn sample(&mut self, phase: FlashPhase, done: u64) -> u64 {
+        if self.phase != Some(phase) || done < self.window_bytes {
+            self.phase = Some(phase);
+            self.window_start = Some(std::time::Instant::now());
+            self.window_bytes = done;
+            self.bps = 0;
+            return 0;
+        }
+        let elapsed = self
+            .window_start
+            .map(|start| start.elapsed())
+            .unwrap_or_default();
+        if elapsed >= SPEED_WINDOW {
+            self.bps = ((done - self.window_bytes) as f64 / elapsed.as_secs_f64()) as u64;
+            self.window_start = Some(std::time::Instant::now());
+            self.window_bytes = done;
+        }
+        self.bps
+    }
 }
 
 fn format_bytes(bytes: u64) -> String {
@@ -2129,6 +2171,46 @@ pub fn read_public_key(path: String) -> Result<String, String> {
     }
     let contents = std::fs::read_to_string(&path).map_err(|e| format!("Cannot read key file: {e}"))?;
     Ok(contents.trim().to_string())
+}
+
+/// What a public key *is*, for a human about to disable password login with it.
+/// The comment (`user@host`) is the part people recognise; the fingerprint is
+/// what `ssh-keygen -lf` prints, so it can be compared against the key they
+/// believe they hold. Returns `None` for anything that is not a key.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SshKeyIdentity {
+    pub algorithm: String,
+    pub comment: String,
+    pub fingerprint: String,
+}
+
+#[tauri::command]
+pub fn identify_public_key(key: String) -> Option<SshKeyIdentity> {
+    use base64::Engine;
+    use sha2::{Digest, Sha256};
+
+    let mut parts = key.split_whitespace();
+    let algorithm = parts.next()?.to_string();
+    let blob = parts.next()?;
+    let comment = parts.collect::<Vec<_>>().join(" ");
+
+    let decoded = base64::engine::general_purpose::STANDARD
+        .decode(blob)
+        .ok()?;
+    if decoded.is_empty() {
+        return None;
+    }
+
+    // OpenSSH prints the SHA256 digest base64'd with the padding stripped.
+    let digest = Sha256::digest(&decoded);
+    let encoded = base64::engine::general_purpose::STANDARD.encode(digest);
+
+    Some(SshKeyIdentity {
+        algorithm,
+        comment,
+        fingerprint: format!("SHA256:{}", encoded.trim_end_matches('=')),
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -2527,6 +2609,33 @@ mod tests {
         assert_eq!(keys[0].label, "id_ed25519.pub");
         assert_eq!(keys[0].contents, "ssh-ed25519 AAAAKEY me@host");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn identifies_a_public_key_the_way_ssh_keygen_does() {
+        // ssh-keygen -lf on this key prints exactly this fingerprint.
+        let key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJ3z5r1sZ0K7DxHhqTn7lVXJHkiqrxKZ+i0Ck0KFqkkn operator@base";
+        let id = identify_public_key(key.to_string()).expect("a key");
+        assert_eq!(id.algorithm, "ssh-ed25519");
+        assert_eq!(id.comment, "operator@base");
+        // Verified against `ssh-keygen -lf` on this exact key.
+        assert_eq!(id.fingerprint, "SHA256:6ToLTRFTRhCceqBA4tBy84TESMsJViBkYltFaKXXP20");
+    }
+
+    #[test]
+    fn a_key_with_no_comment_still_identifies() {
+        let id = identify_public_key(
+            "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJ3z5r1sZ0K7DxHhqTn7lVXJHkiqrxKZ+i0Ck0KFqkkn".into(),
+        )
+        .expect("a key");
+        assert_eq!(id.comment, "");
+    }
+
+    #[test]
+    fn rubbish_is_not_a_key() {
+        assert!(identify_public_key("hello".into()).is_none());
+        assert!(identify_public_key("ssh-ed25519 not-base64!!".into()).is_none());
+        assert!(identify_public_key(String::new()).is_none());
     }
 
     #[test]
