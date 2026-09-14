@@ -1,3 +1,19 @@
+
+      - name: Notarize and staple the DMG
+        if: matrix.os == 'macos'
+        env:
+          GH_TOKEN: ${{ secrets.PAT_TOKEN }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          dmg=$(ls target/*/release/bundle/dmg/*.dmg | head -1)
+          xcrun notarytool submit "$dmg" --apple-id "$APPLE_ID" --password "$APPLE_PASSWORD" --team-id "$APPLE_TEAM_ID" --wait
+          xcrun stapler staple "$dmg"
+          xcrun stapler validate "$dmg"
+          asset="$(basename "$dmg" | tr ' ' .)"
+          cp "$dmg" "$asset"
+          gh release upload "${{ needs.setup.outputs.version }}" "$asset" --clobber -R "${{ github.repository }}"
 name: Desktop Release
 
 # Builds the Aircast Flasher for macOS/Windows/Linux on a version tag, publishes
