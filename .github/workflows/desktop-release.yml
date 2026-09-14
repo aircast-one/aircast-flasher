@@ -203,13 +203,15 @@ jobs:
           # without a telemetry sink and only ever writes the local event log,
           # which is exactly what a dev build should do.
           POSTHOG_KEY: ${{ secrets.POSTHOG_KEY }}
-          # macOS code signing / notarization is intentionally NOT wired here:
-          # passing empty APPLE_CERTIFICATE makes tauri-action attempt
-          # `security import` on an empty cert and fail. To enable signing, add a
-          # real Apple Developer ID cert and set these env (only when non-empty):
-          #   APPLE_CERTIFICATE, APPLE_CERTIFICATE_PASSWORD, APPLE_SIGNING_IDENTITY,
-          #   APPLE_ID, APPLE_PASSWORD, APPLE_TEAM_ID
-          # Until then macOS builds ad-hoc (unsigned) and succeeds, like Win/Linux.
+          # macOS: Developer ID signing + notarization + stapling, done by
+          # tauri-action when these are set. Gated to the mac runner: an empty
+          # APPLE_CERTIFICATE makes tauri-action run `security import` on nothing.
+          APPLE_CERTIFICATE: ${{ matrix.os == 'macos' && secrets.APPLE_CERTIFICATE || '' }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ matrix.os == 'macos' && secrets.APPLE_CERTIFICATE_PASSWORD || '' }}
+          APPLE_SIGNING_IDENTITY: ${{ matrix.os == 'macos' && secrets.APPLE_SIGNING_IDENTITY || '' }}
+          APPLE_ID: ${{ matrix.os == 'macos' && secrets.APPLE_ID || '' }}
+          APPLE_PASSWORD: ${{ matrix.os == 'macos' && secrets.APPLE_PASSWORD || '' }}
+          APPLE_TEAM_ID: ${{ matrix.os == 'macos' && secrets.APPLE_TEAM_ID || '' }}
           # Windows Authenticode is config-driven: add
           # `bundle.windows.certificateThumbprint` to tauri.conf.json + a runner cert.
         with:
