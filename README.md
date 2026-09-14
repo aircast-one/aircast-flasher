@@ -173,3 +173,13 @@ existing log as already shipped.
   macOS + Linux). Add a `\\.\PhysicalDrive` path if needed.
 - **Updater** — wire `tauri-plugin-updater` like aircast-web (pubkey + release
   endpoint) once releases are published.
+
+## License
+
+GPL-3.0-only. See `LICENSE`. Forks and derived flashers must publish their
+source under the same terms.
+
+This repository is the desktop flasher only: it downloads the published
+Aircast image, writes network, hostname and access settings onto the card, and
+verifies the write. The image itself, `aircastd`, and the Aircast cloud are
+separate, proprietary components and are not covered by this license.
