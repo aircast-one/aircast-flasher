@@ -278,7 +278,7 @@ jobs:
           # plus its detached .sig signature for verification).
           for f in *.dmg *.dmg.sha256 *.dmg.sig *.app.tar.gz *.app.tar.gz.sha256 *.app.tar.gz.sig; do [ -f "$f" ] && aws s3 cp "$f" "$base/macos/$f"; done || true
           for f in *.exe *.exe.sha256 *.exe.sig; do [ -f "$f" ] && aws s3 cp "$f" "$base/windows/$f"; done || true
-          for f in *.deb *.deb.sha256 *.rpm *.rpm.sha256 *.AppImage *.AppImage.sha256 *.AppImage.sig; do [ -f "$f" ] && aws s3 cp "$f" "$base/linux/$f"; done || true
+          for f in *.deb *.deb.sha256 *.deb.sig *.rpm *.rpm.sha256 *.rpm.sig *.AppImage *.AppImage.sha256 *.AppImage.sig; do [ -f "$f" ] && aws s3 cp "$f" "$base/linux/$f"; done || true
 
       - name: Upload updater manifest
         run: |
