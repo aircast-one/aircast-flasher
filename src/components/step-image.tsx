@@ -12,6 +12,7 @@ import {
 import { formatBytes, formatDate } from "@/lib/format";
 import type { SourceKind } from "@/components/wizard-types";
 import type { Release } from "@/types";
+import { releaseLabel } from "./release-label";
 
 export function StepImage({
   sourceKind,
@@ -78,7 +79,7 @@ export function StepImage({
                     <span className="flex-1">
                       {option.version}
                       {index === 0 ? " (latest)" : ""}
-                      {option.prerelease ? " · pre-release" : ""}
+                      {releaseLabel(option)}
                     </span>
                     <span className="text-xs text-muted-foreground">
                       {formatDate(option.created_at)}
