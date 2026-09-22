@@ -117,7 +117,13 @@ fn cloud_init_user_data(config: &ProvisionConfig) -> Option<String> {
     let mut scrub = false;
 
     if let Some(host) = &config.hostname {
-        top.push_str(&format!("hostname: {host}\npreserve_hostname: false\n"));
+        // manage_etc_hosts keeps 127.0.1.1 pointing at the name cloud-init just
+        // set. Without it the image's own entry survives, every sudo prints
+        // "unable to resolve host", and anything resolving its own hostname
+        // waits for DNS to fail first.
+        top.push_str(&format!(
+            "hostname: {host}\npreserve_hostname: false\nmanage_etc_hosts: localhost\n"
+        ));
     }
 
     if let Some(access) = config.access.as_ref().filter(|a| a.is_effective()) {
@@ -406,6 +412,17 @@ mod tests {
         assert!(!net.contents.contains("password: \"password\""));
         assert!(files.iter().any(|f| f.name == "user-data" && f.contents.contains("hostname: aircast")));
         assert!(files.iter().any(|f| f.name == "meta-data"));
+    }
+
+    #[test]
+    fn cloud_init_renames_the_host_in_etc_hosts_too() {
+        let ProvisionPlan::CloudInit { files } =
+            plan(&cfg(InitFormat::CloudInit, true, Some("aircast")))
+        else {
+            panic!("expected CloudInit plan");
+        };
+        let user_data = files.iter().find(|f| f.name == "user-data").unwrap();
+        assert!(user_data.contents.contains("manage_etc_hosts: localhost"));
     }
 
     #[test]
