@@ -129,7 +129,7 @@ fn cloud_init_user_data(config: &ProvisionConfig) -> Option<String> {
     if let Some(access) = config.access.as_ref().filter(|a| a.is_effective()) {
         // Returns true when it wrote a plaintext secret (a password) that must
         // not linger on the card.
-        scrub |= access_cloud_init(access, &mut top, &mut runcmd);
+        scrub |= access_cloud_init(access, &mut top, &mut write_files, &mut runcmd);
     }
 
     if let Some((control, key)) = config.tailscale.as_ref().and_then(provisioned_tailscale) {
@@ -161,15 +161,29 @@ fn cloud_init_user_data(config: &ProvisionConfig) -> Option<String> {
     Some(format!("#cloud-config\n{body}"))
 }
 
-/// Emits the SSH/credential cloud-config into `top` (and a disable-ssh item into
-/// `runcmd`). Returns true if a plaintext secret (password) was written, so the
-/// caller can scrub `user-data` after first boot. The public key is not a secret.
-fn access_cloud_init(access: &AccessConfig, top: &mut String, runcmd: &mut Vec<String>) -> bool {
+/// Emits the SSH/credential cloud-config: settings into `top`, the staged key
+/// and its install script into `write_files`, and the item that runs it — or
+/// disables ssh — into `runcmd`. Returns true if a plaintext secret (password)
+/// was written, so the caller can scrub `user-data` after first boot. The
+/// public key is not a secret.
+fn access_cloud_init(
+    access: &AccessConfig,
+    top: &mut String,
+    write_files: &mut Vec<String>,
+    runcmd: &mut Vec<String>,
+) -> bool {
     match access.ssh {
         SshMode::KeyOnly => {
             if let Some(key) = sanitized(&access.authorized_key) {
                 top.push_str("ssh_pwauth: false\n");
-                top.push_str(&format!("ssh_authorized_keys:\n  - {}\n", json_string(&key)));
+                // Not top-level `ssh_authorized_keys`: cloud-init hands those
+                // to its default user, and this image has none — the login user
+                // is created by pi-gen, not by cloud-init. The key then reached
+                // nobody while ssh_pwauth: false still landed, which is a card
+                // with no way into it at all. Install it by name instead, and
+                // let the script put passwords back if even that fails.
+                write_files.push(install_key_write_files(&key));
+                runcmd.push(install_key_runcmd());
             }
             false
         }
@@ -203,6 +217,79 @@ fn sanitized(v: &Option<String>) -> Option<String> {
     let s = sanitize_line(v.as_deref().unwrap_or_default());
     let s = s.trim().to_string();
     (!s.is_empty()).then_some(s)
+}
+
+const KEY_STAGE_PATH: &str = "/root/.aircast-authorized-key";
+const INSTALL_KEY_PATH: &str = "/root/aircast-install-key.sh";
+const RECOVERY_MARKER: &str = "/var/log/aircast-key-install-failed";
+/// sshd takes the first value it reads and `Include /etc/ssh/sshd_config.d/*.conf`
+/// sits at the top of Debian's sshd_config, so a drop-in decides this setting
+/// whatever the main file says. cloud-init writes `50-cloud-init.conf`; glob
+/// order means anything that must beat it has to sort *before* it, not after.
+const ACCESS_DROPIN: &str = "/etc/ssh/sshd_config.d/10-aircast-access.conf";
+
+/// The first-boot step that puts the operator's key where sshd will read it and
+/// then settles password auth to match what actually happened.
+///
+/// It resolves the account rather than assuming any part of it: uid 1000 is
+/// what pi-gen's `FIRST_USER_NAME` creates, and the group and home come out of
+/// that same passwd entry — a group is not always named after its user, and
+/// assuming a name is what broke this in the first place.
+///
+/// One rule, whichever path emitted it: the key is in place, so passwords go
+/// off; or it is not, so passwords stay on and a marker says why. Handing over
+/// a card with neither a key nor a password is the one outcome worth avoiding.
+fn install_key_body() -> String {
+    format!(
+        "key={KEY_STAGE_PATH}\n\
+         user=$(getent passwd 1000 | cut -d: -f1)\n\
+         [ -n \"$user\" ] || user=pi\n\
+         group=$(getent passwd \"$user\" | cut -d: -f4)\n\
+         [ -n \"$group\" ] || group=\"$user\"\n\
+         home=$(getent passwd \"$user\" | cut -d: -f6)\n\
+         [ -n \"$home\" ] || home=/home/$user\n\
+         landed=no\n\
+         if [ -s \"$key\" ]; then\n\
+         \x20 install -d -m 700 -o \"$user\" -g \"$group\" \"$home/.ssh\" \\\n\
+         \x20   && cat \"$key\" >>\"$home/.ssh/authorized_keys\" \\\n\
+         \x20   && chmod 600 \"$home/.ssh/authorized_keys\" \\\n\
+         \x20   && chown \"$user\":\"$group\" \"$home/.ssh/authorized_keys\"\n\
+         \x20 grep -qxF \"$(cat \"$key\")\" \"$home/.ssh/authorized_keys\" 2>/dev/null && landed=yes\n\
+         fi\n\
+         rm -f \"$key\"\n\
+         mkdir -p /etc/ssh/sshd_config.d\n\
+         if [ \"$landed\" = yes ]; then\n\
+         \x20 want=no\n\
+         \x20 rm -f {RECOVERY_MARKER}\n\
+         else\n\
+         \x20 want=yes\n\
+         \x20 echo \"aircast: could not install the operator key for $user; passwords left on so the device stays reachable\" >{RECOVERY_MARKER}\n\
+         fi\n\
+         printf 'PasswordAuthentication %s\\n' \"$want\" >{ACCESS_DROPIN}\n\
+         sed -i \"s/^#\\?PasswordAuthentication.*/PasswordAuthentication $want/\" /etc/ssh/sshd_config 2>/dev/null || true\n\
+         systemctl try-restart ssh 2>/dev/null || systemctl try-restart sshd 2>/dev/null || true\n"
+    )
+}
+
+fn install_key_script() -> String {
+    format!("#!/bin/sh\n{}", install_key_body())
+}
+
+/// Stages the key next to the script, so neither the YAML nor the shell has to
+/// quote it: the key never appears in a command line.
+fn install_key_write_files(key: &str) -> String {
+    let script = install_key_script()
+        .lines()
+        .map(|l| format!("      {l}\n"))
+        .collect::<String>();
+    format!(
+        "  - path: {KEY_STAGE_PATH}\n    permissions: '0600'\n    content: |\n      {key}\n\
+         \x20 - path: {INSTALL_KEY_PATH}\n    permissions: '0700'\n    content: |\n{script}"
+    )
+}
+
+fn install_key_runcmd() -> String {
+    format!("  - [ sh, {INSTALL_KEY_PATH} ]\n")
 }
 
 /// Removes the seed + cloud-init's cache of user-data after first boot, so a
@@ -306,14 +393,15 @@ fn firstrun_access(access: &AccessConfig) -> String {
             let Some(key) = sanitized(&access.authorized_key) else {
                 return String::new();
             };
+            // The same body cloud-init runs: one place decides which account
+            // the key belongs to and whether passwords may go off.
             format!(
-                "install -d -m 700 -o pi -g pi /home/pi/.ssh\n\
-                 printf '%s\\n' '{key}' >>/home/pi/.ssh/authorized_keys\n\
-                 chmod 600 /home/pi/.ssh/authorized_keys\n\
-                 chown pi:pi /home/pi/.ssh/authorized_keys\n\
-                 sed -i 's/^#\\?PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config\n\
+                "printf '%s\\n' '{key}' >{KEY_STAGE_PATH}\n\
+                 chmod 600 {KEY_STAGE_PATH}\n\
+                 {body}\
                  systemctl enable ssh\n\n",
                 key = shell_single_quote(&key),
+                body = install_key_body(),
             )
         }
         SshMode::Password => {
@@ -537,10 +625,134 @@ mod tests {
         );
         let ud = cloud_user_data(&config);
         assert!(ud.contains("ssh_pwauth: false"));
-        assert!(ud.contains("ssh_authorized_keys:"));
-        assert!(ud.contains("\"ssh-ed25519 AAAAkey operator@base\""));
+        assert!(ud.contains(&format!("  - path: {KEY_STAGE_PATH}")));
+        assert!(ud.contains("      ssh-ed25519 AAAAkey operator@base\n"));
+        assert!(ud.contains(&format!("  - [ sh, {INSTALL_KEY_PATH} ]")));
         // A public key is not a secret — user-data is not scrubbed for it.
         assert!(!ud.contains("rm -f /boot/firmware/user-data"));
+    }
+
+    #[test]
+    fn key_only_never_leaves_the_key_to_cloud_inits_default_user() {
+        // This image has no cloud-init default user, so a top-level
+        // ssh_authorized_keys reaches nobody while ssh_pwauth: false still
+        // applies — which is exactly how a card ends up with no way in.
+        let config = access_cfg(
+            InitFormat::CloudInit,
+            access(SshMode::KeyOnly, Some("ssh-ed25519 AAAAkey operator@base"), None),
+        );
+        let ud = cloud_user_data(&config);
+        assert!(!ud.contains("ssh_authorized_keys:"));
+        assert!(ud.contains("  - [ sh, /root/aircast-install-key.sh ]"));
+    }
+
+    #[test]
+    fn install_key_script_resolves_the_user_instead_of_assuming_one() {
+        // Assuming the name is what broke this the first time: the account is
+        // pi-gen's FIRST_USER_NAME, which the flasher does not choose.
+        let script = install_key_script();
+        assert!(script.contains("user=$(getent passwd 1000 | cut -d: -f1)"));
+        assert!(script.contains("home=$(getent passwd \"$user\" | cut -d: -f6)"));
+        assert!(script.contains("group=$(getent passwd \"$user\" | cut -d: -f4)"));
+        assert!(script.contains("install -d -m 700 -o \"$user\" -g \"$group\" \"$home/.ssh\""));
+        assert!(
+            !script.contains("-g \"$user\""),
+            "a group is not always named after its user"
+        );
+    }
+
+    #[test]
+    fn install_key_script_puts_passwords_back_when_the_key_does_not_land() {
+        // Handing over a card with neither a key nor a password is the one
+        // outcome worth avoiding, so the failure branch turns passwords on.
+        let script = install_key_script();
+        assert!(
+            !script.contains("|| exit 0"),
+            "a missing staged key is a failed install, not a reason to leave passwords off"
+        );
+        let (landed, failed) = script
+            .rsplit_once("else")
+            .expect("the script branches on whether the key landed");
+        assert!(landed.contains("want=no"));
+        assert!(failed.contains("want=yes"));
+        assert!(failed.contains(RECOVERY_MARKER));
+    }
+
+    #[test]
+    fn key_only_user_data_is_valid_cloud_config() {
+        // A user-data that does not parse is ignored in silence at boot, which
+        // is the whole failure mode here: assert the shape, not a substring.
+        let ud = cloud_user_data(&access_cfg(
+            InitFormat::CloudInit,
+            access(SshMode::KeyOnly, Some("ssh-ed25519 AAAAkey operator@base"), None),
+        ));
+        let doc: serde_norway::Value = serde_norway::from_str(&ud).expect("valid YAML");
+        assert_eq!(doc["ssh_pwauth"].as_bool(), Some(false));
+        assert!(doc.get("ssh_authorized_keys").is_none());
+
+        let files = doc["write_files"].as_sequence().expect("write_files is a list");
+        let staged = files
+            .iter()
+            .find(|f| f["path"].as_str() == Some(KEY_STAGE_PATH))
+            .expect("the key is staged");
+        assert_eq!(staged["content"].as_str(), Some("ssh-ed25519 AAAAkey operator@base\n"));
+        assert_eq!(staged["permissions"].as_str(), Some("0600"));
+        let script = files
+            .iter()
+            .find(|f| f["path"].as_str() == Some(INSTALL_KEY_PATH))
+            .expect("the script is written");
+        assert!(script["content"].as_str().unwrap().starts_with("#!/bin/sh\n"));
+
+        let run = doc["runcmd"].as_sequence().expect("runcmd is a list");
+        let argv: Vec<&str> = run[0]
+            .as_sequence()
+            .expect("runcmd item is the argv list form, not a shell string")
+            .iter()
+            .map(|v| v.as_str().expect("argv entries are strings"))
+            .collect();
+        assert_eq!(argv, vec!["sh", INSTALL_KEY_PATH]);
+    }
+
+    #[test]
+    fn recovery_beats_cloud_inits_own_sshd_drop_in() {
+        // sshd takes the first value it reads and cloud-init writes
+        // 50-cloud-init.conf, so editing the main config or sorting after it
+        // would change nothing at all.
+        assert!(ACCESS_DROPIN.starts_with("/etc/ssh/sshd_config.d/"));
+        let name = ACCESS_DROPIN.rsplit('/').next().unwrap();
+        assert!(name < "50-cloud-init.conf", "{name} must sort before it");
+        assert!(install_key_script().contains(ACCESS_DROPIN));
+    }
+
+    #[test]
+    fn install_key_script_checks_the_key_itself_not_just_a_non_empty_file() {
+        // An image that ships its own authorized_keys would otherwise pass a
+        // -s test with the operator's key nowhere in it.
+        let script = install_key_script();
+        assert!(script.contains("grep -qxF \"$(cat \"$key\")\" \"$home/.ssh/authorized_keys\""));
+    }
+
+    #[test]
+    fn both_init_formats_run_the_same_install_body() {
+        // The duplicate that hardcoded pi in one path and resolved it in the
+        // other is exactly how these two drifted apart before.
+        let body = install_key_body();
+        let cloud = cloud_user_data(&access_cfg(
+            InitFormat::CloudInit,
+            access(SshMode::KeyOnly, Some("ssh-ed25519 AAAAkey operator@base"), None),
+        ));
+        let ProvisionPlan::FirstRun { script, .. } = plan(&access_cfg(
+            InitFormat::FirstRun,
+            access(SshMode::KeyOnly, Some("ssh-ed25519 AAAAkey operator@base"), None),
+        )) else {
+            panic!("expected FirstRun plan");
+        };
+        // Every line, not a token one: the two paths drifted apart last time in
+        // the lines this test would have skipped.
+        for line in body.lines().filter(|l| !l.trim().is_empty()) {
+            assert!(script.contents.contains(line), "firstrun is missing: {line}");
+            assert!(cloud.contains(line.trim()), "cloud-init is missing: {line}");
+        }
     }
 
     #[test]
@@ -564,8 +776,10 @@ mod tests {
             access(SshMode::KeyOnly, Some("ssh-ed25519 KEY\nssh_pwauth: true"), None),
         );
         let ud = cloud_user_data(&config);
-        // The injected newline is stripped, so it can't become its own YAML key.
-        assert!(ud.contains("\"ssh-ed25519 KEYssh_pwauth: true\""));
+        // The injected newline is stripped, so it can't become its own YAML key:
+        // it stays one indented line inside the staged key's block scalar.
+        assert!(ud.contains("      ssh-ed25519 KEYssh_pwauth: true\n"));
+        assert!(!ud.lines().any(|l| l == "ssh_pwauth: true"));
     }
 
     #[test]
@@ -602,7 +816,10 @@ mod tests {
             panic!("expected FirstRun plan");
         };
         assert!(script.contents.contains(r"key-with-'\''quote"));
-        assert!(script.contents.contains("PasswordAuthentication no"));
+        // The shared body decides the setting from whether the key landed, so
+        // firstrun no longer hardcodes it — nor the account it belongs to.
+        assert!(script.contents.contains("PasswordAuthentication %s"));
+        assert!(!script.contents.contains("-o pi -g pi"));
     }
 
     #[test]
