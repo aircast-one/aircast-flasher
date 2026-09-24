@@ -215,11 +215,11 @@ mod tests {
         // A spread of deliberately unaligned offsets and lengths.
         let ops: &[(u64, usize, u8)] = &[
             (0, 10, 0x11),
-            (10, 4096, 0x22),       // crosses a block boundary, unaligned start
-            (4090, 20, 0x33),       // straddles the first boundary
-            (8192, 4096, 0x44),     // fully aligned block
-            (8000, 500, 0x55),      // unaligned within/around a block
-            (12345, 1234, 0x66),    // odd offset + odd length
+            (10, 4096, 0x22),           // crosses a block boundary, unaligned start
+            (4090, 20, 0x33),           // straddles the first boundary
+            (8192, 4096, 0x44),         // fully aligned block
+            (8000, 500, 0x55),          // unaligned within/around a block
+            (12345, 1234, 0x66),        // odd offset + odd length
             (size as u64 - 5, 5, 0x77), // last 5 bytes
         ];
 
@@ -237,7 +237,10 @@ mod tests {
         let mut got = vec![0u8; size];
         aligned.seek(SeekFrom::Start(0)).unwrap();
         aligned.read_exact(&mut got).unwrap();
-        assert_eq!(got, plain_bytes, "aligned read-back must match plain cursor");
+        assert_eq!(
+            got, plain_bytes,
+            "aligned read-back must match plain cursor"
+        );
     }
 
     #[test]

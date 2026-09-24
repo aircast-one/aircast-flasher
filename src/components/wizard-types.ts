@@ -9,13 +9,14 @@ import type {
 
 export type SourceKind = "aircast" | "local";
 
-export type WizardStep = 1 | 2 | 3 | 4;
+export type WizardStep = 1 | 2 | 3 | 4 | 5;
 
 export const STEP = {
   os: 1,
   network: 2,
-  storage: 3,
-  write: 4,
+  access: 3,
+  storage: 4,
+  write: 5,
 } as const satisfies Record<string, WizardStep>;
 
 export type FlashProgressState =

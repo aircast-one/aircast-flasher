@@ -55,7 +55,10 @@ test("the surviving image default login is flagged", () => {
 test("remote access is off without a key, whatever the control server says", () => {
   assert.equal(valueOf(base, "Remote access"), "Off");
   assert.equal(
-    valueOf({ ...base, controlServer: "https://hs.example.com" }, "Remote access"),
+    valueOf(
+      { ...base, controlServer: "https://hs.example.com" },
+      "Remote access",
+    ),
     "Off",
   );
 });
@@ -68,12 +71,28 @@ test("distinguishes Tailscale from a self-hosted control server", () => {
       { ...withKey, controlServer: "https://hs.example.com" },
       "Remote access",
     ),
-    "Headscale · https://hs.example.com",
+    "Headscale · hs.example.com",
   );
 });
 
+test("a control server that isn't a URL means remote access is skipped", () => {
+  const bad = {
+    ...base,
+    authKey: "tskey-auth-abc",
+    controlServer: "headscale",
+  };
+  assert.equal(
+    valueOf(bad, "Remote access"),
+    "Off — control server isn't a URL",
+  );
+  assert.equal(rowOf(bad, "Remote access")?.warn, true);
+});
+
 test("an empty key or password means the image default login survives", () => {
-  assert.equal(valueOf(base, "Device access"), "Image default (pi / raspberry)");
+  assert.equal(
+    valueOf(base, "Device access"),
+    "Image default (pi / raspberry)",
+  );
   assert.equal(
     valueOf({ ...base, sshMode: "password" }, "Device access"),
     "Image default (pi / raspberry)",
@@ -105,7 +124,10 @@ test("names the key that will be written", () => {
 
 test("reports a set password and a disabled SSH server", () => {
   assert.equal(
-    valueOf({ ...base, sshMode: "password", devicePassword: "s3cret!" }, "Device access"),
+    valueOf(
+      { ...base, sshMode: "password", devicePassword: "s3cret!" },
+      "Device access",
+    ),
     "Password for pi",
   );
   assert.equal(
@@ -114,8 +136,12 @@ test("reports a set password and a disabled SSH server", () => {
   );
 });
 
-test("default hostnames are valid and collide rarely", () => {
-  const names = Array.from({ length: 500 }, defaultHostname);
-  names.forEach((n: string) => assert.match(n, /^aircast-[0-9a-f]{6}$/));
-  assert.equal(new Set(names).size, names.length);
+test("the default hostname is the lowest number not already in use", () => {
+  assert.equal(defaultHostname(), "aircast-01");
+  assert.equal(defaultHostname(["aircast-01"]), "aircast-02");
+  assert.equal(defaultHostname(["aircast-01", "aircast-02"]), "aircast-03");
+  // A gap is filled rather than skipped, and case does not matter.
+  assert.equal(defaultHostname(["AIRCAST-01", "aircast-03"]), "aircast-02");
+  // Names that are not ours never shift the sequence.
+  assert.equal(defaultHostname(["falcon", "owel-3"]), "aircast-01");
 });

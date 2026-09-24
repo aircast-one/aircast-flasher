@@ -12,17 +12,16 @@ use windows::Win32::Foundation::{
     CloseHandle, GENERIC_READ, GENERIC_WRITE, HANDLE, INVALID_HANDLE_VALUE,
 };
 use windows::Win32::Storage::FileSystem::{
-    CreateFileW, FlushFileBuffers, ReadFile, SetFilePointerEx, WriteFile, BusTypeMmc, BusTypeSata,
-    BusTypeSd, BusTypeUsb, FILE_BEGIN, FILE_CURRENT, FILE_FLAGS_AND_ATTRIBUTES,
+    BusTypeMmc, BusTypeSata, BusTypeSd, BusTypeUsb, CreateFileW, FlushFileBuffers, ReadFile,
+    SetFilePointerEx, WriteFile, FILE_BEGIN, FILE_CURRENT, FILE_FLAGS_AND_ATTRIBUTES,
     FILE_FLAG_NO_BUFFERING, FILE_FLAG_WRITE_THROUGH, FILE_GENERIC_READ, FILE_SHARE_MODE,
     FILE_SHARE_READ, FILE_SHARE_WRITE, IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS, OPEN_EXISTING,
 };
 use windows::Win32::System::Ioctl::{
     PropertyStandardQuery, StorageDeviceProperty, DISK_EXTENT, DISK_GEOMETRY_EX,
-    FSCTL_DISMOUNT_VOLUME, FSCTL_LOCK_VOLUME, FSCTL_UNLOCK_VOLUME,
-    IOCTL_DISK_DELETE_DRIVE_LAYOUT, IOCTL_DISK_GET_DRIVE_GEOMETRY_EX,
-    IOCTL_DISK_UPDATE_PROPERTIES, IOCTL_STORAGE_QUERY_PROPERTY, STORAGE_DEVICE_DESCRIPTOR,
-    STORAGE_PROPERTY_QUERY, VOLUME_DISK_EXTENTS,
+    FSCTL_DISMOUNT_VOLUME, FSCTL_LOCK_VOLUME, FSCTL_UNLOCK_VOLUME, IOCTL_DISK_DELETE_DRIVE_LAYOUT,
+    IOCTL_DISK_GET_DRIVE_GEOMETRY_EX, IOCTL_DISK_UPDATE_PROPERTIES, IOCTL_STORAGE_QUERY_PROPERTY,
+    STORAGE_DEVICE_DESCRIPTOR, STORAGE_PROPERTY_QUERY, VOLUME_DISK_EXTENTS,
 };
 use windows::Win32::System::IO::DeviceIoControl;
 
@@ -96,7 +95,8 @@ fn volume_disk_number(handle: HANDLE) -> Option<u32> {
     // generous number of inline DISK_EXTENTs (single-disk volumes need just one).
     let mut buf = vec![
         0u8;
-        std::mem::size_of::<VOLUME_DISK_EXTENTS>() + 16 * std::mem::size_of::<DISK_EXTENT>()
+        std::mem::size_of::<VOLUME_DISK_EXTENTS>()
+            + 16 * std::mem::size_of::<DISK_EXTENT>()
     ];
     let mut returned: u32 = 0;
     unsafe {
@@ -423,8 +423,8 @@ pub fn open_device(device: &str) -> Result<WinDevice, String> {
 
     delete_drive_layout(disk.raw());
 
-    let size = query_disk_length(disk.raw())
-        .ok_or_else(|| format!("Failed to query the size of {id}"))?;
+    let size =
+        query_disk_length(disk.raw()).ok_or_else(|| format!("Failed to query the size of {id}"))?;
 
     Ok(WinDevice { disk, size, locked })
 }
@@ -458,8 +458,7 @@ impl std::io::Write for WinDevice {
 
     fn flush(&mut self) -> std::io::Result<()> {
         unsafe {
-            FlushFileBuffers(self.disk.raw())
-                .map_err(|e| std::io::Error::other(e.to_string()))?;
+            FlushFileBuffers(self.disk.raw()).map_err(|e| std::io::Error::other(e.to_string()))?;
         }
         Ok(())
     }
@@ -485,8 +484,7 @@ impl std::io::Seek for WinDevice {
 impl crate::engine::BlockDevice for WinDevice {
     fn sync(&mut self) -> std::io::Result<()> {
         unsafe {
-            FlushFileBuffers(self.disk.raw())
-                .map_err(|e| std::io::Error::other(e.to_string()))?;
+            FlushFileBuffers(self.disk.raw()).map_err(|e| std::io::Error::other(e.to_string()))?;
         }
         Ok(())
     }

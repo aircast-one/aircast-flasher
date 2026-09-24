@@ -1,5 +1,8 @@
-import { useState } from "react";
-import { Eye, EyeOff } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Eye, EyeOff, KeyRound } from "lucide-react";
+
+import { identifyPublicKey } from "@/api";
+import type { SshKeyIdentity } from "@/types";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -12,6 +15,59 @@ const SSH_MODES: { value: SshMode; label: string }[] = [
   { value: "key-only", label: "SSH key" },
   { value: "disabled", label: "Disabled" },
 ];
+
+// This key is about to turn password login off, and a wrong one means
+// re-flashing the card to get back in. The input truncates before the comment,
+// which is the only part a human recognises — so name the key, and print the
+// fingerprint `ssh-keygen -lf` prints so it can actually be compared.
+function KeyIdentity({ sshKey }: { sshKey: string }) {
+  const [identity, setIdentity] = useState<SshKeyIdentity | null>(null);
+
+  useEffect(() => {
+    const key = sshKey.trim();
+    if (key === "") {
+      setIdentity(null);
+      return;
+    }
+    let cancelled = false;
+    identifyPublicKey(key)
+      .then((id) => {
+        if (!cancelled) setIdentity(id);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [sshKey]);
+
+  if (identity === null) return null;
+
+  return (
+    <div className="flex items-start gap-2 rounded-md bg-muted/50 px-2.5 py-1.5">
+      <KeyRound className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
+      <div className="flex min-w-0 flex-col">
+        <span className="truncate text-xs">
+          {identity.comment === "" ? (
+            <span className="text-muted-foreground">
+              {identity.algorithm} · no comment
+            </span>
+          ) : (
+            <>
+              <span className="font-medium">{identity.comment}</span>
+              <span className="text-muted-foreground">
+                {" · "}
+                {identity.algorithm}
+              </span>
+            </>
+          )}
+        </span>
+        <span className="truncate font-mono text-xs text-muted-foreground">
+          {identity.fingerprint}
+        </span>
+      </div>
+    </div>
+  );
+}
 
 export interface DeviceAccessProps {
   sshMode: SshMode;
@@ -98,6 +154,7 @@ export function DeviceAccessSection({
             aria-invalid={sshKeyInvalid}
             aria-describedby="ssh-key-help"
           />
+          <KeyIdentity sshKey={sshKey} />
           <p id="ssh-key-help" className="text-sm text-muted-foreground">
             {sshKeyInvalid ? (
               <span className="text-destructive">
@@ -114,7 +171,10 @@ export function DeviceAccessSection({
                 stays usable.
               </>
             ) : (
-              <>Password login is off on the device.</>
+              <>
+                Password login is off on the device — check the key above is
+                the one you hold, or you'll need to re-flash to get back in.
+              </>
             )}
           </p>
         </div>

@@ -18,14 +18,92 @@ list_releases ─► download_image ─► flash_image ─► provision_device
 
 - **Image source** — `downloads.aircast.one/images/releases.json` (channels:
   `stable` / `development` / `staging`), or a local `.img`/`.img.xz`/`.img.gz`.
+- **Progress** — download and write both report a rate over the same
+  one-second window (`SPEED_WINDOW`). The write is the longest wait in the app,
+  so a bar alone would answer "is it moving" but not "how long"; the meter
+  restarts on a phase change, since write and verify run at different speeds
+  over the same byte count.
 - **Privileged write** — on macOS, one native auth prompt (Touch ID) via
   Authorization Services, then `dd of=/dev/rdiskN bs=1m` runs as root with the
   decompressed image streamed to its stdin (live progress + cancel). On Linux,
   `pkexec dd`. **No separate helper binary** to sign or bundle.
+- **Steps** — Operating system → **Network** (WiFi, hostname: whether it comes
+  online and what it's called) → **Access** (remote access, device access: both
+  optional, how you get in) → Storage → Write. Split because one screen was
+  answering four questions with two of them optional, so the optional half
+  inflated the mandatory half.
+- **The default hostname is the next free number** — `aircast-01`, then
+  `aircast-02`, chosen by checking the tailnet rather than by rolling random
+  hex. The hex existed only because the app could not see the fleet; it can
+  now, so the name says which device this is and cannot collide with one that
+  already exists. A gap is filled rather than skipped. Two sources say a name is
+  taken: the tailnet, and `flashedHostnames` in settings — the names this app
+  has written before, which is what keeps a batch flashed *offline* counting up
+  when there is no tailnet to consult. "Flash another" advances from whatever
+  the operator typed (`falcon-01` -> `falcon-02`), skipping anything taken, so
+  their naming survives rather than being replaced by a default.
+- **The SSH key is named before it locks you out** — an authorized key turns
+  password login off, and the field truncates before the `user@host` comment,
+  so `identify_public_key` prints the comment, the algorithm, and the SHA256
+  fingerprint `ssh-keygen -lf` prints. A wrong key here costs a re-flash; the
+  fingerprint is the only way to check it is the key you hold.
 - **Provisioning** — after writing, the boot partition is mounted and the WiFi
   PSK + hostname are written as cloud-init (`user-data` + `network-config`) or
   legacy `firstrun.sh`, then the card is ejected. The plaintext WiFi passphrase
   is never written — only the derived WPA-PSK.
+- **Remote access (optional)** — paste a pre-auth key and it is provisioned into
+  aircastd's store, so the device joins your tailnet on first boot with no
+  sign-in. Getting that key needs a Tailscale account, so the step checks this
+  computer with `local_tailscale` (`status --json` via the per-platform install
+  paths — it is not on `PATH` after a Mac App Store install) and says which of
+  three situations you're in: signed in (naming the account the key will come
+  from), installed but signed out, or not installed — offering **Get a key**
+  and, when missing, **Get Tailscale**.
+- **Remote access after boot** — leave the key blank and the device can sign
+  itself in instead. Once found on the LAN, `tailscale_login` POSTs to
+  aircastd's `/api/tailscale/connection`, which starts the headless tsnet login
+  and hands back a `login.tailscale.com` URL; the flasher opens it in the system
+  browser and then polls `tailscale_status` until the device reports the join.
+  Offered only over the LAN — on the device's own hotspot neither side has
+  internet, so the screen says to put the device on WiFi first.
+- **The tailnet itself** — `tailscale status --json` also returns every peer,
+  so `local_tailscale` reports them (shared-in devices are kept but flagged;
+  ones with no `DNSName` are dropped). That powers three things: a hostname
+  collision warning before the card is written (a name already on your tailnet
+  gets a `-1` suffix from Tailscale and the promised address drifts), a
+  join confirmation on the Write screen that works after the device has left
+  the LAN — the only way to confirm the pre-auth-key path — and the **Devices**
+  view. The join confirmation compares against a
+  baseline of the peers present when the screen mounted: matching on hostname
+  alone reports a machine that has been on the tailnet for months, which is
+  precisely the name the collision warning flagged.
+- **Devices** — a sidebar view, available at launch rather than after a flash.
+  `probe_devices` hits `/healthz` on every online Linux peer in parallel, so the
+  list is what is actually running aircastd, not what happens to run Linux (a
+  tailnet's Linux peers include servers and stray Pis). Each row opens the
+  device's own page over the tailnet, from anywhere — in an app window, not the
+  system browser, so managing a device never leaves the app. It is a native
+  webview rather than an iframe because the app's origin is a secure context and
+  an embedded `http://` frame is mixed active content the webviews block
+  inconsistently across platforms; the device page inherits no Tauri APIs, since
+  the capability is scoped to the `main` window. Links that are genuinely
+  external — the Tailscale keys page, docs, QGC — still open in the real
+  browser, deliberately: Google refuses OAuth sign-in inside an embedded
+  webview.
+
+- **Headscale** — `status --json` does not carry the control server, so
+  `tailscale debug prefs` supplies `ControlURL`. Anything that is not
+  Tailscale's own server switches the whole step: the form opens on the
+  self-hosted branch with the detected server filled in, the key help drops the
+  Tailscale admin link — Headscale keys come from `headscale preauthkeys
+  create`, shown with a copy button — and the post-boot sign-in PUTs the control
+  server to the device first, so a self-hosted shop's device never tries to sign
+  in to Tailscale.
+
+  Remote access is on **iff a pre-auth key is present**: a control server alone
+  writes nothing, which is why prefilling it raises no error. The only guard
+  left is a key with no server while self-hosted, where the key would go to
+  Tailscale instead.
 
 ## Layout
 
@@ -67,10 +145,12 @@ writing, and `validate_disk_path` rejects anything that isn't `/dev/diskN`
 
 ## Settings
 
-WiFi network + passphrase, hostname, control server and authorized SSH key are
-saved to `<config dir>/one.aircast.flasher/settings.json` (owner-only, 0600 —
-it holds the passphrase) via the `read_settings` / `write_settings` commands,
-rather than in webview localStorage. The pre-auth key is never persisted.
+WiFi network + passphrase, hostname, control server, authorized SSH key and the
+list of hostnames already written are saved to
+`<config dir>/one.aircast.flasher/settings.json` (owner-only, 0600 — it holds
+the passphrase) via the `read_settings` / `write_settings` commands, rather
+than in webview localStorage. The written-hostname list is capped at the most
+recent 200.
 
 `null` means "never set" and is distinct from `""` — that is what lets a
 cleared SSID or hostname stay cleared instead of snapping back to the detected
@@ -119,16 +199,15 @@ One line per event. `download` and `flash` are correlated by `job_id`:
 ```json
 {"event":"flash","job_id":"5f2…","app_version":"0.1.1","os":"macos","arch":"aarch64",
  "outcome":"failed","duration_ms":91000,"error":"write to device: Input/output error",
- "wifi":true,"hostname":true,"remote":"headscale","ssh":"password","init_format":"cloud-init",
+ "wifi":true,"hostname":true,"ssh":"password","init_format":"cloud-init",
  "image_bytes":3800000000,"compressed":true,"verified":false,"failed_at":"write",
  "decompress_ms":21000,"write_ms":70000,"write_mbps":54.3}
 ```
 
 Recorded: outcome, the phase a failure happened in, per-phase durations, write
 throughput, image size, and *whether* each setting was used. Never recorded: the
-SSID, the hostname, the WiFi passphrase, the pre-auth key, the device password,
-the SSH key, or the control-server URL — `describe_config` maps configuration to
-booleans and fixed labels, so a secret cannot reach the log by construction
+SSID, the hostname, the WiFi passphrase, the device password, or the SSH key —
+`describe_config` maps configuration to booleans and fixed labels, so a secret cannot reach the log by construction
 (`telemetry.rs` tests assert this). The log rolls over at 2 MiB.
 
 The events cover the whole run, not just the destructive part — a flash-only log

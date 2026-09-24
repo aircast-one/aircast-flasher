@@ -1,12 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { nextHostname } from "./next-hostname.ts";
+import { nextFreeHostname, nextHostname } from "./next-hostname.ts";
 
-test("a generated default is replaced by a fresh generated default", () => {
-  const next = nextHostname("aircast-4600ef");
-  assert.match(next, /^aircast-[0-9a-f]{6}$/);
-  assert.notEqual(next, "aircast-4600ef");
+test("a generated default counts up like any other numbered name", () => {
+  assert.equal(nextHostname("aircast-01"), "aircast-02");
+  assert.equal(nextHostname("aircast-09"), "aircast-10");
 });
 
 test("a numbered name counts up, keeping its padding", () => {
@@ -22,7 +21,7 @@ test("an unnumbered name gets a number rather than reusing the same one", () => 
 });
 
 test("an empty name falls back to a generated default", () => {
-  assert.match(nextHostname(""), /^aircast-[0-9a-f]{6}$/);
+  assert.equal(nextHostname(""), "aircast-01");
 });
 
 test("flashing a batch never repeats a hostname", () => {
@@ -31,4 +30,14 @@ test("flashing a batch never repeats a hostname", () => {
     ["falcon-01"],
   );
   assert.equal(new Set(names).size, names.length);
+});
+
+test("counting up skips names already taken, keeping the operator's stem", () => {
+  assert.equal(nextFreeHostname("falcon-01", []), "falcon-02");
+  assert.equal(nextFreeHostname("falcon-01", ["falcon-02"]), "falcon-03");
+  assert.equal(
+    nextFreeHostname("falcon-01", ["falcon-02", "FALCON-03"]),
+    "falcon-04",
+  );
+  assert.equal(nextFreeHostname("aircast-01", ["aircast-02"]), "aircast-03");
 });

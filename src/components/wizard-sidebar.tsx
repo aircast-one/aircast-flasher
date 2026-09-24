@@ -1,4 +1,4 @@
-import { Check } from "lucide-react";
+import { Check, Router } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { getVersion } from "@tauri-apps/api/app";
 
@@ -12,7 +12,8 @@ export interface SidebarStep {
 
 export const WIZARD_STEPS: SidebarStep[] = [
   { id: STEP.os, label: "Operating system" },
-  { id: STEP.network, label: "Network & access" },
+  { id: STEP.network, label: "Network" },
+  { id: STEP.access, label: "Access" },
   { id: STEP.storage, label: "Storage" },
   { id: STEP.write, label: "Write" },
 ];
@@ -31,6 +32,8 @@ export function WizardSidebar({
   highestReached,
   writing,
   onSelect,
+  onDevices,
+  showingDevices,
   telemetry,
   onTelemetry,
 }: {
@@ -38,6 +41,8 @@ export function WizardSidebar({
   highestReached: WizardStep;
   writing: boolean;
   onSelect: (step: WizardStep) => void;
+  onDevices: () => void;
+  showingDevices: boolean;
   telemetry: boolean | null;
   onTelemetry: (share: boolean) => void;
 }) {
@@ -60,9 +65,12 @@ export function WizardSidebar({
           Setup steps
         </p>
         {WIZARD_STEPS.map((s, i) => {
-          const isActive = s.id === current;
+          const isActive = !showingDevices && s.id === current;
           const isDone = s.id < current;
-          const isClickable = s.id < current && !writing;
+          const isClickable =
+            !writing &&
+            s.id <= highestReached &&
+            !(s.id === current && !showingDevices);
           return (
             <button
               key={s.id}
@@ -76,9 +84,12 @@ export function WizardSidebar({
                 isActive &&
                   "bg-primary font-medium text-primary-foreground shadow-sm",
                 !isActive &&
-                  isDone &&
+                  (isDone || isClickable) &&
                   "text-sidebar-foreground hover:bg-sidebar-accent",
-                !isActive && !isDone && "text-muted-foreground/60",
+                !isActive &&
+                  !isDone &&
+                  !isClickable &&
+                  "text-muted-foreground/60",
                 isClickable ? "cursor-pointer" : "cursor-default",
               )}
             >
@@ -87,9 +98,12 @@ export function WizardSidebar({
                   "flex size-5 shrink-0 items-center justify-center rounded-full text-[0.7rem] font-semibold",
                   isActive &&
                     "bg-primary-foreground/20 text-primary-foreground",
-                  !isActive && isDone && "bg-primary/20 text-primary",
+                  !isActive &&
+                    (isDone || isClickable) &&
+                    "bg-primary/20 text-primary",
                   !isActive &&
                     !isDone &&
+                    !isClickable &&
                     "border border-border text-muted-foreground/60",
                 )}
               >
@@ -99,6 +113,35 @@ export function WizardSidebar({
             </button>
           );
         })}
+      </nav>
+
+      <nav className="mt-4 flex flex-col gap-1 px-3" aria-label="Fleet">
+        <p className="px-2 pb-1 text-xs font-medium tracking-wide text-muted-foreground uppercase">
+          Fleet
+        </p>
+        <button
+          type="button"
+          disabled={writing}
+          onClick={onDevices}
+          aria-current={showingDevices ? "page" : undefined}
+          className={cn(
+            "flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors outline-none",
+            "focus-visible:ring-2 focus-visible:ring-ring/50",
+            writing && "cursor-default text-muted-foreground/60",
+            !writing && "cursor-pointer",
+            showingDevices &&
+              !writing &&
+              "bg-primary font-medium text-primary-foreground shadow-sm",
+            !showingDevices &&
+              !writing &&
+              "text-sidebar-foreground hover:bg-sidebar-accent",
+          )}
+        >
+          <span className="flex size-5 shrink-0 items-center justify-center">
+            <Router className="size-4" />
+          </span>
+          <span className="truncate">Devices</span>
+        </button>
       </nav>
 
       <div className="mt-auto flex flex-col gap-1.5 px-5 py-4 text-xs text-muted-foreground/60">

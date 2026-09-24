@@ -17,8 +17,11 @@ import type {
   InitFormat,
   ListReleasesResponse,
   Settings,
+  LocalTailscale,
+  SshKeyIdentity,
   SshPublicKey,
   TailscaleConfig,
+  TailscaleState,
   WifiConfig,
   WifiNetworks,
 } from "./types";
@@ -101,12 +104,45 @@ export async function pickAndReadPublicKey(): Promise<string | null> {
   return invoke<string>("read_public_key", { path });
 }
 
+export function identifyPublicKey(
+  key: string,
+): Promise<SshKeyIdentity | null> {
+  return invoke<SshKeyIdentity | null>("identify_public_key", { key });
+}
+
 export function cancelFlash(): Promise<void> {
   return invoke<void>("cancel_flash");
 }
 
 export function probeDevice(url: string): Promise<boolean> {
   return invoke<boolean>("probe_device", { url });
+}
+
+export function setDeviceControlServer(
+  url: string,
+  controlServer: string,
+): Promise<void> {
+  return invoke<void>("set_device_control_server", { url, controlServer });
+}
+
+export function openDeviceWindow(url: string, title: string): Promise<void> {
+  return invoke<void>("open_device_window", { url, title });
+}
+
+export function probeDevices(urls: string[]): Promise<string[]> {
+  return invoke<string[]>("probe_devices", { urls });
+}
+
+export function tailscaleLogin(url: string): Promise<string> {
+  return invoke<string>("tailscale_login", { url });
+}
+
+export function tailscaleStatus(url: string): Promise<TailscaleState> {
+  return invoke<TailscaleState>("tailscale_status", { url });
+}
+
+export function localTailscale(): Promise<LocalTailscale> {
+  return invoke<LocalTailscale>("local_tailscale");
 }
 
 export function joinWifi(ssid: string, password: string): Promise<void> {
@@ -146,6 +182,7 @@ export function onFlashProgress(
 // error — the endpoint 404s until the first release ships, and dev builds have
 // no updater configured, neither of which should surface to the user.
 export async function checkForUpdate(): Promise<Update | null> {
+  if (import.meta.env.DEV) return null;
   try {
     const update = await check();
     return update?.available ? update : null;

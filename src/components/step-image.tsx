@@ -25,6 +25,7 @@ export function StepImage({
   localFileName,
   onPickLocal,
   canProceed,
+  cacheStatus,
   onNext,
 }: {
   sourceKind: SourceKind;
@@ -37,6 +38,7 @@ export function StepImage({
   localFileName: string | null;
   onPickLocal: () => void;
   canProceed: boolean;
+  cacheStatus: string | null;
   onNext: () => void;
 }) {
   return (
@@ -61,6 +63,11 @@ export function StepImage({
                   ? `${release.version} · ${release.image.filename} · ${formatBytes(release.image.size)}`
                   : "No release"}
           </span>
+          {sourceKind === "aircast" && cacheStatus ? (
+            <span className="mt-1 block text-xs text-muted-foreground">
+              {cacheStatus}
+            </span>
+          ) : null}
         </SelectableCard>
 
         {sourceKind === "aircast" && releases.length > 1 && (

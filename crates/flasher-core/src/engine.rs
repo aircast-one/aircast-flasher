@@ -298,7 +298,8 @@ fn append_cmdline<T: fatfs::ReadWriteSeek>(
     let mut fh = root
         .create_file("cmdline.txt")
         .map_err(|e| ioerr("create cmdline.txt", e))?;
-    fh.truncate().map_err(|e| ioerr("truncate cmdline.txt", e))?;
+    fh.truncate()
+        .map_err(|e| ioerr("truncate cmdline.txt", e))?;
     fh.write_all(updated.as_bytes())
         .map_err(|e| ioerr("write cmdline.txt", e))?;
     Ok(())
@@ -308,8 +309,7 @@ fn append_cmdline<T: fatfs::ReadWriteSeek>(
 /// byte_length)` of the first FAT partition.
 fn fat_partition_extent(first_block: &[u8]) -> Result<(u64, u64), String> {
     let mut cursor = Cursor::new(first_block);
-    let mbr = MBR::read_from(&mut cursor, SECTOR as u32)
-        .map_err(|e| format!("parse MBR: {e}"))?;
+    let mbr = MBR::read_from(&mut cursor, SECTOR as u32).map_err(|e| format!("parse MBR: {e}"))?;
 
     for (_, part) in mbr.iter() {
         if part.is_used() && is_fat(part.sys) {
@@ -375,7 +375,9 @@ mod tests {
 
     impl MemDevice {
         fn zeroed(len: usize) -> Self {
-            Self { cur: Cursor::new(vec![0u8; len]) }
+            Self {
+                cur: Cursor::new(vec![0u8; len]),
+            }
         }
         fn into_bytes(self) -> Vec<u8> {
             self.cur.into_inner()
@@ -460,8 +462,8 @@ mod tests {
 
         // Build & write the MBR with one FAT32-LBA primary partition.
         let mut cursor = Cursor::new(vec![0u8; total_bytes]);
-        let mut mbr = MBR::new_from(&mut cursor, SECTOR as u32, [0x12, 0x34, 0x56, 0x78])
-            .expect("new MBR");
+        let mut mbr =
+            MBR::new_from(&mut cursor, SECTOR as u32, [0x12, 0x34, 0x56, 0x78]).expect("new MBR");
         mbr[1] = mbrman::MBRPartitionEntry {
             boot: 0,
             first_chs: mbrman::CHS::empty(),
@@ -501,7 +503,10 @@ mod tests {
             )
             .expect("slice for seed");
             let fs = fatfs::FileSystem::new(slice, fatfs::FsOptions::new()).expect("open seed fs");
-            let mut f = fs.root_dir().create_file("cmdline.txt").expect("create cmdline");
+            let mut f = fs
+                .root_dir()
+                .create_file("cmdline.txt")
+                .expect("create cmdline");
             f.write_all(b"console=serial0,115200 root=PARTUUID=abcd rootwait")
                 .expect("write cmdline");
         }
@@ -542,7 +547,10 @@ mod tests {
         let mut device = MemDevice::zeroed(image.len());
 
         let cfg = cloud_init_config();
-        let params = FlashParams { image_len, verify: true };
+        let params = FlashParams {
+            image_len,
+            verify: true,
+        };
 
         let mut reader = Cursor::new(image.clone());
         flash(&mut device, &mut reader, &params, &cfg, &mut |_, _, _| {})
@@ -561,7 +569,10 @@ mod tests {
         // and carry the derived PSK, never the plaintext.
         let net = read_fat_file(&written, "network-config").expect("network-config exists");
         assert!(net.contains(PSK), "network-config must contain derived PSK");
-        assert!(!net.contains("password: \"password\""), "no plaintext passphrase");
+        assert!(
+            !net.contains("password: \"password\""),
+            "no plaintext passphrase"
+        );
 
         let user = read_fat_file(&written, "user-data").expect("user-data exists");
         assert!(user.contains("hostname: aircast"));
@@ -586,18 +597,23 @@ mod tests {
             access: None,
             init_format: InitFormat::FirstRun,
         };
-        let params = FlashParams { image_len, verify: false };
+        let params = FlashParams {
+            image_len,
+            verify: false,
+        };
 
         let mut reader = Cursor::new(image);
-        flash(&mut device, &mut reader, &params, &cfg, &mut |_, _, _| {})
-            .expect("flash firstrun");
+        flash(&mut device, &mut reader, &params, &cfg, &mut |_, _, _| {}).expect("flash firstrun");
 
         let written = device.into_bytes();
         let script = read_fat_file(&written, "firstrun.sh").expect("firstrun.sh exists");
         assert!(script.contains(&format!("psk={PSK}")));
 
         let cmdline = read_fat_file(&written, "cmdline.txt").expect("cmdline.txt exists");
-        assert!(cmdline.contains("console=serial0,115200"), "kept original cmdline");
+        assert!(
+            cmdline.contains("console=serial0,115200"),
+            "kept original cmdline"
+        );
         assert!(
             cmdline.contains("systemd.run=/boot/firstrun.sh"),
             "appended firstrun fragment"
@@ -615,7 +631,10 @@ mod tests {
         device.cur.get_mut()[last_sector..last_sector + 8].copy_from_slice(b"EFI PART");
 
         let cfg = cloud_init_config();
-        let params = FlashParams { image_len, verify: true };
+        let params = FlashParams {
+            image_len,
+            verify: true,
+        };
 
         let mut reader = Cursor::new(image);
         flash(&mut device, &mut reader, &params, &cfg, &mut |_, _, _| {})
@@ -644,7 +663,10 @@ mod tests {
         };
 
         let cfg = cloud_init_config();
-        let params = FlashParams { image_len, verify: true };
+        let params = FlashParams {
+            image_len,
+            verify: true,
+        };
 
         let mut reader = Cursor::new(image);
         let err = flash(&mut device, &mut reader, &params, &cfg, &mut |_, _, _| {})

@@ -180,7 +180,10 @@ pub struct ConfigFacts {
 pub fn describe_config(cfg: &ProvisionConfig) -> ConfigFacts {
     ConfigFacts {
         wifi: cfg.wifi.is_some(),
-        hostname: cfg.hostname.as_deref().is_some_and(|h| !h.trim().is_empty()),
+        hostname: cfg
+            .hostname
+            .as_deref()
+            .is_some_and(|h| !h.trim().is_empty()),
         remote: match cfg.tailscale.as_ref() {
             None => "off",
             Some(ts) if ts.control_server.trim().is_empty() => "tailscale",
@@ -521,9 +524,15 @@ mod tests {
         assert!(v.is_object());
         assert_eq!(v["event"], "flash");
         assert_eq!(v["failed_at"], "write");
-        assert_eq!(v["ssh"], "password", "config facts are flattened, not nested");
+        assert_eq!(
+            v["ssh"], "password",
+            "config facts are flattened, not nested"
+        );
         assert_eq!(v["job_id"], "job-1", "envelope is flattened, not nested");
-        assert!(v.get("verify_ms").is_none(), "phases that never ran are omitted");
+        assert!(
+            v.get("verify_ms").is_none(),
+            "phases that never ran are omitted"
+        );
         assert!(
             !serde_json::to_string(&event)
                 .expect("serialize")
@@ -589,4 +598,17 @@ mod tests {
             r#"{"event":"flash"}"#,
         );
     }
+}
+
+#[tauri::command]
+pub fn reveal_event_log(app_handle: AppHandle) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt as _;
+    let path = log_path(&app_handle)?;
+    if !path.exists() {
+        std::fs::write(&path, "").map_err(|e| format!("Failed to create log: {e}"))?;
+    }
+    app_handle
+        .opener()
+        .reveal_item_in_dir(&path)
+        .map_err(|e| format!("Failed to reveal log: {e}"))
 }

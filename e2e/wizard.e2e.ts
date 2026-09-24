@@ -69,8 +69,8 @@ async function waitForHeading(text: string) {
 }
 
 async function onNetworkStep() {
-  if ((await heading()) === "Network & access") return;
-  const back = $('nav[aria-label="Setup steps"]').$("button*=Network & access");
+  if ((await heading()) === "Network") return;
+  const back = $('nav[aria-label="Setup steps"]').$("button*=Network");
   if (await back.isEnabled()) {
     await back.click();
   } else {
@@ -82,7 +82,14 @@ async function onNetworkStep() {
     });
     await next.click();
   }
-  await waitForHeading("Network & access");
+  await waitForHeading("Network");
+}
+
+async function onAccessStep() {
+  if ((await heading()) === "Access") return;
+  await knownGoodNetworkState();
+  await $("button=Next").click();
+  await waitForHeading("Access");
 }
 
 async function knownGoodNetworkState() {
@@ -105,21 +112,28 @@ async function showsApp(): Promise<boolean> {
 }
 
 async function attachToAppWindow() {
-  await browser.waitUntil(
-    async () => {
-      const handles = await browser.getWindowHandles();
-      for (const handle of handles) {
-        await browser.switchToWindow(handle);
-        if (await showsApp()) return true;
-      }
-      return false;
-    },
-    { timeout: HEADING_TIMEOUT },
-  ).catch(async () => {
-    throw new Error(
-      `no window held the app. ${await pageDiagnostics()}`,
-    );
-  });
+  await browser
+    .waitUntil(
+      async () => {
+        const handles = await browser.getWindowHandles();
+        for (const handle of handles) {
+          await browser.switchToWindow(handle);
+          if (await showsApp()) return true;
+        }
+        return false;
+      },
+      { timeout: HEADING_TIMEOUT },
+    )
+    .catch(async () => {
+      throw new Error(`no window held the app. ${await pageDiagnostics()}`);
+    });
+}
+
+async function openRemoteAccess() {
+  const section = $("button*=Remote access");
+  if ((await section.getAttribute("aria-expanded")) !== "true") {
+    await section.click();
+  }
 }
 
 describe("flasher wizard", () => {
@@ -153,7 +167,8 @@ describe("flasher wizard", () => {
     ).map((s) => s.getText());
     expect(labels).toEqual([
       "Operating system",
-      "Network & access",
+      "Network",
+      "Access",
       "Storage",
       "Write",
     ]);
@@ -230,23 +245,44 @@ describe("flasher wizard", () => {
     await $("#password").clearValue();
   });
 
-  it("refuses a Headscale key with no control server", async () => {
-    await knownGoodNetworkState();
-    await $("button*=Remote access").click();
+  it("warns about a Headscale key with no control server without blocking", async () => {
+    await onAccessStep();
+    await openRemoteAccess();
     await $("button*=self-hosted control server").click();
     await $("#auth-key").setValue("hskey-auth-abc123");
     await expect($("#control-server-error")).toHaveText(
       expect.stringContaining("Enter your control server URL"),
     );
-    await expect($("button=Next")).toBeDisabled();
+    await expect($("button=Next")).toBeEnabled();
 
     await $("button=Use Tailscale").click();
     await expect($("button=Next")).toBeEnabled();
     await $("#auth-key").clearValue();
   });
 
+  it("keeps the caret where it is when editing the control server", async () => {
+    await onAccessStep();
+    await openRemoteAccess();
+    await $("button*=self-hosted control server").click();
+    const field = await $("#control-server");
+    await field.setValue("https://hs.example.com");
+    await browser.execute((el: HTMLElement) => {
+      const input = el as HTMLInputElement;
+      input.focus();
+      input.setSelectionRange(8, 8);
+      document.execCommand("insertText", false, "a");
+    }, field);
+    await expect(field).toHaveValue("https://ahs.example.com");
+    const caret = await browser.execute(
+      (el: HTMLElement) => (el as HTMLInputElement).selectionStart,
+      field,
+    );
+    expect(caret).toBe(9);
+    await field.clearValue();
+  });
+
   it("never prefills the stock device password", async () => {
-    await knownGoodNetworkState();
+    await onAccessStep();
     await $("button=Password").click();
     await expect($("#device-password")).toHaveValue("");
     await expect($("button=Next")).toBeEnabled();
@@ -254,7 +290,7 @@ describe("flasher wizard", () => {
   });
 
   it("shows the login the device will ship with, without being asked", async () => {
-    await onNetworkStep();
+    await onAccessStep();
     await expect($("button=SSH key")).toBeDisplayed();
     await expect($("button=Disabled")).toBeDisplayed();
   });
@@ -274,7 +310,7 @@ describe("flasher wizard", () => {
   });
 
   it("shows what will be written before the destructive step", async () => {
-    await knownGoodNetworkState();
+    await onAccessStep();
     await $("button=Next").click();
 
     await waitForHeading("Storage");
@@ -287,7 +323,7 @@ describe("flasher wizard", () => {
   });
 
   it("sends you back to the step that owns a setting you want to change", async () => {
-    await knownGoodNetworkState();
+    await onAccessStep();
     await $("button=Next").click();
     await waitForHeading("Storage");
 

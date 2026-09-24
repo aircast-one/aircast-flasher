@@ -190,6 +190,16 @@ export function JobView({
             device.
           </p>
         </div>
+        <div className="w-full text-left text-sm text-muted-foreground">
+          <h3 className="mb-1 font-medium text-foreground">What happens next</h3>
+          <ol className="list-decimal space-y-1 pl-5">
+            <li>Put the card in the device and power it on.</li>
+            <li>
+              First boot takes a few minutes: it expands the filesystem, joins
+              the network, then reboots once.
+            </li>
+          </ol>
+        </div>
         <DeviceFinder hostname={hostname} remoteEnrolled={remoteEnrolled} />
         <div className="flex w-full items-center justify-between gap-3 rounded-xl border border-border px-4 py-3 text-left">
           <div className="flex min-w-0 flex-col gap-0.5">
@@ -217,17 +227,13 @@ export function JobView({
             Get it
           </Button>
         </div>
-        <div className="w-full text-left text-sm text-muted-foreground">
-          <h3 className="mb-1 font-medium text-foreground">What happens next</h3>
-          <ol className="list-decimal space-y-1 pl-5">
-            <li>Put the card in the device and power it on.</li>
-            <li>
-              First boot takes a few minutes: it expands the filesystem, joins
-              the network, then reboots once.
-            </li>
-          </ol>
-        </div>
-        <Button type="button" size="lg" className="min-w-45" onClick={onReset}>
+        <Button
+          type="button"
+          size="lg"
+          variant="secondary"
+          className="min-w-45"
+          onClick={onReset}
+        >
           Flash another
         </Button>
       </Pane>
@@ -275,7 +281,8 @@ export function JobView({
         <div className="flex flex-col gap-1.5">
           <h2 className="text-xl font-semibold">Flash failed</h2>
           <p className="text-sm text-balance text-muted-foreground">
-            Something went wrong while writing the SD card.
+            Something went wrong while writing the SD card. It is partly
+            written and won't boot, so flash it again before using it.
           </p>
         </div>
         <Alert variant="destructive" className="text-left">
@@ -376,6 +383,8 @@ export function JobView({
       p.total_bytes > 0
         ? `${formatBytes(p.bytes_processed)} / ${formatBytes(p.total_bytes)}`
         : null;
+    const rate = p && p.speed_bps > 0 ? formatSpeed(p.speed_bps) : null;
+    const flashDetail = [sizeDetail, rate].filter(Boolean).join(" · ") || null;
 
     return (
       <Pane heading="Writing">
@@ -389,7 +398,7 @@ export function JobView({
           subtitle={p ? subtitle : "Getting things ready."}
           stepLabel={stepLabel}
           percent={percent}
-          detail={sizeDetail}
+          detail={flashDetail}
           determinate={determinate}
           onCancel={onCancel}
           showCancel

@@ -13,43 +13,14 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { StepShell } from "@/components/step-shell";
-import { CollapsibleSection } from "@/components/collapsible-section";
 import {
-  RemoteAccessSection,
-  type RemoteAccessProps,
-} from "@/components/remote-access-section";
-import {
-  DeviceAccessSection,
-  type DeviceAccessProps,
-} from "@/components/device-access-section";
-import {
-  isInvalidSshKey,
   isInvalidWifiPassword,
-  isValidControlServer,
   isValidHostname,
-  isWeakDevicePassword,
-  needsAuthKey,
-  needsControlServer,
   needsSsid,
 } from "@/components/step-network.validation";
 import { GENERATED_HOSTNAME } from "@/components/default-hostname";
-
-type RemoteAccessInputs = Pick<
-  RemoteAccessProps,
-  "controlServer" | "onControlServer" | "authKey" | "onAuthKey"
->;
-
-type DeviceAccessInputs = Pick<
-  DeviceAccessProps,
-  | "sshMode"
-  | "onSshMode"
-  | "sshKey"
-  | "onSshKey"
-  | "detectedKeys"
-  | "onChooseKeyFile"
-  | "devicePassword"
-  | "onDevicePassword"
->;
+import { nextFreeHostname } from "@/components/next-hostname";
+import { useLocalTailscale } from "@/lib/use-local-tailscale";
 
 export function StepNetwork({
   ssid,
@@ -65,8 +36,6 @@ export function StepNetwork({
   onHostname,
   noWifi,
   onNoWifi,
-  remote,
-  access,
   onBack,
   onNext,
 }: {
@@ -83,14 +52,10 @@ export function StepNetwork({
   onHostname: (v: string) => void;
   noWifi: boolean;
   onNoWifi: (v: boolean) => void;
-  remote: RemoteAccessInputs;
-  access: DeviceAccessInputs;
   onBack: () => void;
   onNext: () => void;
 }) {
-  const [selfHosted, setSelfHosted] = useState(
-    () => remote.controlServer.trim() !== "",
-  );
+  const local = useLocalTailscale();
   const [ssidTouched, setSsidTouched] = useState(false);
 
   const trimmedHostname = hostname.trim();
@@ -98,38 +63,28 @@ export function StepNetwork({
   const hostnameValid = isValidHostname(hostname);
   const hostnameGenerated = GENERATED_HOSTNAME.test(trimmedHostname);
   const ssidMissing = needsSsid(noWifi, ssid);
+
+  const takenNames = (local?.peers ?? [])
+    .filter((peer) => peer.sameTailnet)
+    .map((peer) => peer.hostName.toLowerCase());
+  const nameTaken = takenNames.includes(trimmedHostname.toLowerCase());
+  const suggestion = nextFreeHostname(trimmedHostname, takenNames);
+
   const wifiPasswordInvalid = !noWifi && isInvalidWifiPassword(password);
-
-  const controlServerValid = isValidControlServer(remote.controlServer);
-  const controlServerMissing = needsControlServer(
-    selfHosted,
-    remote.controlServer,
-  );
-  const missingAuthKey = needsAuthKey(remote.controlServer, remote.authKey);
-  const remoteAccessValid =
-    controlServerValid && !controlServerMissing && !missingAuthKey;
-
-  const sshKeyInvalid =
-    access.sshMode === "key-only" && isInvalidSshKey(access.sshKey);
-  const devicePasswordWeak =
-    access.sshMode === "password" &&
-    isWeakDevicePassword(access.devicePassword);
 
   return (
     <StepShell
-      heading="Network & access"
-      description="These settings are written to the card so the device connects on first boot."
+      heading="Network"
+      description={
+        noWifi
+          ? "What this device is called. Its network comes from Ethernet or a modem, so nothing about WiFi is written."
+          : "How the device gets online, and what it's called. Written to the card and applied on first boot."
+      }
       back={{ onClick: onBack }}
       next={{
         label: "Next",
         onClick: onNext,
-        disabled:
-          !hostnameValid ||
-          ssidMissing ||
-          wifiPasswordInvalid ||
-          !remoteAccessValid ||
-          sshKeyInvalid ||
-          devicePasswordWeak,
+        disabled: !hostnameValid || ssidMissing || wifiPasswordInvalid,
       }}
     >
       <div className="flex max-w-xl flex-col gap-5">
@@ -141,14 +96,15 @@ export function StepNetwork({
             <p className="text-sm text-muted-foreground">
               This device gets its network from Ethernet or a cellular modem.
             </p>
-            <button
+            <Button
               type="button"
+              variant="secondary"
+              className="mt-1 self-start"
               onClick={() => onNoWifi(false)}
-              className="flex items-center gap-1.5 self-start text-sm text-muted-foreground hover:text-foreground"
             >
               <Wifi className="size-4" />
               Set up WiFi instead
-            </button>
+            </Button>
           </div>
         ) : (
           <>
@@ -262,6 +218,9 @@ export function StepNetwork({
             id="hostname"
             value={hostname}
             onChange={(e) => onHostname(e.currentTarget.value)}
+            onFocus={(e) => {
+              if (hostnameGenerated) e.currentTarget.select();
+            }}
             placeholder="e.g. falcon-01"
             required
             autoCapitalize="none"
@@ -280,48 +239,36 @@ export function StepNetwork({
                 Use lowercase letters, numbers, and hyphens only (e.g.
                 falcon-01).
               </span>
+            ) : nameTaken ? (
+              <span className="text-amber-600 dark:text-amber-400">
+                <span className="font-medium">{trimmedHostname}</span> is
+                already on your tailnet — Tailscale will name this one{" "}
+                <span className="font-medium">{trimmedHostname}-1</span>, so the
+                address above won't be the one it answers on.
+              </span>
             ) : (
               <>
                 Reachable at{" "}
                 <span className="font-medium text-foreground">
                   {trimmedHostname}.local
                 </span>
-                {hostnameGenerated
-                  ? " — a generated name, rename it to spot this device in a fleet."
-                  : null}
+
               </>
             )}
           </p>
+          {nameTaken ? (
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              className="self-start"
+              onClick={() => onHostname(suggestion)}
+            >
+              Use {suggestion}
+            </Button>
+          ) : null}
         </div>
 
-        <CollapsibleSection
-          title="Remote access (optional)"
-          forceOpen={!remoteAccessValid}
-          initiallyOpen={
-            remote.controlServer.trim() !== "" || remote.authKey.trim() !== ""
-          }
-        >
-          <RemoteAccessSection
-            {...remote}
-            selfHosted={selfHosted}
-            onSelfHosted={setSelfHosted}
-            controlServerValid={controlServerValid}
-            controlServerMissing={controlServerMissing}
-            missingAuthKey={missingAuthKey}
-          />
-        </CollapsibleSection>
-
-        <CollapsibleSection
-          title="Device access"
-          forceOpen={sshKeyInvalid || devicePasswordWeak}
-          initiallyOpen
-        >
-          <DeviceAccessSection
-            {...access}
-            sshKeyInvalid={sshKeyInvalid}
-            devicePasswordWeak={devicePasswordWeak}
-          />
-        </CollapsibleSection>
       </div>
     </StepShell>
   );

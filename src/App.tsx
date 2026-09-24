@@ -18,6 +18,7 @@ import {
 import type {
   AccessConfig,
   BlockDevice,
+  DownloadProgress,
   InitFormat,
   Release,
   SshMode,
@@ -26,17 +27,21 @@ import type {
 } from "@/types";
 import { errorMessage } from "@/lib/format";
 import { defaultHostname } from "@/components/default-hostname";
-import { nextHostname } from "@/components/next-hostname";
+import { nextFreeHostname } from "@/components/next-hostname";
 import { randomHex } from "@/lib/random-id";
 import { buildSummary } from "@/components/wizard-summary";
+import { isValidControlServer } from "@/components/step-network.validation";
 import { useSettings } from "@/lib/use-settings";
+import { useLocalTailscale } from "@/lib/use-local-tailscale";
 import { ConsentBanner } from "@/components/consent-banner";
 import { UpdateBanner } from "@/components/update-banner";
 import { WizardSidebar } from "@/components/wizard-sidebar";
 import { StepStorage } from "@/components/step-storage";
 import { StepImage } from "@/components/step-image";
 import { StepNetwork } from "@/components/step-network";
+import { StepAccess } from "@/components/step-access";
 import { JobView } from "@/components/job-view";
+import { DevicesView } from "@/components/devices-view";
 import {
   STEP,
   type FlashProgressState,
@@ -50,11 +55,25 @@ const DEVICE_POLL_INTERVAL_MS = 2000;
 const STEP_NAME: Record<WizardStep, string> = {
   [STEP.os]: "image",
   [STEP.network]: "network",
+  [STEP.access]: "access",
   [STEP.storage]: "storage",
   [STEP.write]: "write",
 };
 
-const DEFAULT_HOSTNAME = defaultHostname();
+/// Two sources say a name is taken: the tailnet, and the names this app has
+/// already written. The second is what keeps an offline batch counting up —
+/// with no tailnet to check, nothing else remembers.
+const FLASHED_HISTORY_LIMIT = 200;
+
+function useTakenHostnames(flashed: readonly string[]): string[] {
+  const local = useLocalTailscale();
+  const peers = (local?.peers ?? []).map((peer) => peer.hostName);
+  return useMemo(
+    () => [...peers, ...flashed],
+    // The arrays are rebuilt each render; their contents are what matter.
+    [peers.join("\u0000"), flashed.join("\u0000")],
+  );
+}
 
 function pickDefaultRelease(releases: Release[]): Release | null {
   return releases.find((r) => !r.prerelease) ?? releases[0] ?? null;
@@ -80,7 +99,7 @@ function App() {
   const [sourceKind, setSourceKind] = useState<SourceKind>("aircast");
   const [selectedVersion, setSelectedVersion] = useState<string | null>(null);
   const [localPath, setLocalPath] = useState<string | null>(null);
-  const [selectedDisk, setSelectedDisk] = useState<string>("");
+  const [pickedDisk, setPickedDisk] = useState<string>("");
 
   const { settings, update } = useSettings();
   const [showPassword, setShowPassword] = useState(false);
@@ -100,12 +119,15 @@ function App() {
   const setNoWifi = (value: boolean) => update({ noWifi: value });
 
   const [step, setStep] = useState<WizardStep>(STEP.os);
+  const [showingDevices, setShowingDevices] = useState(false);
   const [cancelled, setCancelled] = useState(false);
   const [lastVars, setLastVars] = useState<FlashVars | null>(null);
 
   const [progress, setProgress] = useState<FlashProgressState>({
     phase: "idle",
   });
+  const [downloadProgress, setDownloadProgress] =
+    useState<DownloadProgress | null>(null);
 
   const onStorageStep = step === STEP.storage;
   const devicesQuery = useQuery({
@@ -137,9 +159,20 @@ function App() {
   }
 
   const ssid = settings.ssid ?? wifiQuery.data?.current ?? "";
-  const hostname = settings.hostname ?? DEFAULT_HOSTNAME;
+  // An untouched default follows the tailnet as it loads; once the operator has
+  // named this card, `settings.hostname` is theirs and nothing overrides it.
+  const takenHostnames = useTakenHostnames(settings.flashedHostnames);
+  const suggested = defaultHostname(takenHostnames);
+  const hostname = settings.hostname ?? suggested;
 
   const devices: BlockDevice[] = devicesQuery.data ?? [];
+  // Resolved at render, not synced by an effect: a card pulled out while the
+  // 2s poll runs must not leave a stale path selected for a flash.
+  const selectedDisk = devices.some((d) => d.path === pickedDisk)
+    ? pickedDisk
+    : devices.length === 1
+      ? devices[0].path
+      : "";
   const releases: Release[] = releasesQuery.data?.releases ?? [];
   const release = useMemo(() => {
     const chosen = releases.find((r) => r.version === selectedVersion);
@@ -168,21 +201,12 @@ function App() {
   }, [releaseError]);
 
   useEffect(() => {
-    const list = devicesQuery.data ?? [];
-    setSelectedDisk((prev) =>
-      list.some((d) => d.path === prev)
-        ? prev
-        : list.length === 1
-          ? list[0].path
-          : "",
-    );
-  }, [devicesQuery.data]);
-  useEffect(() => {
     let active = true;
     let unlistenDownload: (() => void) | undefined;
     let unlistenFlash: (() => void) | undefined;
 
     onDownloadProgress((p) => {
+      setDownloadProgress(p);
       setProgress((prev) =>
         prev.phase === "downloading"
           ? { phase: "downloading", progress: p }
@@ -209,6 +233,39 @@ function App() {
     };
   }, []);
 
+  const chosen = selectedVersion !== null || step > STEP.os;
+  const imageUrl =
+    sourceKind === "aircast" && chosen
+      ? (release?.image.download_url ?? null)
+      : null;
+
+  const imageDownload = useQuery({
+    queryKey: ["image", imageUrl],
+    queryFn: () =>
+      downloadImage({
+        jobId: randomHex(8),
+        downloadUrl: release!.image.download_url,
+        checksumUrl: release!.image.checksum_url,
+      }),
+    enabled: imageUrl !== null,
+    staleTime: Infinity,
+    gcTime: Infinity,
+    retry: false,
+  });
+
+  const cacheStatus =
+    imageUrl === null
+      ? null
+      : imageDownload.isSuccess
+        ? imageDownload.data.cached
+          ? "Already on this computer — nothing to download."
+          : "Downloaded — ready to write."
+        : imageDownload.isError
+          ? "Download failed — it retries when you write the card."
+          : downloadProgress && downloadProgress.total_bytes > 0
+            ? `Downloading in the background… ${Math.min(100, Math.round(downloadProgress.percent))}%`
+            : "Downloading in the background…";
+
   const flashMutation = useMutation<void, unknown, FlashVars>({
     mutationFn: async (vars) => {
       let imagePath: string;
@@ -216,10 +273,17 @@ function App() {
       if (vars.sourceKind === "aircast") {
         if (!vars.release) throw new Error("No Aircast release available.");
         setProgress({ phase: "downloading", progress: null });
-        const result = await downloadImage({
-          jobId: vars.jobId,
-          downloadUrl: vars.release.image.download_url,
-          checksumUrl: vars.release.image.checksum_url,
+        const result = await queryClient.fetchQuery({
+          queryKey: ["image", vars.release.image.download_url],
+          queryFn: () =>
+            downloadImage({
+              jobId: vars.jobId,
+              downloadUrl: vars.release!.image.download_url,
+              checksumUrl: vars.release!.image.checksum_url,
+            }),
+          staleTime: Infinity,
+          gcTime: Infinity,
+          retry: false,
         });
         imagePath = result.image_path;
       } else {
@@ -236,6 +300,15 @@ function App() {
         tailscale: vars.tailscale,
         access: vars.access,
         initFormat: "cloud-init" satisfies InitFormat,
+      });
+    },
+    onSuccess: (_result, vars) => {
+      const written = vars.hostname.trim();
+      if (written === "" || settings.flashedHostnames.includes(written)) return;
+      update({
+        flashedHostnames: [...settings.flashedHostnames, written].slice(
+          -FLASHED_HISTORY_LIMIT,
+        ),
       });
     },
     onSettled: () => {
@@ -258,10 +331,10 @@ function App() {
     sourceKind === "aircast" && release !== null
       ? (release.image.uncompressed_size ?? releasesQuery.data?.min_card_bytes)
       : undefined;
-  const selectedDevice = devices.find((d) => d.path === selectedDisk) ?? null;
+  const selectedDevice = devices.find((d) => d.path === selectedDisk);
   const cardTooSmall =
     requiredCardBytes !== undefined &&
-    selectedDevice !== null &&
+    selectedDevice !== undefined &&
     selectedDevice.size > 0 &&
     selectedDevice.size < requiredCardBytes;
   const canProceed = sourceReady && selectedDisk !== "" && !cardTooSmall;
@@ -322,10 +395,11 @@ function App() {
     const trimmedHostname = hostname.trim();
 
     const trimmedKey = authKey.trim();
+    const trimmedControl = controlServer.trim();
     const tailscale: TailscaleConfig | null =
-      trimmedKey === ""
+      trimmedKey === "" || !isValidControlServer(trimmedControl)
         ? null
-        : { controlServer: controlServer.trim(), authKey: trimmedKey };
+        : { controlServer: trimmedControl, authKey: trimmedKey };
 
     const access = buildAccess(sshMode, sshKey, devicePassword);
 
@@ -370,7 +444,7 @@ function App() {
   }
 
   function flashAnother() {
-    setHostname(nextHostname(hostname));
+    setHostname(nextFreeHostname(hostname, takenHostnames));
     startOver();
   }
   const writing = flashMutation.isPending;
@@ -388,13 +462,25 @@ function App() {
           current={step}
           highestReached={step}
           writing={writing}
-          onSelect={(s) => setStep(s)}
+          onSelect={(s) => {
+            setShowingDevices(false);
+            setStep(s);
+          }}
+          onDevices={() => setShowingDevices((v) => !v)}
+          showingDevices={showingDevices}
           telemetry={settings.telemetry ?? false}
           onTelemetry={answerTelemetry}
         />
 
         <main className="flex min-h-0 min-w-0 flex-1 flex-col">
-          {step === STEP.os ? (
+          {showingDevices ? (
+            <DevicesView
+              onFlash={() => {
+                setShowingDevices(false);
+                setStep(STEP.os);
+              }}
+            />
+          ) : step === STEP.os ? (
             <StepImage
               sourceKind={sourceKind}
               onSourceKind={setSourceKind}
@@ -406,6 +492,7 @@ function App() {
               localFileName={localFileName}
               onPickLocal={handlePickLocal}
               canProceed={sourceReady}
+              cacheStatus={cacheStatus}
               onNext={() => setStep(STEP.network)}
             />
           ) : step === STEP.network ? (
@@ -423,6 +510,11 @@ function App() {
               onHostname={setHostname}
               noWifi={noWifi}
               onNoWifi={setNoWifi}
+              onBack={() => setStep(STEP.os)}
+              onNext={() => setStep(STEP.access)}
+            />
+          ) : step === STEP.access ? (
+            <StepAccess
               remote={{
                 controlServer,
                 onControlServer: setControlServer,
@@ -439,7 +531,7 @@ function App() {
                 devicePassword,
                 onDevicePassword: setDevicePassword,
               }}
-              onBack={() => setStep(STEP.os)}
+              onBack={() => setStep(STEP.network)}
               onNext={() => setStep(STEP.storage)}
             />
           ) : step === STEP.storage ? (
@@ -447,11 +539,11 @@ function App() {
               devices={devices}
               devicesLoading={devicesQuery.isLoading}
               selectedDisk={selectedDisk}
-              onSelectDisk={setSelectedDisk}
+              onSelectDisk={setPickedDisk}
               requiredCardBytes={requiredCardBytes}
               summary={summary}
               canProceed={canProceed}
-              onBack={() => setStep(STEP.network)}
+              onBack={() => setStep(STEP.access)}
               onEditStep={setStep}
               onFlash={handleFlash}
             />

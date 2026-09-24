@@ -1,5 +1,6 @@
 import type { SshMode, SshPublicKey } from "@/types";
 import { STEP, type WizardStep } from "@/components/wizard-types";
+import { isValidControlServer } from "@/components/step-network.validation";
 
 export interface SummaryItem {
   label: string;
@@ -23,10 +24,17 @@ export interface SummaryInput {
 
 const IMAGE_DEFAULT_LOGIN = "Image default (pi / raspberry)";
 
-function remoteAccess(authKey: string, controlServer: string): string {
-  if (authKey.trim() === "") return "Off";
+function remoteAccess(authKey: string, controlServer: string): SummaryItem {
+  const row = { label: "Remote access", step: STEP.access };
   const server = controlServer.trim();
-  return server === "" ? "Tailscale" : `Headscale · ${server}`;
+  if (authKey.trim() === "") return { ...row, value: "Off" };
+  if (server === "") return { ...row, value: "Tailscale" };
+  if (!isValidControlServer(server))
+    return { ...row, value: "Off — control server isn't a URL", warn: true };
+  return {
+    ...row,
+    value: `Headscale · ${server.replace(/^https?:\/\//, "")}`,
+  };
 }
 
 function keyName(sshKey: string, detectedKeys: SshPublicKey[]): string {
@@ -76,16 +84,12 @@ export function buildSummary(input: SummaryInput): SummaryItem[] {
       step: STEP.network,
     },
     wifi(input.noWifi, input.ssid.trim()),
-    {
-      label: "Remote access",
-      value: remoteAccess(input.authKey, input.controlServer),
-      step: STEP.network,
-    },
+    remoteAccess(input.authKey, input.controlServer),
     {
       label: "Device access",
       value: access,
       warn: access === IMAGE_DEFAULT_LOGIN,
-      step: STEP.network,
+      step: STEP.access,
     },
   ];
 }

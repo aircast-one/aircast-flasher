@@ -29,6 +29,10 @@ pub struct Settings {
     /// Random per-install id, minted when diagnostics are turned on and never
     /// derived from anything about the machine or its operator.
     pub install_id: Option<String>,
+    /// Names already written by this app. Without a tailnet to check against
+    /// there is nothing else that knows a name is taken, so a batch flashed
+    /// offline would otherwise hand out the same default every time.
+    pub flashed_hostnames: Vec<String>,
 }
 
 fn settings_path(app: &AppHandle) -> Result<PathBuf, String> {
@@ -148,6 +152,7 @@ mod tests {
             no_wifi: false,
             telemetry: None,
             install_id: None,
+            flashed_hostnames: vec!["aircast-01".into()],
         }
     }
 

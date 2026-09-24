@@ -29,10 +29,19 @@ test:
 # End-to-end tests against the real app (WebdriverIO, embedded Tauri driver)
 [group('test')]
 e2e:
-    npm run build
+    #!/usr/bin/env bash
+    set -euo pipefail
     cargo build --features wdio --manifest-path src-tauri/Cargo.toml
     npx tsc -p e2e/tsconfig.json
-    npx wdio run ./wdio.conf.ts
+    if curl -sf http://localhost:1420 >/dev/null; then
+        npx wdio run ./wdio.conf.ts
+    else
+        npm run dev >/tmp/flasher-e2e-vite.log 2>&1 &
+        vite=$!
+        trap 'kill $vite 2>/dev/null || true' EXIT
+        until curl -sf http://localhost:1420 >/dev/null; do sleep 0.2; done
+        npx wdio run ./wdio.conf.ts
+    fi
 
 # Everything CI runs
 [group('test')]

@@ -60,6 +60,7 @@ export interface FlashProgress {
   bytes_processed: number;
   total_bytes: number;
   percent: number;
+  speed_bps: number;
 }
 
 export interface WifiConfig {
@@ -71,6 +72,31 @@ export interface WifiConfig {
 export interface TailscaleConfig {
   controlServer: string;
   authKey: string;
+}
+
+export interface TailnetPeer {
+  hostName: string;
+  dnsName: string;
+  os: string;
+  online: boolean;
+  ip: string;
+  sameTailnet: boolean;
+}
+
+export interface LocalTailscale {
+  installed: boolean;
+  running: boolean;
+  name: string;
+  tailnet: string;
+  magicDnsSuffix: string;
+  controlUrl: string;
+  selfHosted: boolean;
+  peers: TailnetPeer[];
+}
+
+export interface TailscaleState {
+  connected: boolean;
+  name: string;
 }
 
 export type SshMode = "key-only" | "password" | "disabled";
@@ -99,6 +125,14 @@ export interface Settings {
   /** `null` = never asked, which is what raises the consent prompt once. */
   telemetry: boolean | null;
   installId: string | null;
+  /** Names this app has already written, so an offline batch keeps counting. */
+  flashedHostnames: string[];
+}
+
+export interface SshKeyIdentity {
+  algorithm: string;
+  comment: string;
+  fingerprint: string;
 }
 
 export interface SshPublicKey {

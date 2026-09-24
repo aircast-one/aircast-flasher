@@ -1,4 +1,5 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
+import { useMutation, useQuery } from "@tanstack/react-query";
 
 import { readSettings, writeSettings } from "@/api";
 import type { Settings } from "@/types";
@@ -14,13 +15,13 @@ const EMPTY: Settings = {
   noWifi: false,
   telemetry: null,
   installId: null,
+  flashedHostnames: [],
 };
 
 export function useSettings(): {
   settings: Settings;
   update: (patch: Partial<Settings>) => void;
 } {
-  const queryClient = useQueryClient();
   const query = useQuery({
     queryKey: KEY,
     queryFn: readSettings,
@@ -28,13 +29,15 @@ export function useSettings(): {
   });
 
   const persist = useMutation({ mutationFn: writeSettings });
-  const settings = query.data ?? EMPTY;
+  const [edited, setEdited] = useState<Settings | null>(null);
+  const settings = edited ?? query.data ?? EMPTY;
 
   return {
     settings,
     update: (patch) => {
+      if (query.data === undefined) return;
       const next = { ...settings, ...patch };
-      queryClient.setQueryData(KEY, next);
+      setEdited(next);
       persist.mutate(next);
     },
   };
