@@ -14,6 +14,7 @@
     "test:unit": "node --test --import tsx \"src/**/*.test.ts\""
   },
   "dependencies": {
+    "@aircast/tokens": "github:aircast-one/aircast-tokens#9a6ea7438d236e02b42c538f241c7003bdd6e5fa",
     "@base-ui/react": "^1.6.0",
     "@fontsource-variable/geist": "^5.2.9",
     "@tailwindcss/vite": "^4.3.1",
