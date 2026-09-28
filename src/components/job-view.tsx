@@ -195,8 +195,13 @@ export function JobView({
           <ol className="list-decimal space-y-1 pl-5">
             <li>Put the card in the device and power it on.</li>
             <li>
-              First boot takes a few minutes: it expands the filesystem, joins
-              the network, then reboots once.
+              Wait a few minutes. It restarts once on its own — don't unplug
+              it.
+            </li>
+            <li>
+              {remoteEnrolled
+                ? "It appears below when it's ready — on this network or your private one."
+                : "Keep this computer on the same network. The device appears below when it's ready."}
             </li>
           </ol>
         </div>
