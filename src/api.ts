@@ -10,7 +10,6 @@ import { relaunch } from "@tauri-apps/plugin-process";
 import type {
   AccessConfig,
   BlockDevice,
-  Channel,
   DownloadProgress,
   DownloadResult,
   FlashProgress,
@@ -29,20 +28,14 @@ import type {
 const DOWNLOAD_PROGRESS_EVENT = "flasher:download-progress";
 const FLASH_PROGRESS_EVENT = "flasher:flash-progress";
 
-export function listReleases(channel?: Channel): Promise<ListReleasesResponse> {
-  // Pass null (not "stable") when no channel is chosen, so the backend runs its
-  // stable → staging → development fallback instead of pinning to empty stable.
-  return invoke<ListReleasesResponse>("list_releases", {
-    channel: channel ?? null,
-  });
+export function listReleases(): Promise<ListReleasesResponse> {
+  return invoke<ListReleasesResponse>("list_releases");
 }
 
 export function listBlockDevices(): Promise<BlockDevice[]> {
   return invoke<BlockDevice[]>("list_block_devices");
 }
 
-// Diagnostics must never be able to break the wizard, and outside a Tauri
-// window (unit tests, a browser dev server) there is no command to call at all.
 export function track(
   event: string,
   props: Record<string, unknown> = {},
@@ -92,8 +85,6 @@ export function detectSshKeys(): Promise<SshPublicKey[]> {
   return invoke<SshPublicKey[]>("detect_ssh_keys");
 }
 
-// Open a file picker for a .pub key and return its trimmed contents, or null if
-// the user cancelled.
 export async function pickAndReadPublicKey(): Promise<string | null> {
   const path = await open({
     multiple: false,
@@ -177,10 +168,6 @@ export function onFlashProgress(
   );
 }
 
-// Ask the updater endpoint whether a newer build is available. Returns the
-// pending Update (with `.version`) or null when up-to-date. Swallows every
-// error — the endpoint 404s until the first release ships, and dev builds have
-// no updater configured, neither of which should surface to the user.
 export async function checkForUpdate(): Promise<Update | null> {
   if (import.meta.env.DEV) return null;
   try {
@@ -191,9 +178,6 @@ export async function checkForUpdate(): Promise<Update | null> {
   }
 }
 
-// Download + install the pending update, then restart into the new version.
-// The caller gets the raw download events so it can show progress; a failed
-// download must surface to the user, so nothing is caught here.
 export async function installUpdate(
   update: Update,
   onEvent: (event: DownloadEvent) => void,

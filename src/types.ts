@@ -1,4 +1,3 @@
-export type Channel = "stable" | "development" | "staging";
 
 export type InitFormat = "cloud-init" | "first-run";
 
@@ -101,9 +100,6 @@ export interface TailscaleState {
 
 export type SshMode = "key-only" | "password" | "disabled";
 
-// Discriminated on `ssh` so illegal field combos (a key-only entry carrying a
-// password, etc.) can't be represented. Serializes to the shape the Rust
-// AccessConfig expects (its unused fields default to None).
 export type AccessConfig =
   | { ssh: "key-only"; authorizedKey: string }
   | { ssh: "password"; password: string }

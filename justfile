@@ -1,6 +1,3 @@
-# Aircast Flasher — task runner
-# Run `just` to list recipes.
-
 _default:
     @just --list
 
@@ -47,8 +44,7 @@ e2e:
 [group('test')]
 check: test e2e
 
-# Create and push a release tag.
-#   just release <patch|minor|major|dev|staging>
+# Create and push a release tag. TYPE: patch|minor|major
 [group('release')]
 release TYPE:
     ./scripts/release.sh {{TYPE}}

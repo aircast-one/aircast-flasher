@@ -1,23 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# =============================================================================
-# release.sh - Create and push version tags for the Aircast Flasher
-# =============================================================================
-# The desktop-release workflow (.github/workflows/desktop-release.yml) builds and
-# publishes on these tag patterns, so the types below map to those triggers:
-#
-#   patch    - Bump patch version   (v1.0.0 -> v1.0.1)           [production]
-#   minor    - Bump minor version   (v1.0.0 -> v1.1.0)           [production]
-#   major    - Bump major version   (v1.0.0 -> v2.0.0)           [production]
-#   dev      - Development release  (v1.0.0 -> v1.0.1-dev.1)
-#   staging  - Staging release      (v1.0.0 -> v1.0.0-staging.1)
-#
-# Usage:
-#   ./scripts/release.sh <patch|minor|major|dev|staging>
-# =============================================================================
-
-TYPE="${1:?Usage: $0 <patch|minor|major|dev|staging>}"
+TYPE="${1:?Usage: $0 <patch|minor|major>}"
 
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -46,22 +30,8 @@ find_next_version() {
     local version="$1"
     while tag_exists "$version"; do
         log_warn "Tag $version already exists, trying next..."
-        case "$version" in
-            *-dev.*)
-                num="${version##*-dev.}"
-                base="${version%-dev.*}"
-                version="${base}-dev.$((num + 1))"
-                ;;
-            *-staging.*)
-                num="${version##*-staging.}"
-                base="${version%-staging.*}"
-                version="${base}-staging.$((num + 1))"
-                ;;
-            *)
-                IFS='.' read -r major minor patch <<< "${version#v}"
-                version="v${major}.${minor}.$((patch + 1))"
-                ;;
-        esac
+        IFS='.' read -r major minor patch <<< "${version#v}"
+        version="v${major}.${minor}.$((patch + 1))"
     done
     echo "$version"
 }
@@ -94,19 +64,9 @@ case "$TYPE" in
         NEW_VERSION=$(find_next_version "$NEW_VERSION")
         MESSAGE="Release $NEW_VERSION"
         ;;
-    dev)
-        NEW_VERSION="v${MAJOR}.${MINOR}.$((PATCH + 1))-dev.1"
-        NEW_VERSION=$(find_next_version "$NEW_VERSION")
-        MESSAGE="Development Release $NEW_VERSION"
-        ;;
-    staging)
-        NEW_VERSION="v${MAJOR}.${MINOR}.${PATCH}-staging.1"
-        NEW_VERSION=$(find_next_version "$NEW_VERSION")
-        MESSAGE="Staging Release $NEW_VERSION"
-        ;;
     *)
         echo "Unknown release type: $TYPE"
-        echo "Valid types: patch, minor, major, dev, staging"
+        echo "Valid types: patch, minor, major"
         exit 1
         ;;
 esac

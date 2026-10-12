@@ -1,33 +1,16 @@
 name: Desktop Release
 
-# Builds the Aircast Flasher for macOS/Windows/Linux on a version tag, publishes
-# a GitHub release, and mirrors the installers to R2 (downloads.aircast.one)
-# under a `flasher/` path with a `releases.json` catalog — mirroring the
-# aircast-pi-gen release pipeline.
-#
-# Required repo/org secrets: R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY,
-# PAT_TOKEN.
-#
-# PAT_TOKEN is a PAT with contents:write (fine-grained: Contents = Read and
-# write on this repo; classic: `repo`). The built-in GITHUB_TOKEN cannot be used:
-# the releases API answers "Resource not accessible by integration" (403) for it
-# on this repo even though the job is granted `Contents: write`, because the org
-# and repo default workflow permissions are read-only. v0.1.2 failed that way
-# with all three platforms built and nothing published.
-
 permissions:
   contents: write
 
 on:
   push:
     tags:
-      - "v[0-9]+.[0-9]+.[0-9]+" # production: v1.0.0
-      - "v*-staging.*" # staging:    v1.0.0-staging.1
-      - "v*-dev.*" # development: v1.0.0-dev.1
+      - "v[0-9]+.[0-9]+.[0-9]+"
   workflow_dispatch:
     inputs:
       version:
-        description: "Version (e.g. v1.0.1, v1.0.1-dev.0)"
+        description: "Version (e.g. v1.0.1)"
         required: true
         type: string
 
@@ -36,11 +19,6 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.config.outputs.version }}
-      environment: ${{ steps.config.outputs.environment }}
-      is_production: ${{ steps.config.outputs.is_production }}
-      s3_path: ${{ steps.config.outputs.s3_path }}
-      downloads_domain: ${{ steps.config.outputs.downloads_domain }}
-      downloads_url: ${{ steps.config.outputs.downloads_url }}
       release_id: ${{ steps.release.outputs.id }}
     steps:
       - name: Require a release token
@@ -70,44 +48,21 @@ jobs:
           else
             VERSION="${{ inputs.version }}"
           fi
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-
-          if [[ "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "is_production=true" >> "$GITHUB_OUTPUT"
-            echo "environment=production" >> "$GITHUB_OUTPUT"
-            echo "s3_path=stable" >> "$GITHUB_OUTPUT"
-            echo "downloads_domain=downloads.aircast.one" >> "$GITHUB_OUTPUT"
-            echo "downloads_url=https://downloads.aircast.one" >> "$GITHUB_OUTPUT"
-          elif [[ "$VERSION" =~ -staging\. ]]; then
-            echo "is_production=false" >> "$GITHUB_OUTPUT"
-            echo "environment=staging" >> "$GITHUB_OUTPUT"
-            echo "s3_path=staging" >> "$GITHUB_OUTPUT"
-            echo "downloads_domain=downloads.stage.aircast.one" >> "$GITHUB_OUTPUT"
-            echo "downloads_url=https://downloads.staging.aircast.one" >> "$GITHUB_OUTPUT"
-          else
-            echo "is_production=false" >> "$GITHUB_OUTPUT"
-            echo "environment=development" >> "$GITHUB_OUTPUT"
-            echo "s3_path=development" >> "$GITHUB_OUTPUT"
-            echo "downloads_domain=downloads.dev.aircast.one" >> "$GITHUB_OUTPUT"
-            echo "downloads_url=https://downloads.dev.aircast.one" >> "$GITHUB_OUTPUT"
+          if [[ ! "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Invalid version $VERSION (expected vX.Y.Z)"
+            exit 1
           fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "Release: $VERSION"
 
-      # Create the release once, here, instead of letting the three build jobs
-      # race to create it by tag — that race is what failed v0.1.2, with two of
-      # them getting "Resource not accessible by integration" from the releases
-      # API after building successfully.
       - name: Ensure the GitHub release exists
         id: release
         env:
           GH_TOKEN: ${{ secrets.PAT_TOKEN }}
           V: ${{ steps.config.outputs.version }}
-          PRODUCTION: ${{ steps.config.outputs.is_production }}
         run: |
           if ! gh release view "$V" >/dev/null 2>&1; then
-            PRE=""
-            [ "$PRODUCTION" = "true" ] || PRE="--prerelease"
-            gh release create "$V" $PRE \
+            gh release create "$V" \
               --title "Aircast Flasher $V" \
               --notes "See the assets below to download this version."
           fi
@@ -145,14 +100,8 @@ jobs:
         shell: bash
         run: |
           if [ "${{ matrix.os }}" == "macos" ]; then
-            # universal for production, arm64-only for dev/staging (faster)
-            if [ "${{ needs.setup.outputs.is_production }}" == "true" ]; then
-              echo "target=universal-apple-darwin" >> "$GITHUB_OUTPUT"
-              echo "rust_targets=aarch64-apple-darwin,x86_64-apple-darwin" >> "$GITHUB_OUTPUT"
-            else
-              echo "target=aarch64-apple-darwin" >> "$GITHUB_OUTPUT"
-              echo "rust_targets=aarch64-apple-darwin" >> "$GITHUB_OUTPUT"
-            fi
+            echo "target=universal-apple-darwin" >> "$GITHUB_OUTPUT"
+            echo "rust_targets=aarch64-apple-darwin,x86_64-apple-darwin" >> "$GITHUB_OUTPUT"
           elif [ "${{ matrix.os }}" == "windows" ]; then
             echo "target=x86_64-pc-windows-msvc" >> "$GITHUB_OUTPUT"
             echo "rust_targets=x86_64-pc-windows-msvc" >> "$GITHUB_OUTPUT"
@@ -187,33 +136,21 @@ jobs:
         shell: bash
         run: node scripts/configure-updater.mjs
         env:
-          DOWNLOADS_URL: ${{ needs.setup.outputs.downloads_url }}
+          DOWNLOADS_URL: https://downloads.aircast.one
 
       - name: Build + release
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}
-          # Updater signing. The minisign private key + its password sign the
-          # updater artifacts so the embedded pubkey can verify them. Empty
-          # secrets => tauri-action skips updater signing and the build still
-          # succeeds (just without verifiable updates).
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          # Baked in at compile time (option_env!). Absent => the build ships
-          # without a telemetry sink and only ever writes the local event log,
-          # which is exactly what a dev build should do.
           POSTHOG_KEY: ${{ secrets.POSTHOG_KEY }}
-          # macOS: Developer ID signing + notarization + stapling, done by
-          # tauri-action when these are set. Gated to the mac runner: an empty
-          # APPLE_CERTIFICATE makes tauri-action run `security import` on nothing.
           APPLE_CERTIFICATE: ${{ matrix.os == 'macos' && secrets.APPLE_CERTIFICATE || '' }}
           APPLE_CERTIFICATE_PASSWORD: ${{ matrix.os == 'macos' && secrets.APPLE_CERTIFICATE_PASSWORD || '' }}
           APPLE_SIGNING_IDENTITY: ${{ matrix.os == 'macos' && secrets.APPLE_SIGNING_IDENTITY || '' }}
           APPLE_ID: ${{ matrix.os == 'macos' && secrets.APPLE_ID || '' }}
           APPLE_PASSWORD: ${{ matrix.os == 'macos' && secrets.APPLE_PASSWORD || '' }}
           APPLE_TEAM_ID: ${{ matrix.os == 'macos' && secrets.APPLE_TEAM_ID || '' }}
-          # Windows Authenticode is config-driven: add
-          # `bundle.windows.certificateThumbprint` to tauri.conf.json + a runner cert.
         with:
           releaseId: ${{ needs.setup.outputs.release_id }}
           includeUpdaterJson: true
@@ -272,10 +209,8 @@ jobs:
         run: |
           cd assets
           V="${{ needs.setup.outputs.version }}"
-          P="${{ needs.setup.outputs.s3_path }}"
+          P=stable
           base="s3://aircast-artifacts-$P/flasher/$V"
-          # Installers + their .sig (the updater downloads the platform artifact
-          # plus its detached .sig signature for verification).
           for f in *.dmg *.dmg.sha256 *.dmg.sig *.app.tar.gz *.app.tar.gz.sha256 *.app.tar.gz.sig; do [ -f "$f" ] && aws s3 cp "$f" "$base/macos/$f"; done || true
           for f in *.exe *.exe.sha256 *.exe.sig; do [ -f "$f" ] && aws s3 cp "$f" "$base/windows/$f"; done || true
           for f in *.deb *.deb.sha256 *.deb.sig *.rpm *.rpm.sha256 *.rpm.sig *.AppImage *.AppImage.sha256 *.AppImage.sig; do [ -f "$f" ] && aws s3 cp "$f" "$base/linux/$f"; done || true
@@ -284,12 +219,8 @@ jobs:
         run: |
           cd assets
           V="${{ needs.setup.outputs.version }}"
-          P="${{ needs.setup.outputs.s3_path }}"
-          URL="${{ needs.setup.outputs.downloads_url }}"
-          # tauri-action writes github.com release-asset URLs into latest.json.
-          # This repo is private, so those 404 for the updater on a user's
-          # machine — the banner shows and the install silently does nothing.
-          # Repoint every platform at the public mirror uploaded above.
+          P=stable
+          URL=https://downloads.aircast.one
           if [ ! -f latest.json ]; then
             echo "::error::No latest.json in the release — the updater has nothing to serve." \
                  "Check TAURI_SIGNING_PRIVATE_KEY is set and createUpdaterArtifacts is on."
@@ -297,8 +228,6 @@ jobs:
           fi
           node ../scripts/rewrite-updater-manifest.mjs latest.json "$URL/flasher/$V"
           aws s3 cp latest.json "s3://aircast-artifacts-$P/flasher/$V/updater/latest.json"
-          # Never point the updater at an older build: a re-release of v0.34.x
-          # keeps serving whatever newer version is already live.
           CURRENT=$(aws s3 cp "s3://aircast-artifacts-$P/flasher/latest.json" - 2>/dev/null | jq -r '.version // empty' | sed 's/^v//')
           NEWER=$(jq -rn --arg a "${CURRENT:-0.0.0}" --arg b "${V#v}" \
             'def key: [splits("[.-]")] | map(tonumber? // .); ($a | key) < ($b | key)')
@@ -314,9 +243,8 @@ jobs:
         run: |
           cd assets
           V="${{ needs.setup.outputs.version }}"
-          P="${{ needs.setup.outputs.s3_path }}"
-          URL="${{ needs.setup.outputs.downloads_url }}"
-          PRE="${{ needs.setup.outputs.is_production != 'true' }}"
+          P=stable
+          URL=https://downloads.aircast.one
           INFO=$(gh api repos/${{ github.repository }}/releases/tags/$V)
           CREATED=$(echo "$INFO" | jq -r '.created_at')
           NOTES=$(echo "$INFO" | jq -r '.body // ""')
@@ -337,7 +265,7 @@ jobs:
           add linux rpm "$(ls *.rpm 2>/dev/null | head -1)"
           add linux appimage "$(ls *.AppImage 2>/dev/null | head -1)"
 
-          jq -n --arg v "$V" --argjson pre "$PRE" --arg c "$CREATED" --arg n "$NOTES" --arg r "$REL_URL" --argjson p "$PLATFORMS" \
+          jq -n --arg v "$V" --argjson pre false --arg c "$CREATED" --arg n "$NOTES" --arg r "$REL_URL" --argjson p "$PLATFORMS" \
             '{version:$v, prerelease:$pre, created_at:$c, release_notes:$n, github_release_url:$r, platforms:$p}' > new.json
 
           KEY="flasher/releases.json"
@@ -350,7 +278,7 @@ jobs:
 
       - name: Verify the published updater is installable
         run: |
-          URL="${{ needs.setup.outputs.downloads_url }}"
+          URL=https://downloads.aircast.one
           node scripts/verify-updater-manifest.mjs "$URL/flasher/latest.json"
 
   cleanup-old-releases:
@@ -368,25 +296,17 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.PAT_TOKEN }}
         run: |
-          P="${{ needs.setup.outputs.s3_path }}"
-          ENV="${{ needs.setup.outputs.environment }}"
+          P=stable
           KEEP_COUNT=5
 
-          # Match only this channel's tags (double-escaped for jq's regex).
-          if [ "${{ needs.setup.outputs.is_production }}" == "true" ]; then
-            TAG_PATTERN='^v[0-9]+\\.[0-9]+\\.[0-9]+$'
-          elif [ "$ENV" == "staging" ]; then
-            TAG_PATTERN='^v.*-staging\\..*$'
-          else
-            TAG_PATTERN='^v.*-dev\\..*$'
-          fi
+          TAG_PATTERN='^v[0-9]+\\.[0-9]+\\.[0-9]+$'
 
           RELEASES=$(gh api repos/${{ github.repository }}/releases \
             --paginate \
             --jq "[.[] | select(.tag_name | test(\"$TAG_PATTERN\")) | {id: .id, tag_name: .tag_name, created_at: .created_at}] | sort_by(.created_at) | reverse")
 
           TOTAL_COUNT=$(echo "$RELEASES" | jq 'length')
-          echo "Found $TOTAL_COUNT releases for $ENV"
+          echo "Found $TOTAL_COUNT releases"
 
           VERSIONS_TO_KEEP=$(echo "$RELEASES" | jq -r ".[0:$KEEP_COUNT] | .[].tag_name")
 
@@ -408,7 +328,6 @@ jobs:
             echo "No cleanup needed ($TOTAL_COUNT <= $KEEP_COUNT)"
           fi
 
-          # Prune deleted versions from releases.json.
           KEY="flasher/releases.json"
           if aws s3 cp "s3://aircast-artifacts-$P/$KEY" releases.json 2>/dev/null; then
             KEEP_JSON=$(echo "$VERSIONS_TO_KEEP" | jq -R -s 'split("\n") | map(select(length > 0))')
@@ -423,7 +342,6 @@ jobs:
             fi
           fi
 
-
   notify:
     needs: [setup, desktop-builds, mirror-to-s3, cleanup-old-releases]
     if: always()
@@ -432,9 +350,9 @@ jobs:
       - run: |
           {
             echo "## Aircast Flasher Release"
-            echo "- **Version:** ${{ needs.setup.outputs.version }} (${{ needs.setup.outputs.environment }})"
+            echo "- **Version:** ${{ needs.setup.outputs.version }}"
             echo "- **Builds:** ${{ needs.desktop-builds.result }}"
             echo "- **R2 mirror:** ${{ needs.mirror-to-s3.result }}"
-            echo "- **Downloads:** ${{ needs.setup.outputs.downloads_url }}/flasher/${{ needs.setup.outputs.version }}/"
-            echo "- **Catalog:** ${{ needs.setup.outputs.downloads_url }}/flasher/releases.json"
+            echo "- **Downloads:** https://downloads.aircast.one/flasher/${{ needs.setup.outputs.version }}/"
+            echo "- **Catalog:** https://downloads.aircast.one/flasher/releases.json"
           } >> "$GITHUB_STEP_SUMMARY"
