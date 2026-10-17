@@ -1,9 +1,9 @@
-import { Check, Router } from "lucide-react";
+import { Check, KeyRound, Router, type LucideIcon } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { getVersion } from "@tauri-apps/api/app";
 
 import { cn } from "@/lib/utils";
-import { STEP, type WizardStep } from "@/components/wizard-types";
+import { STEP, type FleetView, type WizardStep } from "@/components/wizard-types";
 
 export interface SidebarStep {
   id: WizardStep;
@@ -27,13 +27,51 @@ function AppVersion() {
   return versionQuery.data ? <span>v{versionQuery.data}</span> : null;
 }
 
+function FleetButton({
+  icon: Icon,
+  label,
+  active,
+  writing,
+  onClick,
+}: {
+  icon: LucideIcon;
+  label: string;
+  active: boolean;
+  writing: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      disabled={writing}
+      onClick={onClick}
+      aria-current={active ? "page" : undefined}
+      className={cn(
+        "flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors outline-none",
+        "focus-visible:ring-2 focus-visible:ring-ring/50",
+        writing && "cursor-default text-muted-foreground/60",
+        !writing && "cursor-pointer",
+        active &&
+          !writing &&
+          "bg-primary font-medium text-primary-foreground shadow-sm",
+        !active && !writing && "text-sidebar-foreground hover:bg-sidebar-accent",
+      )}
+    >
+      <span className="flex size-5 shrink-0 items-center justify-center">
+        <Icon className="size-4" />
+      </span>
+      <span className="truncate">{label}</span>
+    </button>
+  );
+}
+
 export function WizardSidebar({
   current,
   highestReached,
   writing,
   onSelect,
-  onDevices,
-  showingDevices,
+  fleetView,
+  onFleetView,
   telemetry,
   onTelemetry,
 }: {
@@ -41,8 +79,8 @@ export function WizardSidebar({
   highestReached: WizardStep;
   writing: boolean;
   onSelect: (step: WizardStep) => void;
-  onDevices: () => void;
-  showingDevices: boolean;
+  fleetView: FleetView | null;
+  onFleetView: (view: FleetView) => void;
   telemetry: boolean | null;
   onTelemetry: (share: boolean) => void;
 }) {
@@ -65,12 +103,12 @@ export function WizardSidebar({
           Setup steps
         </p>
         {WIZARD_STEPS.map((s, i) => {
-          const isActive = !showingDevices && s.id === current;
+          const isActive = fleetView === null && s.id === current;
           const isDone = s.id < current;
           const isClickable =
             !writing &&
             s.id <= highestReached &&
-            !(s.id === current && !showingDevices);
+            !(s.id === current && fleetView === null);
           return (
             <button
               key={s.id}
@@ -119,29 +157,20 @@ export function WizardSidebar({
         <p className="px-2 pb-1 text-xs font-medium tracking-wide text-muted-foreground uppercase">
           Fleet
         </p>
-        <button
-          type="button"
-          disabled={writing}
-          onClick={onDevices}
-          aria-current={showingDevices ? "page" : undefined}
-          className={cn(
-            "flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors outline-none",
-            "focus-visible:ring-2 focus-visible:ring-ring/50",
-            writing && "cursor-default text-muted-foreground/60",
-            !writing && "cursor-pointer",
-            showingDevices &&
-              !writing &&
-              "bg-primary font-medium text-primary-foreground shadow-sm",
-            !showingDevices &&
-              !writing &&
-              "text-sidebar-foreground hover:bg-sidebar-accent",
-          )}
-        >
-          <span className="flex size-5 shrink-0 items-center justify-center">
-            <Router className="size-4" />
-          </span>
-          <span className="truncate">Devices</span>
-        </button>
+        <FleetButton
+          icon={Router}
+          label="Devices"
+          active={fleetView === "devices"}
+          writing={writing}
+          onClick={() => onFleetView("devices")}
+        />
+        <FleetButton
+          icon={KeyRound}
+          label="Cloud cards"
+          active={fleetView === "cloud"}
+          writing={writing}
+          onClick={() => onFleetView("cloud")}
+        />
       </nav>
 
       <div className="mt-auto flex flex-col gap-1.5 px-5 py-4 text-xs text-muted-foreground/60">

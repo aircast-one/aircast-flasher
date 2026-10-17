@@ -189,6 +189,7 @@ function EncryptionReminder({
             encryption.threshold,
             hostname,
             encryption.recoveryKey,
+            false,
           )
             .then((ok) => setSaved(ok))
             .catch(() => setSaved(false));

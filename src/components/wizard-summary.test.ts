@@ -15,7 +15,7 @@ const base: SummaryInput = {
   sshKey: "",
   detectedKeys: [],
   devicePassword: "",
-  encryption: false,
+  encryption: null,
 };
 
 const rowOf = (input: SummaryInput, label: string) =>
@@ -149,5 +149,16 @@ test("the default hostname is the lowest number not already in use", () => {
 
 test("reports whether the data partition is encrypted", () => {
   assert.equal(valueOf(base, "Disk encryption"), "Off");
-  assert.equal(valueOf({ ...base, encryption: true }, "Disk encryption"), "LUKS2 · Tang");
+  assert.equal(
+    valueOf({ ...base, encryption: { tang: true, cloud: false } }, "Disk encryption"),
+    "LUKS2 · your key server",
+  );
+  assert.equal(
+    valueOf({ ...base, encryption: { tang: false, cloud: true } }, "Disk encryption"),
+    "LUKS2 · Aircast Cloud",
+  );
+  assert.equal(
+    valueOf({ ...base, encryption: { tang: true, cloud: true } }, "Disk encryption"),
+    "LUKS2 · your key server + Aircast Cloud",
+  );
 });

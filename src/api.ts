@@ -9,6 +9,10 @@ import {
 import { relaunch } from "@tauri-apps/plugin-process";
 import type {
   AccessConfig,
+  CloudCard,
+  CloudKeyset,
+  CloudSignIn,
+  CloudSignInStatus,
   BlockDevice,
   Channel,
   DownloadProgress,
@@ -31,8 +35,6 @@ const DOWNLOAD_PROGRESS_EVENT = "flasher:download-progress";
 const FLASH_PROGRESS_EVENT = "flasher:flash-progress";
 
 export function listReleases(channel?: Channel): Promise<ListReleasesResponse> {
-  // Pass null (not "stable") when no channel is chosen, so the backend runs its
-  // stable → staging → development fallback instead of pinning to empty stable.
   return invoke<ListReleasesResponse>("list_releases", {
     channel: channel ?? null,
   });
@@ -42,8 +44,6 @@ export function listBlockDevices(): Promise<BlockDevice[]> {
   return invoke<BlockDevice[]>("list_block_devices");
 }
 
-// Diagnostics must never be able to break the wizard, and outside a Tauri
-// window (unit tests, a browser dev server) there is no command to call at all.
 export function track(
   event: string,
   props: Record<string, unknown> = {},
@@ -87,14 +87,38 @@ export function flashImage(args: {
   });
 }
 
-// Fetch a Tang server's advertisement (its public signed key set) so a card can
-// be enrolled for encryption offline. Throws if the URL isn't a reachable Tang.
 export function fetchTangAdv(url: string): Promise<string> {
   return invoke<string>("fetch_tang_adv", { url });
 }
 
-// Show a save dialog (owned by the backend) and write the recovery escrow file.
-// Resolves true if saved, false if cancelled.
+export function cloudSignInStart(): Promise<CloudSignIn> {
+  return invoke<CloudSignIn>("cloud_sign_in_start");
+}
+
+export function cloudSignInPoll(token: string): Promise<CloudSignInStatus> {
+  return invoke<CloudSignInStatus>("cloud_sign_in_poll", { token });
+}
+
+export function cloudAccount(): Promise<string | null> {
+  return invoke<string | null>("cloud_account");
+}
+
+export function cloudSignOut(): Promise<void> {
+  return invoke<void>("cloud_sign_out");
+}
+
+export function cloudCreateKeyset(label: string): Promise<CloudKeyset> {
+  return invoke<CloudKeyset>("cloud_create_keyset", { label });
+}
+
+export function cloudListCards(): Promise<CloudCard[]> {
+  return invoke<CloudCard[]>("cloud_list_cards");
+}
+
+export function cloudMarkLost(id: string): Promise<void> {
+  return invoke<void>("cloud_mark_lost", { id });
+}
+
 export function saveRecoveryFile(
   defaultName: string,
   contents: string,
@@ -110,8 +134,6 @@ export function detectSshKeys(): Promise<SshPublicKey[]> {
   return invoke<SshPublicKey[]>("detect_ssh_keys");
 }
 
-// Open a file picker for a .pub key and return its trimmed contents, or null if
-// the user cancelled.
 export async function pickAndReadPublicKey(): Promise<string | null> {
   const path = await open({
     multiple: false,
@@ -195,10 +217,6 @@ export function onFlashProgress(
   );
 }
 
-// Ask the updater endpoint whether a newer build is available. Returns the
-// pending Update (with `.version`) or null when up-to-date. Swallows every
-// error — the endpoint 404s until the first release ships, and dev builds have
-// no updater configured, neither of which should surface to the user.
 export async function checkForUpdate(): Promise<Update | null> {
   if (import.meta.env.DEV) return null;
   try {
@@ -209,9 +227,6 @@ export async function checkForUpdate(): Promise<Update | null> {
   }
 }
 
-// Download + install the pending update, then restart into the new version.
-// The caller gets the raw download events so it can show progress; a failed
-// download must surface to the user, so nothing is caught here.
 export async function installUpdate(
   update: Update,
   onEvent: (event: DownloadEvent) => void,

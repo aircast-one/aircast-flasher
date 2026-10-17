@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   cancelFlash,
+  cloudCreateKeyset,
   detectSshKeys,
   downloadImage,
   fetchTangAdv,
@@ -34,6 +35,7 @@ import { nextFreeHostname } from "@/components/next-hostname";
 import { randomHex } from "@/lib/random-id";
 import { buildSummary } from "@/components/wizard-summary";
 import { isCaptured } from "@/components/encryption";
+import { cardLabel, withCloudServer } from "@/components/cloud";
 import { isValidControlServer } from "@/components/step-network.validation";
 import { useSettings } from "@/lib/use-settings";
 import { useLocalTailscale } from "@/lib/use-local-tailscale";
@@ -46,9 +48,11 @@ import { StepNetwork } from "@/components/step-network";
 import { StepAccess } from "@/components/step-access";
 import { JobView } from "@/components/job-view";
 import { DevicesView } from "@/components/devices-view";
+import { CloudCardsView } from "@/components/cloud-cards-view";
 import {
   STEP,
   type FlashProgressState,
+  type FleetView,
   type FlashVars,
   type SourceKind,
   type WizardStep,
@@ -64,9 +68,6 @@ const STEP_NAME: Record<WizardStep, string> = {
   [STEP.write]: "write",
 };
 
-/// Two sources say a name is taken: the tailnet, and the names this app has
-/// already written. The second is what keeps an offline batch counting up —
-/// with no tailnet to check, nothing else remembers.
 const FLASHED_HISTORY_LIMIT = 200;
 
 function useTakenHostnames(flashed: readonly string[]): string[] {
@@ -74,7 +75,6 @@ function useTakenHostnames(flashed: readonly string[]): string[] {
   const peers = (local?.peers ?? []).map((peer) => peer.hostName);
   return useMemo(
     () => [...peers, ...flashed],
-    // The arrays are rebuilt each render; their contents are what matter.
     [peers.join("\u0000"), flashed.join("\u0000")],
   );
 }
@@ -116,6 +116,7 @@ function App() {
     { url: "", adv: "" },
   ]);
   const [threshold, setThreshold] = useState(1);
+  const [cloudKeyServer, setCloudKeyServer] = useState(false);
   const [recoveryKey, setRecoveryKey] = useState("");
   const [recoverySaved, setRecoverySaved] = useState(false);
   const enableEncryption = (on: boolean) => {
@@ -125,9 +126,7 @@ function App() {
       return;
     }
     if (recoveryKey === "") setRecoveryKey(randomHex(24));
-    // A remembered key server makes the per-card step zero-touch: prefill the
-    // URLs and the threshold, and re-capture their advertisements automatically
-    // (they aren't persisted). The operator only reviews and confirms.
+    if (settings.tangCloud) setCloudKeyServer(true);
     const remembered = settings.tangUrls;
     if (remembered.length > 0 && tangServers.every((s) => s.url === "")) {
       setThreshold(Math.max(1, Math.min(settings.tangThreshold || 1, remembered.length)));
@@ -156,7 +155,7 @@ function App() {
   const setNoWifi = (value: boolean) => update({ noWifi: value });
 
   const [step, setStep] = useState<WizardStep>(STEP.os);
-  const [showingDevices, setShowingDevices] = useState(false);
+  const [fleetView, setFleetView] = useState<FleetView | null>(null);
   const [cancelled, setCancelled] = useState(false);
   const [lastVars, setLastVars] = useState<FlashVars | null>(null);
 
@@ -196,15 +195,11 @@ function App() {
   }
 
   const ssid = settings.ssid ?? wifiQuery.data?.current ?? "";
-  // An untouched default follows the tailnet as it loads; once the operator has
-  // named this card, `settings.hostname` is theirs and nothing overrides it.
   const takenHostnames = useTakenHostnames(settings.flashedHostnames);
   const suggested = defaultHostname(takenHostnames);
   const hostname = settings.hostname ?? suggested;
 
   const devices: BlockDevice[] = devicesQuery.data ?? [];
-  // Resolved at render, not synced by an effect: a card pulled out while the
-  // 2s poll runs must not leave a stale path selected for a flash.
   const selectedDisk = devices.some((d) => d.path === pickedDisk)
     ? pickedDisk
     : devices.length === 1
@@ -222,13 +217,8 @@ function App() {
       : null;
   useEffect(() => track("app_start"), []);
 
-  // The wizard's own funnel: which step an operator reached, and where the
-  // ones who never flash stop. Keyed on the step, so a step is counted once
-  // however long they sit on it.
   useEffect(() => track("step_view", { step: STEP_NAME[step] }), [step]);
 
-  // "No card detected" looks identical to "never tried" in a flash-only log.
-  // Keyed on the count, so the 2s poll does not report the same card forever.
   useEffect(() => {
     if (onStorageStep) track("devices_listed", { count: devices.length });
   }, [onStorageStep, devices.length]);
@@ -303,7 +293,7 @@ function App() {
             ? `Downloading in the background… ${Math.min(100, Math.round(downloadProgress.percent))}%`
             : "Downloading in the background…";
 
-  const flashMutation = useMutation<void, unknown, FlashVars>({
+  const flashMutation = useMutation<EncryptionConfig | null, unknown, FlashVars>({
     mutationFn: async (vars) => {
       let imagePath: string;
 
@@ -327,6 +317,13 @@ function App() {
         if (!vars.localPath) throw new Error("No local image selected.");
         imagePath = vars.localPath;
       }
+      const encryption =
+        vars.encryption !== null && vars.cloudKeyServer
+          ? withCloudServer(
+              vars.encryption,
+              await cloudCreateKeyset(cardLabel(vars.hostname)),
+            )
+          : vars.encryption;
       setProgress({ phase: "flashing", progress: null });
       await flashImage({
         jobId: vars.jobId,
@@ -336,16 +333,17 @@ function App() {
         hostname: vars.hostname,
         tailscale: vars.tailscale,
         access: vars.access,
-        encryption: vars.encryption,
+        encryption,
         initFormat: "cloud-init" satisfies InitFormat,
       });
+      return encryption;
     },
     onSuccess: (_result, vars) => {
-      // Remember the Tang servers + threshold so the next card is zero-touch.
       if (vars.encryption) {
         update({
           tangUrls: vars.encryption.tangServers.map((s) => s.url),
           tangThreshold: vars.encryption.threshold,
+          tangCloud: vars.cloudKeyServer,
         });
       }
       const written = vars.hostname.trim();
@@ -368,10 +366,6 @@ function App() {
 
   const sourceReady =
     sourceKind === "aircast" ? release !== null : localPath !== null;
-  // The card has to hold the *decompressed* image, which is several times the
-  // download. Releases do not publish that size yet, so the backend hands us a
-  // floor big enough for a real image (and the exact check still runs against
-  // the decompressed file before anything is written).
   const requiredCardBytes =
     sourceKind === "aircast" && release !== null
       ? (release.image.uncompressed_size ?? releasesQuery.data?.min_card_bytes)
@@ -386,9 +380,6 @@ function App() {
 
   const remoteEnrolled = authKey.trim() !== "";
   const detectedKeys = sshKeysQuery.data ?? [];
-  // Prefill the one detected key, but never fight an operator who cleared it:
-  // null is "never set", "" is "cleared on purpose". Derived at render, so
-  // there is no effect and no state to keep in sync.
   const sshKey =
     settings.authorizedKey ??
     (detectedKeys.length === 1 ? detectedKeys[0].contents : "");
@@ -411,7 +402,9 @@ function App() {
     sshKey,
     detectedKeys,
     devicePassword,
-    encryption: encryptEnabled && tangServers.some(isCaptured),
+    encryption: encryptEnabled
+      ? { tang: tangServers.some(isCaptured), cloud: cloudKeyServer }
+      : null,
   });
 
   async function handlePickLocal() {
@@ -452,11 +445,12 @@ function App() {
     const capturedServers = tangServers
       .filter(isCaptured)
       .map((s) => ({ url: s.url.trim(), adv: s.adv }));
+    const keyServers = capturedServers.length + (cloudKeyServer ? 1 : 0);
     const encryption: EncryptionConfig | null =
       encryptEnabled &&
-      capturedServers.length >= 1 &&
+      keyServers >= 1 &&
       threshold >= 1 &&
-      threshold <= capturedServers.length
+      threshold <= keyServers
         ? { tangServers: capturedServers, threshold, recoveryKey }
         : null;
 
@@ -471,6 +465,7 @@ function App() {
       tailscale,
       access,
       encryption,
+      cloudKeyServer: encryptEnabled && cloudKeyServer,
     };
     setLastVars(vars);
     flashMutation.mutate(vars);
@@ -478,8 +473,6 @@ function App() {
 
   function answerTelemetry(share: boolean) {
     update({ telemetry: share });
-    // Opting in is itself the first event, and the only one that can confirm a
-    // build's sink works at all.
     if (share) track("consent", { shared: true });
   }
 
@@ -521,23 +514,27 @@ function App() {
           highestReached={step}
           writing={writing}
           onSelect={(s) => {
-            setShowingDevices(false);
+            setFleetView(null);
             setStep(s);
           }}
-          onDevices={() => setShowingDevices((v) => !v)}
-          showingDevices={showingDevices}
+          fleetView={fleetView}
+          onFleetView={(view) =>
+            setFleetView((current) => (current === view ? null : view))
+          }
           telemetry={settings.telemetry ?? false}
           onTelemetry={answerTelemetry}
         />
 
         <main className="flex min-h-0 min-w-0 flex-1 flex-col">
-          {showingDevices ? (
+          {fleetView === "devices" ? (
             <DevicesView
               onFlash={() => {
-                setShowingDevices(false);
+                setFleetView(null);
                 setStep(STEP.os);
               }}
             />
+          ) : fleetView === "cloud" ? (
+            <CloudCardsView />
           ) : step === STEP.os ? (
             <StepImage
               sourceKind={sourceKind}
@@ -596,6 +593,8 @@ function App() {
                 onServers: setTangServers,
                 threshold,
                 onThreshold: setThreshold,
+                cloud: cloudKeyServer,
+                onCloud: setCloudKeyServer,
                 recoveryKey,
                 recoverySaved,
                 onRecoverySaved: setRecoverySaved,
@@ -622,7 +621,7 @@ function App() {
             <JobView
               hostname={hostname.trim()}
               remoteEnrolled={remoteEnrolled}
-              encryption={lastVars?.encryption ?? null}
+              encryption={flashMutation.data ?? null}
               success={flashMutation.isSuccess}
               cancelled={cancelled && flashMutation.isError}
               error={

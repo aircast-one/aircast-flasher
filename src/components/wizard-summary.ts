@@ -20,7 +20,7 @@ export interface SummaryInput {
   sshKey: string;
   detectedKeys: SshPublicKey[];
   devicePassword: string;
-  encryption: boolean;
+  encryption: { tang: boolean; cloud: boolean } | null;
 }
 
 const IMAGE_DEFAULT_LOGIN = "Image default (pi / raspberry)";
@@ -69,6 +69,12 @@ function wifi(noWifi: boolean, ssid: string): SummaryItem {
     : { ...row, value: ssid };
 }
 
+function encryptionValue(e: SummaryInput["encryption"]): string {
+  if (e === null) return "Off";
+  if (e.tang && e.cloud) return "LUKS2 · your key server + Aircast Cloud";
+  return e.cloud ? "LUKS2 · Aircast Cloud" : "LUKS2 · your key server";
+}
+
 export function buildSummary(input: SummaryInput): SummaryItem[] {
   const hostname = input.hostname.trim();
   const access = deviceAccess(
@@ -94,7 +100,7 @@ export function buildSummary(input: SummaryInput): SummaryItem[] {
     },
     {
       label: "Disk encryption",
-      value: input.encryption ? "LUKS2 · Tang" : "Off",
+      value: encryptionValue(input.encryption),
       step: STEP.access,
     },
   ];

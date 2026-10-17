@@ -5,9 +5,7 @@ export type InitFormat = "cloud-init" | "first-run";
 export interface ImageInfo {
   filename: string;
   extension: string;
-  /** Size of the download. Never compare this against a card's capacity. */
   size: number;
-  /** Size once unpacked — what the card must hold. Absent on older releases. */
   uncompressed_size: number | null;
   download_url: string;
   checksum_url: string;
@@ -22,7 +20,6 @@ export interface Release {
 
 export interface ListReleasesResponse {
   releases: Release[];
-  /** Fallback card requirement for releases without an uncompressed_size. */
   min_card_bytes: number;
 }
 
@@ -101,30 +98,44 @@ export interface TailscaleState {
 
 export type SshMode = "key-only" | "password" | "disabled";
 
-// Discriminated on `ssh` so illegal field combos (a key-only entry carrying a
-// password, etc.) can't be represented. Serializes to the shape the Rust
-// AccessConfig expects (its unused fields default to None).
 export type AccessConfig =
   | { ssh: "key-only"; authorizedKey: string }
   | { ssh: "password"; password: string }
   | { ssh: "disabled" };
 
-// One Tang server: its URL plus a captured advertisement (so first-boot
-// enrolment is offline). `adv` is "" until captured.
 export interface TangServer {
   url: string;
   adv: string;
 }
 
-// Data-partition encryption (LUKS2 + Clevis/Tang). The device unlocks against
-// the Tang servers at every boot; with several, `threshold` of them must answer
-// (Clevis sss), so one box down doesn't lock the fleet out. `recoveryKey` is the
-// break-glass passphrase the operator keeps. Serializes to the Rust
-// EncryptionConfig.
 export interface EncryptionConfig {
   tangServers: TangServer[];
   threshold: number;
   recoveryKey: string;
+}
+
+export interface CloudSignIn {
+  token: string;
+  authUrl: string;
+}
+
+export type CloudSignInStatus =
+  | { status: "pending" }
+  | { status: "signedIn"; email: string };
+
+export interface CloudKeyset {
+  id: string;
+  url: string;
+  advertisement: unknown;
+}
+
+export interface CloudCard {
+  id: string;
+  label: string;
+  createdAt: string;
+  lostAt: string | null;
+  lastUnlockAt: string | null;
+  lastUnlockIp: string | null;
 }
 
 export interface WifiNetworks {
@@ -140,15 +151,12 @@ export interface Settings {
   controlServer: string;
   authorizedKey: string | null;
   noWifi: boolean;
-  /** `null` = never asked, which is what raises the consent prompt once. */
   telemetry: boolean | null;
   installId: string | null;
-  /** Names this app has already written, so an offline batch keeps counting. */
   flashedHostnames: string[];
-  /** Tang server URLs remembered across a batch (advertisements re-captured). */
   tangUrls: string[];
-  /** The k-of-n unlock threshold remembered alongside the URLs. 0 = unset. */
   tangThreshold: number;
+  tangCloud: boolean;
 }
 
 export interface SshKeyIdentity {

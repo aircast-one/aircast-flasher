@@ -11,10 +11,20 @@ import {
 } from "lucide-react";
 import { fetchTangAdv, saveRecoveryFile } from "@/api";
 import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import type { TangServer } from "@/types";
-import { hasUrl, isCaptured, serversReady } from "@/components/encryption";
+import {
+  hasUrl,
+  isCaptured,
+  serverCount,
+  serversReady,
+} from "@/components/encryption";
+import {
+  CloudSignInButton,
+  useCloudAccount,
+} from "@/components/cloud-cards-view";
 import { cn } from "@/lib/utils";
 
 const COPIED_FEEDBACK_MS = 2000;
@@ -26,6 +36,8 @@ export interface DiskEncryptionProps {
   onServers: (v: TangServer[]) => void;
   threshold: number;
   onThreshold: (v: number) => void;
+  cloud: boolean;
+  onCloud: (v: boolean) => void;
   recoveryKey: string;
   recoverySaved: boolean;
   onRecoverySaved: (v: boolean) => void;
@@ -74,7 +86,9 @@ export function DiskEncryptionSection(props: DiskEncryptionProps) {
           onServers={props.onServers}
           threshold={props.threshold}
           onThreshold={props.onThreshold}
+          cloud={props.cloud}
         />
+        <CloudOption cloud={props.cloud} onCloud={props.onCloud} />
       </Stage>
       <Stage n={2} title="Recovery key" done={props.recoverySaved}>
         <RecoveryKeyField
@@ -83,6 +97,7 @@ export function DiskEncryptionSection(props: DiskEncryptionProps) {
           onRecoverySaved={props.onRecoverySaved}
           servers={props.servers}
           threshold={props.threshold}
+          cloud={props.cloud}
           hostname={props.hostname}
         />
       </Stage>
@@ -96,9 +111,10 @@ function TangServers({
   onServers,
   threshold,
   onThreshold,
+  cloud,
 }: Pick<
   DiskEncryptionProps,
-  "servers" | "onServers" | "threshold" | "onThreshold"
+  "servers" | "onServers" | "threshold" | "onThreshold" | "cloud"
 >) {
   const [busy, setBusy] = useState(false);
   const [errors, setErrors] = useState<Record<number, string>>({});
@@ -136,6 +152,7 @@ function TangServers({
   };
 
   const urlCount = servers.filter(hasUrl).length;
+  const total = serverCount({ servers, cloud });
 
   return (
     <div className="flex flex-col gap-2">
@@ -200,7 +217,7 @@ function TangServers({
         </Button>
       </div>
       <KeyServerSetup />
-      {urlCount > 1 ? (
+      {total > 1 ? (
         <div className="flex items-center gap-2 pt-1">
           <Label htmlFor="threshold" className="whitespace-nowrap">
             Unlock with
@@ -209,16 +226,16 @@ function TangServers({
             id="threshold"
             type="number"
             min={1}
-            max={urlCount}
+            max={total}
             className="w-16"
             value={threshold}
             onChange={(e) => {
               const n = Number(e.target.value);
-              onThreshold(Math.max(1, Math.min(urlCount, Number.isFinite(n) ? n : 1)));
+              onThreshold(Math.max(1, Math.min(total, Number.isFinite(n) ? n : 1)));
             }}
           />
           <span className="text-sm text-muted-foreground">
-            of {urlCount} servers
+            of {total} servers
           </span>
         </div>
       ) : null}
@@ -293,6 +310,40 @@ function KeyServerSetup() {
   );
 }
 
+function CloudOption({
+  cloud,
+  onCloud,
+}: Pick<DiskEncryptionProps, "cloud" | "onCloud">) {
+  const account = useCloudAccount();
+  const email = account.data;
+  const signedIn = typeof email === "string";
+
+  return (
+    <div className="flex flex-col gap-2 rounded-md border border-border px-3 py-2.5">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex flex-col gap-0.5">
+          <p className="text-sm font-medium">Also unlock through Aircast Cloud</p>
+          <p className="text-sm text-muted-foreground">
+            No server to run. The trade-off: the card also unlocks anywhere it
+            gets online, until you mark it lost under Cloud cards.
+          </p>
+        </div>
+        <Switch
+          aria-label="Aircast Cloud key server"
+          checked={cloud && signedIn}
+          disabled={!signedIn}
+          onCheckedChange={onCloud}
+        />
+      </div>
+      {signedIn ? (
+        <p className="text-xs text-muted-foreground">Signed in as {email}</p>
+      ) : account.isPending ? null : (
+        <CloudSignInButton />
+      )}
+    </div>
+  );
+}
+
 function WifiPskNote() {
   return (
     <div className="flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2">
@@ -310,12 +361,14 @@ export function recoveryEscrowText(
   threshold: number,
   hostname: string,
   recoveryKey: string,
+  cloud: boolean,
 ): string {
   const host = hostname.trim() === "" ? "(unnamed device)" : hostname.trim();
-  const urls = servers
-    .filter(isCaptured)
-    .map((s) => `  - ${s.url.trim()}`)
-    .join("\n");
+  const lines = [
+    ...servers.filter(isCaptured).map((s) => `  - ${s.url.trim()}`),
+    ...(cloud ? ["  - Aircast Cloud (this card's own key set)"] : []),
+  ];
+  const urls = lines.join("\n");
   return [
     "Aircast disk-encryption recovery key",
     "KEEP THIS SECRET. It unlocks the device's data partition by hand if the",
@@ -323,7 +376,7 @@ export function recoveryEscrowText(
     "",
     `Device:    ${host}`,
     `Saved:     ${new Date().toISOString()}`,
-    `Unlock:    ${threshold} of ${servers.filter(isCaptured).length} key server(s):`,
+    `Unlock:    ${threshold} of ${lines.length} key server(s):`,
     urls,
     "",
     `Recovery key: ${recoveryKey}`,
@@ -336,11 +389,12 @@ export function saveRecoveryKey(
   threshold: number,
   hostname: string,
   recoveryKey: string,
+  cloud: boolean,
 ): Promise<boolean> {
   const name = `${hostname.trim() || "aircast"}-recovery-key.txt`;
   return saveRecoveryFile(
     name,
-    recoveryEscrowText(servers, threshold, hostname, recoveryKey),
+    recoveryEscrowText(servers, threshold, hostname, recoveryKey, cloud),
   );
 }
 
@@ -350,6 +404,7 @@ function RecoveryKeyField({
   onRecoverySaved,
   servers,
   threshold,
+  cloud,
   hostname,
 }: Pick<
   DiskEncryptionProps,
@@ -358,6 +413,7 @@ function RecoveryKeyField({
   | "onRecoverySaved"
   | "servers"
   | "threshold"
+  | "cloud"
   | "hostname"
 >) {
   const [copied, setCopied] = useState(false);
@@ -365,7 +421,7 @@ function RecoveryKeyField({
 
   const download = () => {
     setSaveError(null);
-    saveRecoveryKey(servers, threshold, hostname, recoveryKey)
+    saveRecoveryKey(servers, threshold, hostname, recoveryKey, cloud)
       .then((saved) => {
         if (saved) onRecoverySaved(true);
       })

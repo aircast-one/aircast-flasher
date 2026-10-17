@@ -18,6 +18,7 @@ const EMPTY: Settings = {
   flashedHostnames: [],
   tangUrls: [],
   tangThreshold: 1,
+  tangCloud: false,
 };
 
 export function useSettings(): {

@@ -5,10 +5,6 @@ use tauri::{AppHandle, Manager};
 
 const SETTINGS_FILE: &str = "settings.json";
 
-/// Operator settings that survive restarts. `None` means "never set", which is
-/// what lets a cleared field stay cleared instead of snapping back to the
-/// detected network or a generated hostname. The pre-auth key is deliberately
-/// absent — it is a short-lived secret and stays in memory only.
 #[derive(Serialize, Deserialize, Default, Clone, PartialEq, Debug)]
 #[serde(default, rename_all = "camelCase")]
 pub struct Settings {
@@ -16,29 +12,14 @@ pub struct Settings {
     pub hostname: Option<String>,
     pub wifi_password: String,
     pub control_server: String,
-    /// `None` = never set, so a single detected key prefills the field;
-    /// `Some("")` = the operator cleared it and must not be re-prefilled.
     pub authorized_key: Option<String>,
-    /// The operator flashes wired or cellular devices: WiFi is skipped on
-    /// purpose. Persisted like the rest, so a fleet of Ethernet boards does not
-    /// re-raise "enter a network name" on every launch.
     pub no_wifi: bool,
-    /// `None` = never asked, which is what raises the consent prompt exactly
-    /// once. Diagnostics leave the machine only on `Some(true)`.
     pub telemetry: Option<bool>,
-    /// Random per-install id, minted when diagnostics are turned on and never
-    /// derived from anything about the machine or its operator.
     pub install_id: Option<String>,
-    /// Names already written by this app. Without a tailnet to check against
-    /// there is nothing else that knows a name is taken, so a batch flashed
-    /// offline would otherwise hand out the same default every time.
     pub flashed_hostnames: Vec<String>,
-    /// Tang server URLs for disk encryption, remembered across a batch so the
-    /// operator doesn't retype them per card. Advertisements are re-captured
-    /// each flash (they are not persisted).
     pub tang_urls: Vec<String>,
-    /// The k-of-n unlock threshold, remembered alongside the URLs. 0 = unset.
     pub tang_threshold: u32,
+    pub tang_cloud: bool,
 }
 
 fn settings_path(app: &AppHandle) -> Result<PathBuf, String> {
@@ -51,9 +32,6 @@ fn settings_path(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(dir.join(SETTINGS_FILE))
 }
 
-/// Unreadable or corrupt settings are not an error: a first run has no file,
-/// and a truncated one must not brick the wizard. Either way the operator gets
-/// defaults and the next save rewrites it.
 fn load_from(path: &Path) -> Settings {
     std::fs::read_to_string(path)
         .ok()
@@ -61,7 +39,6 @@ fn load_from(path: &Path) -> Settings {
         .unwrap_or_default()
 }
 
-/// Owner-only (0600 on Unix): this file holds the WiFi passphrase.
 fn save_to(path: &Path, settings: &Settings) -> Result<(), String> {
     let json = serde_json::to_string_pretty(settings)
         .map_err(|e| format!("Failed to encode settings: {e}"))?;
@@ -96,8 +73,6 @@ fn write_owner_only(path: &Path, contents: &str) -> Result<(), String> {
         .map_err(|e| format!("Failed to write settings: {e}"))
 }
 
-/// Turning diagnostics on mints the install id; turning them off drops it, so
-/// an opt-out leaves nothing behind to correlate a later opt-in against.
 fn with_install_id(settings: Settings) -> Settings {
     match settings.telemetry {
         Some(true) => Settings {
@@ -114,8 +89,6 @@ fn with_install_id(settings: Settings) -> Settings {
     }
 }
 
-/// The id events are attributed to, or `None` when the operator has not opted
-/// in — the single gate every shipped event passes through.
 pub fn telemetry_id(app: &AppHandle) -> Option<String> {
     let settings = load_from(&settings_path(app).ok()?);
     settings.telemetry.unwrap_or(false).then_some(())?;
@@ -161,6 +134,7 @@ mod tests {
             flashed_hostnames: vec!["aircast-01".into()],
             tang_urls: vec!["http://10.0.0.5".into()],
             tang_threshold: 1,
+            tang_cloud: false,
         }
     }
 

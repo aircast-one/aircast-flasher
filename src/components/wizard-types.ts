@@ -10,6 +10,8 @@ import type {
 
 export type SourceKind = "aircast" | "local";
 
+export type FleetView = "devices" | "cloud";
+
 export type WizardStep = 1 | 2 | 3 | 4 | 5;
 
 export const STEP = {
@@ -36,4 +38,5 @@ export interface FlashVars {
   tailscale: TailscaleConfig | null;
   access: AccessConfig | null;
   encryption: EncryptionConfig | null;
+  cloudKeyServer: boolean;
 }

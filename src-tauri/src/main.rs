@@ -1,9 +1,9 @@
-// Prevent an extra console window on Windows release builds.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 #[cfg(all(feature = "wdio", not(debug_assertions)))]
 compile_error!("the wdio feature embeds a WebDriver server — never enable it in a release build");
 
+mod cloud;
 mod connect;
 mod flasher;
 mod helper;
@@ -16,9 +16,6 @@ use flasher::FlasherState;
 
 #[tokio::main]
 async fn main() {
-    // The elevated flash helper is this same binary re-executed (Touch ID on
-    // macOS / UAC on Windows / pkexec on Linux). It opens the raw device as
-    // root, runs the engine, and exits before any GUI is constructed.
     if std::env::args().any(|a| a == "--flash-helper") {
         helper::run_flash_helper();
     }
@@ -34,11 +31,10 @@ async fn main() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .manage(FlasherState::new())
+        .manage(cloud::CloudState::default())
         .setup(|app| {
             let handle = app.handle().clone();
             telemetry::record_panics(handle.clone());
-            // A run that ended offline, or died before its last event shipped,
-            // leaves the tail of the log unsent. This is where it catches up.
             telemetry::flush(&handle);
             Ok(())
         })
@@ -49,6 +45,13 @@ async fn main() {
             flasher::flash::flash_image,
             flasher::encrypt::fetch_tang_adv,
             flasher::encrypt::save_recovery_file,
+            cloud::cloud_sign_in_start,
+            cloud::cloud_sign_in_poll,
+            cloud::cloud_account,
+            cloud::cloud_sign_out,
+            cloud::cloud_create_keyset,
+            cloud::cloud_list_cards,
+            cloud::cloud_mark_lost,
             flasher::wifi::list_wifi_networks,
             flasher::flash::cancel_flash,
             flasher::sshkeys::detect_ssh_keys,
