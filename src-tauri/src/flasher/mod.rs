@@ -1,9 +1,3 @@
-//! Flasher commands. Mirrors the proven aircast-web flasher: list releases,
-//! enumerate removable block devices, stream-download with checksum verify,
-//! decompress if needed, then run the open-once write → verify → customize
-//! engine inside one elevated helper process (Touch ID on macOS / UAC on
-//! Windows / pkexec on Linux). Cancellable via a shared flag.
-
 pub mod devices;
 pub mod download;
 pub mod encrypt;
@@ -29,13 +23,8 @@ use tauri::{AppHandle, Emitter};
 use flasher_core::{ProvisionConfig, TailscaleConfig, WifiConfig};
 
 pub(crate) const PROGRESS_THROTTLE_MS: u128 = 100;
-pub(crate) const MIN_TEMP_SPACE_BYTES: u64 = 4_500_000_000; // ~4.5 GB
+pub(crate) const MIN_TEMP_SPACE_BYTES: u64 = 4_500_000_000;
 
-/// Smallest card that can hold a decompressed aircast-lite image, used to warn
-/// before the download when the release does not publish its uncompressed size.
-/// v0.3.2 decompresses to 2.97 GB (`xz --robot -l`), so this rejects 2 GB cards
-/// and clears every real 4 GB one. It is a floor, not the true requirement:
-/// the exact check runs against the decompressed file in `flash_image_inner`.
 pub(crate) const MIN_CARD_BYTES: u64 = 3_500_000_000;
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const STALL_TIMEOUT: Duration = Duration::from_secs(20);
@@ -44,20 +33,10 @@ pub(crate) const BACKOFF_BASE: Duration = Duration::from_secs(1);
 pub(crate) const BACKOFF_CAP: Duration = Duration::from_secs(30);
 pub(crate) const CANCEL_POLL: Duration = Duration::from_millis(100);
 
-/// How many *consecutive* attempts may move zero bytes before the download is
-/// declared dead. Any progress resets the count, so a long transfer over a link
-/// that drops repeatedly still finishes; only a link that stops delivering
-/// gives up.
 pub(crate) const STALLED_ATTEMPTS: usize = 6;
 
-/// Absolute backstop, since [`STALLED_ATTEMPTS`] resets on any progress at all:
-/// a server dribbling one byte per connection would otherwise retry forever.
 pub(crate) const MAX_RETRIES: usize = 100;
 
-/// How long to wait for the elevated helper to notice an aborted preparation
-/// before reporting the preparation's own error. Long enough for a helper that
-/// is actually running to read the abort file, short enough that an unanswered
-/// elevation prompt does not hold the UI.
 pub(crate) const HELPER_ABORT_GRACE: Duration = Duration::from_secs(5);
 
 pub(crate) fn http() -> &'static reqwest::Client {
@@ -71,15 +50,6 @@ pub(crate) fn http() -> &'static reqwest::Client {
     })
 }
 
-// ---------------------------------------------------------------------------
-// State
-// ---------------------------------------------------------------------------
-
-/// Shared cancel flag for the active download/flash. `cancel_flash` flips it;
-/// long-running loops poll it.
-/// `cancel` stops in-flight work (download loops, decompress) and is also set
-/// internally when the elevated helper dies first; `user_cancel` records that
-/// the user pressed Cancel, so telemetry can tell a cancellation from a failure.
 pub struct FlasherState {
     pub cancel: Arc<AtomicBool>,
     pub user_cancel: Arc<AtomicBool>,
@@ -93,9 +63,6 @@ impl FlasherState {
         }
     }
 }
-
-// Helpers
-// ---------------------------------------------------------------------------
 
 pub(crate) fn emit_flash_progress(
     app_handle: &AppHandle,
@@ -117,9 +84,6 @@ pub(crate) fn emit_flash_progress(
     );
 }
 
-/// Bytes per second over the same one-second window the download uses, so both
-/// progress panels report a rate the same way. Restarts on a phase change,
-/// since write and verify are different speeds over the same byte count.
 #[derive(Default)]
 pub(crate) struct FlashSpeed {
     phase: Option<FlashPhase>,
@@ -156,10 +120,6 @@ pub(crate) fn format_bytes(bytes: u64) -> String {
     format!("{adjusted:.1}")
 }
 
-// ---------------------------------------------------------------------------
-
-/// A directory of this test's own, so the ones that write files do not
-/// collide when the suite runs in parallel.
 #[cfg(test)]
 pub(crate) fn isolated_dir(name: &str) -> std::path::PathBuf {
     let dir = std::env::temp_dir().join(format!(
@@ -206,8 +166,6 @@ mod tests {
     }
 }
 
-/// Windows spawns a console window for every child process unless told not to.
-/// Shared, because the flash helper and both Wi-Fi paths all shell out.
 #[cfg(target_os = "windows")]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 

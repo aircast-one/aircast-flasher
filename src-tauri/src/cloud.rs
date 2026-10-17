@@ -163,9 +163,7 @@ pub async fn cloud_sign_in_poll(
         .map_err(|e| format!("could not reach Aircast Cloud: {e}"))?;
     match resp.status() {
         reqwest::StatusCode::ACCEPTED => Ok(SignInStatus::Pending),
-        reqwest::StatusCode::NOT_FOUND => {
-            Err("The sign-in expired. Start it again.".to_string())
-        }
+        reqwest::StatusCode::NOT_FOUND => Err("The sign-in expired. Start it again.".to_string()),
         s if s.is_success() => {
             let poll = resp
                 .json::<Poll>()

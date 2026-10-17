@@ -10,21 +10,17 @@ repository.workspace = true
 serde = { workspace = true }
 serde_json = { workspace = true }
 
-# psk: WPA-PSK derivation
 pbkdf2 = "0.12"
 hmac = "0.12"
 sha1 = "0.10"
 hex = "0.4"
 
-# sha2: post-write verification (read-back hash compare)
 sha2 = "0.10"
 
-# engine: block-level FAT customization + MBR parsing over the raw device.
 fatfs = "0.3"
 fscommon = "0.1"
 mbrman = "0.5"
 
-# Windows-only: raw disk enumeration + image writing via Win32 APIs.
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.58", features = [
   "Win32_Foundation",

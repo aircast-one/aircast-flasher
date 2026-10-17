@@ -31,9 +31,6 @@ pub fn record<T: Serialize>(app: &AppHandle, event: &T) {
     flush(app);
 }
 
-/// Record an event named at runtime. The UI owns the half of the funnel the
-/// backend cannot see — which step the operator reached, whether an update was
-/// offered — so it needs a way in that does not mean a command per event.
 #[tauri::command]
 pub fn track(app_handle: AppHandle, event: String, props: serde_json::Value) {
     let envelope = serde_json::json!({
@@ -54,13 +51,6 @@ fn merge(base: serde_json::Value, extra: serde_json::Value) -> serde_json::Value
     }
 }
 
-/// Ship everything written since the last successful send. Nothing leaves the
-/// machine until the operator opts in, and a build without a `POSTHOG_KEY`
-/// (every dev build) only ever writes the local log.
-///
-/// The offset lives beside the log rather than in `settings.json` because the
-/// UI rewrites settings on every keystroke, and a lost write here would mean
-/// re-sending the whole log.
 pub fn flush(app: &AppHandle) {
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
@@ -105,8 +95,6 @@ async fn flush_now(app: &AppHandle) -> Option<()> {
     Some(())
 }
 
-/// Turn a panic into an event. A crash is the one failure the operator can
-/// never describe and the local log would otherwise never name.
 pub fn record_panics(app: AppHandle) {
     let previous = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
@@ -128,17 +116,12 @@ pub fn record_panics(app: AppHandle) {
     }));
 }
 
-/// Treat the log as already shipped. Consent is "from here on": the events
-/// written before the operator opted in stay on their machine.
 pub fn mark_all_sent(app: &AppHandle) {
     let Ok(path) = log_path(app) else { return };
     let len = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
     let _ = std::fs::write(path.with_file_name(SENT_FILE), len.to_string());
 }
 
-/// Bytes of the log already shipped. A rolled-over log is shorter than the
-/// offset it left behind, and [`flush_now`] clamps to the current length rather
-/// than skipping the whole new file.
 fn sent_offset(log: &std::path::Path) -> usize {
     std::fs::read_to_string(log.with_file_name(SENT_FILE))
         .ok()
@@ -151,9 +134,6 @@ fn flush_lock() -> &'static tokio::sync::Mutex<()> {
     LOCK.get_or_init(Default::default)
 }
 
-/// Append one JSONL line, rolling the file over once it passes [`MAX_LOG_BYTES`]
-/// so a long-lived install can't grow it without bound. Best-effort: diagnostics
-/// must never break a flash.
 fn append_line(path: &std::path::Path, line: &str) {
     if std::fs::metadata(path).map(|m| m.len()).unwrap_or(0) > MAX_LOG_BYTES {
         let _ = std::fs::rename(path, path.with_extension("jsonl.1"));
@@ -247,10 +227,6 @@ pub struct DownloadEvent {
     pub cached: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mbps: Option<f64>,
-    /// Reconnects the transfer needed, how many of those threw away progress
-    /// because the server would not resume, and how many bytes resuming saved.
-    /// A download that succeeded after eight reconnects is not the same event
-    /// as a clean one, and only these tell them apart.
     pub retries: usize,
     pub restarts: usize,
     pub resumed_bytes: u64,
@@ -277,15 +253,10 @@ pub struct FlashEvent {
     pub customize_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub write_mbps: Option<f64>,
-    /// The helper's timestamped diagnostic lines, kept on failure so an
-    /// events.jsonl alone pinpoints how far the flash got and on what device.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub diag: Option<Vec<String>>,
 }
 
-/// Stage transitions observed on the helper's progress stream, in order. Phase
-/// durations are the gaps between transitions, so they need no cooperation from
-/// the elevated process.
 #[derive(Default)]
 pub struct PhaseLog {
     transitions: Vec<(&'static str, Instant)>,
@@ -584,8 +555,6 @@ mod tests {
         let len = std::fs::metadata(&path).expect("stat").len() as usize;
         std::fs::write(path.with_file_name(SENT_FILE), "999999").expect("seed offset");
 
-        // flush_now clamps to the log it actually has, so the fresh, shorter
-        // file is sent from the start instead of being read past its end.
         assert!(sent_offset(&path) > len);
         assert_eq!(sent_offset(&path).min(len), len);
     }

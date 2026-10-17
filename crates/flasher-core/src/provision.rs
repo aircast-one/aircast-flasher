@@ -1,19 +1,10 @@
-//! Turn a [`ProvisionConfig`] into the concrete first-boot files to write onto
-//! the FAT boot partition. Pure: no I/O. The Tauri app mounts the partition and
-//! applies the returned [`ProvisionPlan`].
-
 use crate::{psk, AccessConfig, InitFormat, ProvisionConfig, SshMode, TailscaleConfig, WifiConfig};
 
-/// Boot-partition file the image's first-boot service reads to enrol disk
-/// encryption, then wipes.
 const ENCRYPT_MARKER_NAME: &str = "aircast-encrypt";
 
 const TS_STATE_PATH: &str = "/var/lib/aircastd/tailscale.json";
 const TS_KEY_PATH: &str = "/var/lib/aircastd/tailscale.authkey";
 
-/// Sanitized (control_server, auth_key) when a key is present, else `None`.
-/// Strips control characters so a pasted value with an embedded newline can't
-/// break out of the cloud-init YAML block scalar or the firstrun heredoc.
 fn provisioned_tailscale(ts: &TailscaleConfig) -> Option<(String, String)> {
     let control = sanitize_line(&ts.control_server);
     let key = sanitize_line(&ts.auth_key);
@@ -45,45 +36,38 @@ fn json_string(s: &str) -> String {
     out
 }
 
-/// A file to write into the boot partition's root.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProvisionFile {
     pub name: String,
     pub contents: String,
-    /// Whether the file should be made executable (firstrun.sh).
     pub executable: bool,
 }
 
 impl ProvisionFile {
     fn plain(name: &str, contents: String) -> Self {
-        Self { name: name.into(), contents, executable: false }
+        Self {
+            name: name.into(),
+            contents,
+            executable: false,
+        }
     }
 }
 
-/// The kernel-command-line fragment that runs `firstrun.sh` once on first boot.
 pub const FIRSTRUN_CMDLINE: &str =
     " systemd.run=/boot/firstrun.sh systemd.run_success_action=reboot systemd.unit=kernel-command-line.target";
 
-/// What to write to the boot partition for a given config.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProvisionPlan {
-    /// Nothing to provision.
     Noop,
-    /// Write each file to the boot partition root.
-    CloudInit { files: Vec<ProvisionFile> },
-    /// Write `script`, then append `cmdline_append` to `cmdline.txt` (idempotently).
+    CloudInit {
+        files: Vec<ProvisionFile>,
+    },
     FirstRun {
         script: ProvisionFile,
         cmdline_append: String,
     },
 }
 
-/// The boot-partition files that enrol disk encryption: the marker (sourced by
-/// the first-boot service for the Tang URL and recovery key) and the Tang
-/// advertisement sidecar. Empty unless a complete [`EncryptionConfig`] is set.
-///
-/// These are written whatever the init format, since the image's own first-boot
-/// service consumes them — not cloud-init or firstrun.sh.
 pub fn encryption_files(config: &ProvisionConfig) -> Vec<ProvisionFile> {
     let Some(enc) = config.encryption.as_ref().filter(|e| e.is_complete()) else {
         return Vec::new();
@@ -91,11 +75,6 @@ pub fn encryption_files(config: &ProvisionConfig) -> Vec<ProvisionFile> {
     let Some(clevis_cfg) = clevis_sss_config(enc) else {
         return Vec::new();
     };
-    // Single-line (control chars stripped so a value can't start a fresh shell
-    // statement) and single-quoted (the helper escapes any embedded quote), so
-    // sourcing the marker is safe whatever the values are. CLEVIS_CFG is a JSON
-    // sss policy with each Tang advertisement inlined, so first boot binds with
-    // no network.
     let mut marker = format!(
         "# aircast disk-encryption enrolment seed — consumed and wiped by\n\
          # aircast-firstboot-data.sh on first boot. Holds a clear recovery key;\n\
@@ -105,15 +84,7 @@ pub fn encryption_files(config: &ProvisionConfig) -> Vec<ProvisionFile> {
         cfg = shell_single_quote(&sanitize_line(&clevis_cfg)),
         key = shell_single_quote(&sanitize_line(&enc.recovery_key)),
     );
-    // When wifi is the uplink, the initramfs must associate it before it can
-    // reach Tang to unlock — so first boot bakes these creds into the initramfs.
-    // The wifi PSK therefore can't be protected (it's needed pre-decryption);
-    // only the data partition is. Derive the PSK so the plaintext passphrase is
-    // never written.
     if let Some(wifi) = &config.wifi {
-        // Hex-encode the SSID so the initramfs supplicant config needs no
-        // quoting (wpa_supplicant accepts a bare hex ssid), which a `"` or other
-        // special character in the SSID would otherwise break.
         marker.push_str(&format!(
             "WIFI_SSID_HEX='{ssid}'\n\
              WIFI_PSK='{psk}'\n\
@@ -126,10 +97,6 @@ pub fn encryption_files(config: &ProvisionConfig) -> Vec<ProvisionFile> {
     vec![ProvisionFile::plain(ENCRYPT_MARKER_NAME, marker)]
 }
 
-/// Build the Clevis `sss` policy JSON for the configured Tang servers, with each
-/// server's advertisement inlined. Returns `None` if any advertisement isn't
-/// valid JSON (a wrong URL captured an error page). `sss` with one pin and
-/// threshold 1 is valid, so this covers the single-server case too.
 fn clevis_sss_config(enc: &crate::EncryptionConfig) -> Option<String> {
     let pins = enc
         .tang_servers
@@ -146,7 +113,6 @@ fn clevis_sss_config(enc: &crate::EncryptionConfig) -> Option<String> {
     Some(cfg.to_string())
 }
 
-/// Build the provisioning plan for `config`.
 pub fn plan(config: &ProvisionConfig) -> ProvisionPlan {
     if config.is_empty() {
         return ProvisionPlan::Noop;
@@ -174,10 +140,12 @@ fn cloud_init_files(config: &ProvisionConfig) -> Vec<ProvisionFile> {
     }
 
     if let Some(wifi) = &config.wifi {
-        files.push(ProvisionFile::plain("network-config", network_config_v2(wifi)));
+        files.push(ProvisionFile::plain(
+            "network-config",
+            network_config_v2(wifi),
+        ));
     }
 
-    // cloud-init's NoCloud datasource needs meta-data to exist.
     files.push(ProvisionFile::plain("meta-data", String::new()));
     files
 }
@@ -189,18 +157,12 @@ fn cloud_init_user_data(config: &ProvisionConfig) -> Option<String> {
     let mut scrub = false;
 
     if let Some(host) = &config.hostname {
-        // manage_etc_hosts keeps 127.0.1.1 pointing at the name cloud-init just
-        // set. Without it the image's own entry survives, every sudo prints
-        // "unable to resolve host", and anything resolving its own hostname
-        // waits for DNS to fail first.
         top.push_str(&format!(
             "hostname: {host}\npreserve_hostname: false\nmanage_etc_hosts: localhost\n"
         ));
     }
 
     if let Some(access) = config.access.as_ref().filter(|a| a.is_effective()) {
-        // Returns true when it wrote a plaintext secret (a password) that must
-        // not linger on the card.
         scrub |= access_cloud_init(access, &mut top, &mut write_files, &mut runcmd);
     }
 
@@ -233,11 +195,6 @@ fn cloud_init_user_data(config: &ProvisionConfig) -> Option<String> {
     Some(format!("#cloud-config\n{body}"))
 }
 
-/// Emits the SSH/credential cloud-config: settings into `top`, the staged key
-/// and its install script into `write_files`, and the item that runs it — or
-/// disables ssh — into `runcmd`. Returns true if a plaintext secret (password)
-/// was written, so the caller can scrub `user-data` after first boot. The
-/// public key is not a secret.
 fn access_cloud_init(
     access: &AccessConfig,
     top: &mut String,
@@ -248,12 +205,6 @@ fn access_cloud_init(
         SshMode::KeyOnly => {
             if let Some(key) = sanitized(&access.authorized_key) {
                 top.push_str("ssh_pwauth: false\n");
-                // Not top-level `ssh_authorized_keys`: cloud-init hands those
-                // to its default user, and this image has none — the login user
-                // is created by pi-gen, not by cloud-init. The key then reached
-                // nobody while ssh_pwauth: false still landed, which is a card
-                // with no way into it at all. Install it by name instead, and
-                // let the script put passwords back if even that fails.
                 write_files.push(install_key_write_files(&key));
                 runcmd.push(install_key_runcmd());
             }
@@ -271,9 +222,6 @@ fn access_cloud_init(
             false
         }
         SshMode::Disabled => {
-            // Disable both the service and the socket: on socket-activated SSH,
-            // stopping only ssh.service would leave ssh.socket listening. The
-            // `; true` tolerates a system that has only one of them.
             runcmd.push(
                 "  - [ sh, -c, \"systemctl disable --now ssh.socket ssh.service 2>/dev/null; true\" ]\n"
                     .to_string(),
@@ -283,8 +231,6 @@ fn access_cloud_init(
     }
 }
 
-/// One sanitized, non-blank line, or `None`. Strips control characters so a
-/// pasted value can't break out of the surrounding YAML.
 fn sanitized(v: &Option<String>) -> Option<String> {
     let s = sanitize_line(v.as_deref().unwrap_or_default());
     let s = s.trim().to_string();
@@ -294,23 +240,8 @@ fn sanitized(v: &Option<String>) -> Option<String> {
 const KEY_STAGE_PATH: &str = "/root/.aircast-authorized-key";
 const INSTALL_KEY_PATH: &str = "/root/aircast-install-key.sh";
 const RECOVERY_MARKER: &str = "/var/log/aircast-key-install-failed";
-/// sshd takes the first value it reads and `Include /etc/ssh/sshd_config.d/*.conf`
-/// sits at the top of Debian's sshd_config, so a drop-in decides this setting
-/// whatever the main file says. cloud-init writes `50-cloud-init.conf`; glob
-/// order means anything that must beat it has to sort *before* it, not after.
 const ACCESS_DROPIN: &str = "/etc/ssh/sshd_config.d/10-aircast-access.conf";
 
-/// The first-boot step that puts the operator's key where sshd will read it and
-/// then settles password auth to match what actually happened.
-///
-/// It resolves the account rather than assuming any part of it: uid 1000 is
-/// what pi-gen's `FIRST_USER_NAME` creates, and the group and home come out of
-/// that same passwd entry — a group is not always named after its user, and
-/// assuming a name is what broke this in the first place.
-///
-/// One rule, whichever path emitted it: the key is in place, so passwords go
-/// off; or it is not, so passwords stay on and a marker says why. Handing over
-/// a card with neither a key nor a password is the one outcome worth avoiding.
 fn install_key_body() -> String {
     format!(
         "key={KEY_STAGE_PATH}\n\
@@ -347,8 +278,6 @@ fn install_key_script() -> String {
     format!("#!/bin/sh\n{}", install_key_body())
 }
 
-/// Stages the key next to the script, so neither the YAML nor the shell has to
-/// quote it: the key never appears in a command line.
 fn install_key_write_files(key: &str) -> String {
     let script = install_key_script()
         .lines()
@@ -364,9 +293,6 @@ fn install_key_runcmd() -> String {
     format!("  - [ sh, {INSTALL_KEY_PATH} ]\n")
 }
 
-/// Removes the seed + cloud-init's cache of user-data after first boot, so a
-/// plaintext secret (Tailscale key, device password) doesn't linger on the card
-/// or root filesystem. Runs after cloud-init has already applied everything.
 const SCRUB_USERDATA_ITEM: &str = "  - [ sh, -c, \"rm -f /boot/firmware/user-data /var/lib/cloud/instance/user-data.txt /var/lib/cloud/instances/*/user-data.txt 2>/dev/null; true\" ]\n";
 
 fn tailscale_write_files_entry(control_server: &str, auth_key: &str) -> String {
@@ -377,8 +303,6 @@ fn tailscale_write_files_entry(control_server: &str, auth_key: &str) -> String {
     )
 }
 
-/// cloud-init v2 network-config for a single wlan0 network, using a derived
-/// WPA-PSK rather than the plaintext passphrase.
 fn network_config_v2(wifi: &WifiConfig) -> String {
     let key = psk::derive(&wifi.ssid, &wifi.password);
     format!(
@@ -396,8 +320,6 @@ fn network_config_v2(wifi: &WifiConfig) -> String {
     )
 }
 
-/// Legacy `firstrun.sh` that sets the hostname and writes a wpa_supplicant.conf
-/// with the derived PSK, then self-cleans.
 fn firstrun_script(config: &ProvisionConfig) -> String {
     let mut s = String::from("#!/bin/bash\n\nset +e\n\n");
 
@@ -456,17 +378,12 @@ fn firstrun_script(config: &ProvisionConfig) -> String {
     s
 }
 
-/// Shell for the legacy firstrun path that applies the same SSH/credential
-/// posture as [`access_cloud_init`]. Values are single-quoted in the shell and
-/// pre-sanitized of control characters so a pasted value can't break out.
 fn firstrun_access(access: &AccessConfig) -> String {
     match access.ssh {
         SshMode::KeyOnly => {
             let Some(key) = sanitized(&access.authorized_key) else {
                 return String::new();
             };
-            // The same body cloud-init runs: one place decides which account
-            // the key belongs to and whether passwords may go off.
             format!(
                 "printf '%s\\n' '{key}' >{KEY_STAGE_PATH}\n\
                  chmod 600 {KEY_STAGE_PATH}\n\
@@ -493,8 +410,6 @@ fn firstrun_access(access: &AccessConfig) -> String {
     }
 }
 
-/// Escapes a sanitized value for safe inclusion inside a shell single-quoted
-/// string (`'...'`), turning each `'` into `'\''`.
 fn shell_single_quote(s: &str) -> String {
     s.replace('\'', "'\\''")
 }
@@ -568,12 +483,13 @@ mod tests {
             panic!("expected CloudInit plan");
         };
         let net = files.iter().find(|f| f.name == "network-config").unwrap();
-        // The IEEE/password vector PSK, never the plaintext.
         assert!(net
             .contents
             .contains("f42c6fc52df0ebef9ebb4b90b38a5f902e83fe1b135a70e23aed762e9710a12e"));
         assert!(!net.contents.contains("password: \"password\""));
-        assert!(files.iter().any(|f| f.name == "user-data" && f.contents.contains("hostname: aircast")));
+        assert!(files
+            .iter()
+            .any(|f| f.name == "user-data" && f.contents.contains("hostname: aircast")));
         assert!(files.iter().any(|f| f.name == "meta-data"));
     }
 
@@ -590,8 +506,10 @@ mod tests {
 
     #[test]
     fn firstrun_writes_script_and_cmdline() {
-        let ProvisionPlan::FirstRun { script, cmdline_append } =
-            plan(&cfg(InitFormat::FirstRun, true, Some("aircast")))
+        let ProvisionPlan::FirstRun {
+            script,
+            cmdline_append,
+        } = plan(&cfg(InitFormat::FirstRun, true, Some("aircast")))
         else {
             panic!("expected FirstRun plan");
         };
@@ -639,7 +557,8 @@ mod tests {
 
     #[test]
     fn firstrun_provisions_tailscale_store() {
-        let ProvisionPlan::FirstRun { script, .. } = plan(&ts_cfg(InitFormat::FirstRun, None)) else {
+        let ProvisionPlan::FirstRun { script, .. } = plan(&ts_cfg(InitFormat::FirstRun, None))
+        else {
             panic!("expected FirstRun plan");
         };
         assert!(script
@@ -696,25 +615,29 @@ mod tests {
     fn access_key_only_disables_password_auth_and_adds_key() {
         let config = access_cfg(
             InitFormat::CloudInit,
-            access(SshMode::KeyOnly, Some("ssh-ed25519 AAAAkey operator@base"), None),
+            access(
+                SshMode::KeyOnly,
+                Some("ssh-ed25519 AAAAkey operator@base"),
+                None,
+            ),
         );
         let ud = cloud_user_data(&config);
         assert!(ud.contains("ssh_pwauth: false"));
         assert!(ud.contains(&format!("  - path: {KEY_STAGE_PATH}")));
         assert!(ud.contains("      ssh-ed25519 AAAAkey operator@base\n"));
         assert!(ud.contains(&format!("  - [ sh, {INSTALL_KEY_PATH} ]")));
-        // A public key is not a secret — user-data is not scrubbed for it.
         assert!(!ud.contains("rm -f /boot/firmware/user-data"));
     }
 
     #[test]
     fn key_only_never_leaves_the_key_to_cloud_inits_default_user() {
-        // This image has no cloud-init default user, so a top-level
-        // ssh_authorized_keys reaches nobody while ssh_pwauth: false still
-        // applies — which is exactly how a card ends up with no way in.
         let config = access_cfg(
             InitFormat::CloudInit,
-            access(SshMode::KeyOnly, Some("ssh-ed25519 AAAAkey operator@base"), None),
+            access(
+                SshMode::KeyOnly,
+                Some("ssh-ed25519 AAAAkey operator@base"),
+                None,
+            ),
         );
         let ud = cloud_user_data(&config);
         assert!(!ud.contains("ssh_authorized_keys:"));
@@ -723,8 +646,6 @@ mod tests {
 
     #[test]
     fn install_key_script_resolves_the_user_instead_of_assuming_one() {
-        // Assuming the name is what broke this the first time: the account is
-        // pi-gen's FIRST_USER_NAME, which the flasher does not choose.
         let script = install_key_script();
         assert!(script.contains("user=$(getent passwd 1000 | cut -d: -f1)"));
         assert!(script.contains("home=$(getent passwd \"$user\" | cut -d: -f6)"));
@@ -738,8 +659,6 @@ mod tests {
 
     #[test]
     fn install_key_script_puts_passwords_back_when_the_key_does_not_land() {
-        // Handing over a card with neither a key nor a password is the one
-        // outcome worth avoiding, so the failure branch turns passwords on.
         let script = install_key_script();
         assert!(
             !script.contains("|| exit 0"),
@@ -755,28 +674,38 @@ mod tests {
 
     #[test]
     fn key_only_user_data_is_valid_cloud_config() {
-        // A user-data that does not parse is ignored in silence at boot, which
-        // is the whole failure mode here: assert the shape, not a substring.
         let ud = cloud_user_data(&access_cfg(
             InitFormat::CloudInit,
-            access(SshMode::KeyOnly, Some("ssh-ed25519 AAAAkey operator@base"), None),
+            access(
+                SshMode::KeyOnly,
+                Some("ssh-ed25519 AAAAkey operator@base"),
+                None,
+            ),
         ));
         let doc: serde_norway::Value = serde_norway::from_str(&ud).expect("valid YAML");
         assert_eq!(doc["ssh_pwauth"].as_bool(), Some(false));
         assert!(doc.get("ssh_authorized_keys").is_none());
 
-        let files = doc["write_files"].as_sequence().expect("write_files is a list");
+        let files = doc["write_files"]
+            .as_sequence()
+            .expect("write_files is a list");
         let staged = files
             .iter()
             .find(|f| f["path"].as_str() == Some(KEY_STAGE_PATH))
             .expect("the key is staged");
-        assert_eq!(staged["content"].as_str(), Some("ssh-ed25519 AAAAkey operator@base\n"));
+        assert_eq!(
+            staged["content"].as_str(),
+            Some("ssh-ed25519 AAAAkey operator@base\n")
+        );
         assert_eq!(staged["permissions"].as_str(), Some("0600"));
         let script = files
             .iter()
             .find(|f| f["path"].as_str() == Some(INSTALL_KEY_PATH))
             .expect("the script is written");
-        assert!(script["content"].as_str().unwrap().starts_with("#!/bin/sh\n"));
+        assert!(script["content"]
+            .as_str()
+            .unwrap()
+            .starts_with("#!/bin/sh\n"));
 
         let run = doc["runcmd"].as_sequence().expect("runcmd is a list");
         let argv: Vec<&str> = run[0]
@@ -790,9 +719,6 @@ mod tests {
 
     #[test]
     fn recovery_beats_cloud_inits_own_sshd_drop_in() {
-        // sshd takes the first value it reads and cloud-init writes
-        // 50-cloud-init.conf, so editing the main config or sorting after it
-        // would change nothing at all.
         assert!(ACCESS_DROPIN.starts_with("/etc/ssh/sshd_config.d/"));
         let name = ACCESS_DROPIN.rsplit('/').next().unwrap();
         assert!(name < "50-cloud-init.conf", "{name} must sort before it");
@@ -801,31 +727,36 @@ mod tests {
 
     #[test]
     fn install_key_script_checks_the_key_itself_not_just_a_non_empty_file() {
-        // An image that ships its own authorized_keys would otherwise pass a
-        // -s test with the operator's key nowhere in it.
         let script = install_key_script();
         assert!(script.contains("grep -qxF \"$(cat \"$key\")\" \"$home/.ssh/authorized_keys\""));
     }
 
     #[test]
     fn both_init_formats_run_the_same_install_body() {
-        // The duplicate that hardcoded pi in one path and resolved it in the
-        // other is exactly how these two drifted apart before.
         let body = install_key_body();
         let cloud = cloud_user_data(&access_cfg(
             InitFormat::CloudInit,
-            access(SshMode::KeyOnly, Some("ssh-ed25519 AAAAkey operator@base"), None),
+            access(
+                SshMode::KeyOnly,
+                Some("ssh-ed25519 AAAAkey operator@base"),
+                None,
+            ),
         ));
         let ProvisionPlan::FirstRun { script, .. } = plan(&access_cfg(
             InitFormat::FirstRun,
-            access(SshMode::KeyOnly, Some("ssh-ed25519 AAAAkey operator@base"), None),
+            access(
+                SshMode::KeyOnly,
+                Some("ssh-ed25519 AAAAkey operator@base"),
+                None,
+            ),
         )) else {
             panic!("expected FirstRun plan");
         };
-        // Every line, not a token one: the two paths drifted apart last time in
-        // the lines this test would have skipped.
         for line in body.lines().filter(|l| !l.trim().is_empty()) {
-            assert!(script.contents.contains(line), "firstrun is missing: {line}");
+            assert!(
+                script.contents.contains(line),
+                "firstrun is missing: {line}"
+            );
             assert!(cloud.contains(line.trim()), "cloud-init is missing: {line}");
         }
     }
@@ -840,7 +771,6 @@ mod tests {
         assert!(ud.contains("ssh_pwauth: true"));
         assert!(ud.contains("chpasswd:"));
         assert!(ud.contains("{name: pi, password: \"s3cret-pass\", type: text}"));
-        // The plaintext password must be removed from the card after first boot.
         assert!(ud.contains("rm -f /boot/firmware/user-data"));
     }
 
@@ -848,11 +778,13 @@ mod tests {
     fn access_value_newlines_are_stripped() {
         let config = access_cfg(
             InitFormat::CloudInit,
-            access(SshMode::KeyOnly, Some("ssh-ed25519 KEY\nssh_pwauth: true"), None),
+            access(
+                SshMode::KeyOnly,
+                Some("ssh-ed25519 KEY\nssh_pwauth: true"),
+                None,
+            ),
         );
         let ud = cloud_user_data(&config);
-        // The injected newline is stripped, so it can't become its own YAML key:
-        // it stays one indented line inside the staged key's block scalar.
         assert!(ud.contains("      ssh-ed25519 KEYssh_pwauth: true\n"));
         assert!(!ud.lines().any(|l| l == "ssh_pwauth: true"));
     }
@@ -862,7 +794,6 @@ mod tests {
         let mut config = ts_cfg(InitFormat::CloudInit, None);
         config.access = Some(access(SshMode::Disabled, None, None));
         let ud = cloud_user_data(&config);
-        // Exactly one runcmd: block, carrying both the disable and the scrub.
         assert_eq!(ud.matches("runcmd:").count(), 1);
         assert!(ud.contains("systemctl disable --now ssh.socket ssh.service"));
         assert!(ud.contains("rm -f /boot/firmware/user-data"));
@@ -877,7 +808,9 @@ mod tests {
         let ProvisionPlan::FirstRun { script, .. } = plan(&config) else {
             panic!("expected FirstRun plan");
         };
-        assert!(script.contents.contains("printf 'pi:%s\\n' 's3cret' | chpasswd"));
+        assert!(script
+            .contents
+            .contains("printf 'pi:%s\\n' 's3cret' | chpasswd"));
         assert!(script.contents.contains("PasswordAuthentication yes"));
     }
 
@@ -891,8 +824,6 @@ mod tests {
             panic!("expected FirstRun plan");
         };
         assert!(script.contents.contains(r"key-with-'\''quote"));
-        // The shared body decides the setting from whether the key landed, so
-        // firstrun no longer hardcodes it — nor the account it belongs to.
         assert!(script.contents.contains("PasswordAuthentication %s"));
         assert!(!script.contents.contains("-o pi -g pi"));
     }
@@ -927,11 +858,17 @@ mod tests {
     #[test]
     fn encryption_marker_carries_an_sss_clevis_policy() {
         let files = encryption_files(&enc_cfg());
-        let marker = &files.iter().find(|f| f.name == "aircast-encrypt").unwrap().contents;
+        let marker = &files
+            .iter()
+            .find(|f| f.name == "aircast-encrypt")
+            .unwrap()
+            .contents;
         assert!(marker.contains("RECOVERY_KEY='correct-horse-battery'"));
-        // One file only now — the advertisement is inlined into CLEVIS_CFG.
         assert_eq!(files.len(), 1);
-        let cfg_line = marker.lines().find(|l| l.starts_with("CLEVIS_CFG=")).unwrap();
+        let cfg_line = marker
+            .lines()
+            .find(|l| l.starts_with("CLEVIS_CFG="))
+            .unwrap();
         let json = cfg_line
             .trim_start_matches("CLEVIS_CFG=")
             .trim_matches('\'');
@@ -966,7 +903,7 @@ mod tests {
     #[test]
     fn a_threshold_above_the_server_count_is_not_complete() {
         let mut c = enc_cfg();
-        c.encryption.as_mut().unwrap().threshold = 2; // only one server
+        c.encryption.as_mut().unwrap().threshold = 2;
         assert!(encryption_files(&c).is_empty());
     }
 
@@ -983,10 +920,8 @@ mod tests {
             .find(|f| f.name == "aircast-encrypt")
             .unwrap()
             .contents;
-        // SSID hex-encoded ("field-net" → 6669656c642d6e6574) so no quoting.
         assert!(marker.contains("WIFI_SSID_HEX='6669656c642d6e6574'"));
         assert!(marker.contains("WIFI_COUNTRY='UA'"));
-        // The derived PSK, never the plaintext passphrase.
         assert!(marker.contains("WIFI_PSK='"));
         assert!(!marker.contains("password"));
     }
@@ -1014,9 +949,11 @@ mod tests {
         let mut c = enc_cfg();
         c.encryption.as_mut().unwrap().recovery_key = "a'; rm -rf /\n#".into();
         let files = encryption_files(&c);
-        let marker = &files.iter().find(|f| f.name == "aircast-encrypt").unwrap().contents;
-        // Newline stripped (no fresh shell statement) and the quote escaped as
-        // '\'' so the value stays inside its quotes without being mangled.
+        let marker = &files
+            .iter()
+            .find(|f| f.name == "aircast-encrypt")
+            .unwrap()
+            .contents;
         assert!(marker.contains(r"RECOVERY_KEY='a'\''; rm -rf /#'"));
         assert!(!marker.contains("rm -rf /\n"));
     }
@@ -1030,8 +967,11 @@ mod tests {
         let ProvisionPlan::CloudInit { files } = plan(&config) else {
             panic!("expected CloudInit plan");
         };
-        let user_data = &files.iter().find(|f| f.name == "user-data").unwrap().contents;
-        // Newlines stripped → values concatenated, never a fresh YAML line.
+        let user_data = &files
+            .iter()
+            .find(|f| f.name == "user-data")
+            .unwrap()
+            .contents;
         assert!(user_data.contains("https://hevil: true"));
         assert!(user_data.contains("hskeymore"));
         assert!(!user_data.contains("\nevil: true"));

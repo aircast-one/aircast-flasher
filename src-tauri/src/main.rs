@@ -7,10 +7,10 @@ mod cloud;
 mod connect;
 mod flasher;
 mod helper;
-mod settings;
-mod telemetry;
 #[cfg(target_os = "macos")]
 mod macos_auth;
+mod settings;
+mod telemetry;
 
 use flasher::FlasherState;
 

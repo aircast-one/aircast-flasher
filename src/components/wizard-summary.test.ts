@@ -141,9 +141,7 @@ test("the default hostname is the lowest number not already in use", () => {
   assert.equal(defaultHostname(), "aircast-01");
   assert.equal(defaultHostname(["aircast-01"]), "aircast-02");
   assert.equal(defaultHostname(["aircast-01", "aircast-02"]), "aircast-03");
-  // A gap is filled rather than skipped, and case does not matter.
   assert.equal(defaultHostname(["AIRCAST-01", "aircast-03"]), "aircast-02");
-  // Names that are not ours never shift the sequence.
   assert.equal(defaultHostname(["falcon", "owel-3"]), "aircast-01");
 });
 

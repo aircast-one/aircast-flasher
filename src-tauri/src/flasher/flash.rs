@@ -25,10 +25,6 @@ use super::PROGRESS_THROTTLE_MS;
 use crate::telemetry;
 use std::io::Write as _;
 
-// ---------------------------------------------------------------------------
-// Command: flash_image (decompress if needed, then dd)
-// ---------------------------------------------------------------------------
-
 #[derive(Default)]
 struct FlashTrace {
     image_bytes: u64,
@@ -136,7 +132,6 @@ async fn flash_image_inner(
     validate_disk_path(&target_disk)?;
     let src_path = validate_image_file(std::path::Path::new(&image_path))?;
 
-    // Re-validate the target is still a removable external device.
     let devices = list_block_devices().await?;
     let Some(card) = devices.iter().find(|d| d.path == target_disk) else {
         return Err(format!(
@@ -152,7 +147,6 @@ async fn flash_image_inner(
 
     let temp_dir = private_temp_dir()?;
 
-    // Decompress only if compressed; raw .img is written directly (local files).
     let lower = src_path.to_string_lossy().to_ascii_lowercase();
     trace.compressed = lower.ends_with(".xz") || lower.ends_with(".gz");
     let (write_path, is_temp) = if trace.compressed {
@@ -166,8 +160,6 @@ async fn flash_image_inner(
         (src_path.clone(), false)
     };
 
-    // For an uncompressed image the size is known now, so a card that cannot
-    // hold it fails before the elevation prompt instead of after it.
     if !trace.compressed {
         let total = std::fs::metadata(&write_path).map(|m| m.len()).unwrap_or(0);
         fits_on_card(total, card_size, &card_label)?;
@@ -180,11 +172,6 @@ async fn flash_image_inner(
         base64::engine::general_purpose::STANDARD.encode(json)
     };
 
-    // Launch the elevated helper FIRST so it opens and probes the device while
-    // the image decompresses: a bad device/reader fails in seconds, not after a
-    // 50-second decompress. The ready-file handshake tells the helper when the
-    // image is complete ("ok") or the preparation died ("abort"). On failure the
-    // helper sets `cancel`, which aborts the concurrent decompress.
     let ready_file = temp_dir.join(format!("aircast-image-ready-{}.txt", randbits()));
     let _ = std::fs::remove_file(&ready_file);
 
@@ -225,18 +212,12 @@ async fn flash_image_inner(
         }
         Err(prep_error) => {
             let _ = std::fs::write(&ready_file, "abort");
-            // The helper may still be sitting behind an unanswered Touch ID/UAC
-            // prompt, where it cannot see the abort file at all. Report the real
-            // failure rather than blocking on the user dismissing a dialog for a
-            // flash that has already lost.
             let helper_result = match tokio::time::timeout(HELPER_ABORT_GRACE, helper).await {
                 Ok(joined) => {
                     joined.unwrap_or_else(|e| Err(format!("Elevated flash task failed: {e}")))
                 }
                 Err(_) => Ok(()),
             };
-            // If the helper died on its own (device error, declined elevation),
-            // that is the root cause and the decompress abort is collateral.
             match helper_result {
                 Err(e) if !e.contains("image preparation aborted") => Err(e),
                 _ => Err(prep_error),
@@ -251,7 +232,6 @@ async fn flash_image_inner(
     result
 }
 
-/// The helper's stage strings, as `'static` labels for the phase log.
 fn stage_label(stage: &str) -> Option<&'static str> {
     match stage {
         "device" => Some("device"),
@@ -262,7 +242,6 @@ fn stage_label(stage: &str) -> Option<&'static str> {
     }
 }
 
-/// Map a helper progress `stage` string to a [`FlashPhase`].
 fn phase_from_stage(stage: &str) -> Option<FlashPhase> {
     match stage {
         "write" => Some(FlashPhase::Writing),
@@ -272,9 +251,6 @@ fn phase_from_stage(stage: &str) -> Option<FlashPhase> {
     }
 }
 
-/// Launch the elevated helper (this same binary `--flash-helper`) as
-/// root/admin, while a tailer thread reads the progress file it appends to and
-/// re-emits `flasher:flash-progress`. The elevation mechanism is per-OS.
 async fn run_elevated_flash(
     app_handle: AppHandle,
     target_disk: String,
@@ -286,7 +262,6 @@ async fn run_elevated_flash(
 ) -> Result<(), String> {
     let exe = std::env::current_exe().map_err(|e| format!("Failed to find current exe: {e}"))?;
 
-    // A unique progress file in the temp dir, shared with the elevated helper.
     let progress_file = std::env::temp_dir().join(format!(
         "aircast-flash-progress-{}.jsonl",
         std::process::id()
@@ -295,7 +270,6 @@ async fn run_elevated_flash(
     std::fs::File::create(&progress_file)
         .map_err(|e| format!("Failed to create progress file: {e}"))?;
 
-    // Tailer: poll the progress file and emit flash progress until told to stop.
     let app = app_handle.clone();
     let pf_for_tail = progress_file.clone();
     let stop = Arc::new(AtomicBool::new(false));
@@ -353,9 +327,6 @@ async fn run_elevated_flash(
         }
     });
 
-    // The provision blob holds secrets (device password, Tailscale key), so it
-    // goes to the helper as a 0600 file path — never on the command line, where
-    // any local user could read it via `ps`.
     sweep_stale_provision_files();
     let provision_file =
         std::env::temp_dir().join(format!("{PROVISION_FILE_PREFIX}{}.b64", randbits()));
@@ -373,11 +344,9 @@ async fn run_elevated_flash(
     .await;
     let _ = std::fs::remove_file(&provision_file);
 
-    // Stop the tailer regardless of outcome.
     stop.store(true, Ordering::SeqCst);
     let _ = tail.await;
 
-    // Re-read the progress file for a terminal error line.
     let contents = std::fs::read_to_string(&progress_file).unwrap_or_default();
     let last_error = contents
         .lines()
@@ -397,8 +366,6 @@ async fn run_elevated_flash(
         })),
         Err(e) => Err(last_error.unwrap_or(e)),
     };
-    // A helper that died while the main process is still decompressing must
-    // abort that decompress: its cancel check is the only thing watching us.
     if out.is_err() {
         cancel.store(true, Ordering::SeqCst);
     }
@@ -407,8 +374,6 @@ async fn run_elevated_flash(
 
 const PROVISION_FILE_PREFIX: &str = "aircast-provision-";
 
-/// Writes `contents` to `path` as a `0600` file (owner-only on Unix), replacing
-/// any existing file. Used for the secret-bearing provision blob.
 fn write_secret_file(path: &std::path::Path, contents: &str) -> Result<(), String> {
     use std::io::Write as _;
     let _ = std::fs::remove_file(path);
@@ -422,9 +387,6 @@ fn write_secret_file(path: &std::path::Path, contents: &str) -> Result<(), Strin
                 .mode(0o600)
                 .open(path)
         }
-        // Windows has no mode bits here; the file lands in the user's temp dir
-        // (readable by the same user and admins). The argv exposure is what
-        // mattered — a locked-down ACL would need the windows-acl crate.
         #[cfg(not(unix))]
         {
             std::fs::File::create(path)
@@ -436,14 +398,8 @@ fn write_secret_file(path: &std::path::Path, contents: &str) -> Result<(), Strin
     Ok(())
 }
 
-/// No live flash runs anywhere near this long, so a provision blob older than
-/// this is an orphan from a crashed flasher.
 const STALE_PROVISION_AGE: std::time::Duration = std::time::Duration::from_secs(3600);
 
-/// Best-effort removal of orphaned provision blobs in the temp dir, left by a
-/// flasher that crashed between writing the file and cleaning it up. Only files
-/// older than [`STALE_PROVISION_AGE`] are removed, so a concurrently-running
-/// flasher's in-flight blob is never deleted.
 fn sweep_stale_provision_files() {
     sweep_provision_files_in(&std::env::temp_dir(), STALE_PROVISION_AGE);
 }
@@ -472,8 +428,6 @@ fn sweep_provision_files_in(dir: &std::path::Path, max_age: std::time::Duration)
     }
 }
 
-/// Per-OS elevation launcher. Returns `Ok(true)` if the helper exited 0,
-/// `Ok(false)` on a non-zero exit, `Err` if the launcher itself failed.
 #[cfg(target_os = "macos")]
 async fn launch_helper(
     exe: &std::path::Path,
@@ -492,7 +446,6 @@ async fn launch_helper(
     let provision = provision_file.to_string();
     let ready = ready_file.to_string_lossy().to_string();
 
-    // One Touch ID prompt; the helper inherits root and holds the device open.
     tokio::task::spawn_blocking(move || -> Result<bool, String> {
         let auth = Authorization::new()?;
         match auth.execute(
@@ -516,7 +469,6 @@ async fn launch_helper(
                 if e.contains("Authentication cancelled") {
                     Err(e)
                 } else {
-                    // Non-zero exit from the helper → surface the progress error.
                     Ok(false)
                 }
             }
@@ -565,8 +517,6 @@ async fn launch_helper(
     provision_file: &str,
     ready_file: &std::path::Path,
 ) -> Result<bool, String> {
-    // Windows has no pkexec/Authorization-Services: re-exec this binary elevated
-    // via PowerShell's Start-Process -Verb RunAs (UAC) and wait for it.
     let ps_cmd = format!(
         "$p = Start-Process -FilePath '{exe}' -ArgumentList \
          '--flash-helper','--device','{device}','--image','{image}','--progress-file','{pf}','--provision-file','{provision}','--image-ready-file','{ready}' \
@@ -599,8 +549,6 @@ async fn launch_helper(
     Err("Disk flashing is not supported on this platform".to_string())
 }
 
-/// Escape a string for embedding inside a single-quoted PowerShell literal
-/// (the only special char inside `'...'` is a single quote, doubled).
 #[cfg(target_os = "windows")]
 fn ps_escape(s: &str) -> String {
     s.replace('\'', "''")
@@ -649,7 +597,6 @@ pub(crate) async fn decompress(
                 .map_err(|e| format!("Write error: {e}"))?;
             bytes_written += n as u64;
             if last_emit.elapsed().as_millis() >= PROGRESS_THROTTLE_MS {
-                // total=0 → UI shows an indeterminate "decompressing N MB" bar.
                 emit_flash_progress(
                     &app_handle,
                     FlashPhase::Decompressing,
@@ -675,10 +622,6 @@ pub(crate) async fn decompress(
     .map_err(|e| format!("Decompress task failed: {e}"))?
 }
 
-// ---------------------------------------------------------------------------
-// Command: cancel_flash
-// ---------------------------------------------------------------------------
-
 #[tauri::command]
 pub async fn cancel_flash(state: tauri::State<'_, FlasherState>) -> Result<(), String> {
     state.user_cancel.store(true, Ordering::SeqCst);
@@ -692,17 +635,12 @@ mod tests {
     use crate::flasher::isolated_dir;
     use crate::flasher::MIN_CARD_BYTES;
 
-    /// The card has to hold the *decompressed* image. v0.3.2 is 586 MB
-    /// compressed and 2.97 GB unpacked, so a check against the download size
-    /// would clear a 1 GB card that cannot possibly hold it.
     #[test]
     fn card_check_uses_the_decompressed_size() {
         const UNCOMPRESSED: u64 = 2_969_567_232;
         const COMPRESSED: u64 = 586_187_284;
         const ONE_GB_CARD: u64 = 1_000_000_000;
 
-        // The floor has to sit above a real image and above the cards that
-        // comparing against the *download* size alone would wrongly clear.
         const _: () = assert!(MIN_CARD_BYTES > UNCOMPRESSED);
         const _: () = assert!(COMPRESSED < ONE_GB_CARD && ONE_GB_CARD < MIN_CARD_BYTES);
 
@@ -719,10 +657,6 @@ mod tests {
             "an unknown card size must not block the flash"
         );
     }
-
-    // A unique temp subdir per test *and* per process: a previous run whose
-    // cleanup lost the race would otherwise leave a file behind and fail the
-    // next run's `create_new`.
 
     #[test]
     fn write_secret_file_round_trips_contents() {
@@ -741,7 +675,6 @@ mod tests {
         let path = dir.join(format!("{PROVISION_FILE_PREFIX}x.b64"));
         write_secret_file(&path, "secret-blob").unwrap();
         let mode = std::fs::metadata(&path).unwrap().permissions().mode();
-        // The secret-bearing blob must not be world/group readable.
         assert_eq!(mode & 0o777, 0o600, "provision file must be 0600");
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -751,7 +684,6 @@ mod tests {
         let dir = isolated_dir("sweep-stale");
         let stale = dir.join(format!("{PROVISION_FILE_PREFIX}x.b64"));
         write_secret_file(&stale, "x").unwrap();
-        // Zero threshold: every matching file counts as stale.
         sweep_provision_files_in(&dir, std::time::Duration::ZERO);
         assert!(
             !stale.exists(),
@@ -765,8 +697,6 @@ mod tests {
         let dir = isolated_dir("sweep-recent");
         let fresh = dir.join(format!("{PROVISION_FILE_PREFIX}x.b64"));
         write_secret_file(&fresh, "x").unwrap();
-        // A just-written file is younger than the threshold: a concurrent
-        // flash's in-flight blob must survive.
         sweep_provision_files_in(&dir, std::time::Duration::from_secs(3600));
         assert!(
             fresh.exists(),

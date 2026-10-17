@@ -27,8 +27,7 @@ fn settings_path(app: &AppHandle) -> Result<PathBuf, String> {
         .path()
         .app_config_dir()
         .map_err(|e| format!("No config directory: {e}"))?;
-    std::fs::create_dir_all(&dir)
-        .map_err(|e| format!("Failed to create config directory: {e}"))?;
+    std::fs::create_dir_all(&dir).map_err(|e| format!("Failed to create config directory: {e}"))?;
     Ok(dir.join(SETTINGS_FILE))
 }
 

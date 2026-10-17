@@ -1,16 +1,7 @@
-//! Disk-encryption helper: fetch a Tang server's advertisement so the flasher
-//! can enrol a card offline. The advertisement is public (a signed JWS of the
-//! server's keys), not a secret — it only has to reach the device at every
-//! later boot to unlock the card.
-
 use std::time::Duration;
 
 use tauri_plugin_dialog::DialogExt;
 
-/// Fetch `<url>/adv` from a Tang server and return it verbatim. The device
-/// binds to this offline during first boot, so it must be the real
-/// advertisement, not an error page: a JWS General JSON Serialization carrying
-/// `payload` and `signatures`.
 #[tauri::command]
 pub async fn fetch_tang_adv(url: String) -> Result<String, String> {
     let base = url.trim().trim_end_matches('/');
@@ -39,11 +30,6 @@ pub async fn fetch_tang_adv(url: String) -> Result<String, String> {
     Ok(body)
 }
 
-/// Show a save dialog and write `contents` to the chosen path. The dialog and
-/// the write both live in the backend, so the webview never supplies a path —
-/// there is no arbitrary-path write primitive exposed to it. Returns `true` if
-/// the operator saved, `false` if they cancelled. Used to export the recovery
-/// key so it isn't trapped in a copy-once wizard field.
 #[tauri::command]
 pub async fn save_recovery_file(
     app: tauri::AppHandle,
@@ -67,9 +53,6 @@ pub async fn save_recovery_file(
     Ok(true)
 }
 
-/// A Tang advertisement is a JWS in General JSON Serialization: an object with a
-/// `payload` and a `signatures` array. Reject anything else so a captive-portal
-/// page or a wrong URL can't be written onto the card as the binding material.
 fn validate_adv(body: &str) -> Result<(), String> {
     let v: serde_json::Value =
         serde_json::from_str(body).map_err(|_| "Tang advertisement is not JSON".to_string())?;
@@ -91,7 +74,8 @@ mod tests {
 
     #[test]
     fn accepts_a_jws_shaped_advertisement() {
-        let adv = r#"{"payload":"eyJrZXlzIjpbXX0","protected":"e30","signatures":[{"signature":"abc"}]}"#;
+        let adv =
+            r#"{"payload":"eyJrZXlzIjpbXX0","protected":"e30","signatures":[{"signature":"abc"}]}"#;
         assert!(validate_adv(adv).is_ok());
     }
 
