@@ -221,7 +221,8 @@ fn customize(
     provision: &ProvisionConfig,
 ) -> Result<(), String> {
     let plan = crate::provision::plan(provision);
-    if matches!(plan, ProvisionPlan::Noop) {
+    let encrypt_files = crate::provision::encryption_files(provision);
+    if matches!(plan, ProvisionPlan::Noop) && encrypt_files.is_empty() {
         return Ok(());
     }
 
@@ -251,6 +252,11 @@ fn customize(
                 write_fat_file(&root, &script)?;
                 append_cmdline(&root, &cmdline_append)?;
             }
+        }
+        // Disk-encryption marker + Tang advertisement: written whatever the init
+        // format, since the image's own first-boot service consumes them.
+        for f in &encrypt_files {
+            write_fat_file(&root, f)?;
         }
         // `fs` drops here, flushing dirty FAT structures back through the slice.
     }
@@ -524,6 +530,7 @@ mod tests {
             }),
             tailscale: None,
             access: None,
+            encryption: None,
             init_format: InitFormat::CloudInit,
         }
     }
@@ -595,6 +602,7 @@ mod tests {
             }),
             tailscale: None,
             access: None,
+            encryption: None,
             init_format: InitFormat::FirstRun,
         };
         let params = FlashParams {

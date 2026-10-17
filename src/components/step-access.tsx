@@ -11,6 +11,11 @@ import {
   type DeviceAccessProps,
 } from "@/components/device-access-section";
 import {
+  DiskEncryptionSection,
+  type DiskEncryptionProps,
+} from "@/components/disk-encryption-section";
+import { encryptionIncomplete } from "@/components/encryption";
+import {
   isInvalidSshKey,
   isValidControlServer,
   isWeakDevicePassword,
@@ -37,11 +42,13 @@ type DeviceAccessInputs = Pick<
 export function StepAccess({
   remote,
   access,
+  encryption,
   onBack,
   onNext,
 }: {
   remote: RemoteAccessInputs;
   access: DeviceAccessInputs;
+  encryption: DiskEncryptionProps;
   onBack: () => void;
   onNext: () => void;
 }) {
@@ -62,6 +69,7 @@ export function StepAccess({
   const devicePasswordWeak =
     access.sshMode === "password" &&
     isWeakDevicePassword(access.devicePassword);
+  const encryptionPending = encryptionIncomplete(encryption);
 
   return (
     <StepShell
@@ -71,7 +79,7 @@ export function StepAccess({
       next={{
         label: "Next",
         onClick: onNext,
-        disabled: sshKeyInvalid || devicePasswordWeak,
+        disabled: sshKeyInvalid || devicePasswordWeak || encryptionPending,
       }}
     >
       <div className="flex max-w-xl flex-col gap-5">
@@ -99,6 +107,14 @@ export function StepAccess({
             sshKeyInvalid={sshKeyInvalid}
             devicePasswordWeak={devicePasswordWeak}
           />
+        </CollapsibleSection>
+
+        <CollapsibleSection
+          title={encryption.enabled ? "Disk encryption · On" : "Disk encryption (optional)"}
+          forceOpen={encryptionPending}
+          initiallyOpen={encryption.enabled}
+        >
+          <DiskEncryptionSection {...encryption} />
         </CollapsibleSection>
       </div>
     </StepShell>

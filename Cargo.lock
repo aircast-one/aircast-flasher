@@ -1219,6 +1219,7 @@ dependencies = [
  "mbrman",
  "pbkdf2",
  "serde",
+ "serde_json",
  "serde_norway",
  "sha1",
  "sha2",

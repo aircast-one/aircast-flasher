@@ -109,6 +109,24 @@ export type AccessConfig =
   | { ssh: "password"; password: string }
   | { ssh: "disabled" };
 
+// One Tang server: its URL plus a captured advertisement (so first-boot
+// enrolment is offline). `adv` is "" until captured.
+export interface TangServer {
+  url: string;
+  adv: string;
+}
+
+// Data-partition encryption (LUKS2 + Clevis/Tang). The device unlocks against
+// the Tang servers at every boot; with several, `threshold` of them must answer
+// (Clevis sss), so one box down doesn't lock the fleet out. `recoveryKey` is the
+// break-glass passphrase the operator keeps. Serializes to the Rust
+// EncryptionConfig.
+export interface EncryptionConfig {
+  tangServers: TangServer[];
+  threshold: number;
+  recoveryKey: string;
+}
+
 export interface WifiNetworks {
   current: string | null;
   known: string[];
@@ -127,6 +145,8 @@ export interface Settings {
   installId: string | null;
   /** Names this app has already written, so an offline batch keeps counting. */
   flashedHostnames: string[];
+  /** Tang server URLs remembered across a batch (advertisements re-captured). */
+  tangUrls: string[];
 }
 
 export interface SshKeyIdentity {

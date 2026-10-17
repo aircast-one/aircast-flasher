@@ -20,6 +20,9 @@ import { Progress } from "@/components/ui/progress";
 import { formatBytes, formatSpeed } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { FlashProgressState } from "@/components/wizard-types";
+import { saveRecoveryKey } from "@/components/disk-encryption-section";
+import type { EncryptionConfig } from "@/types";
+import { useState } from "react";
 
 function IndeterminateBar() {
   return (
@@ -154,9 +157,54 @@ function ProgressPanel({
   );
 }
 
+function EncryptionReminder({
+  hostname,
+  encryption,
+}: {
+  hostname: string;
+  encryption: EncryptionConfig;
+}) {
+  const [saved, setSaved] = useState(false);
+  return (
+    <div className="w-full rounded-xl border border-border px-4 py-3 text-left">
+      <p className="flex items-center gap-1.5 text-sm font-medium">
+        <ShieldCheck className="size-4 text-green-600 dark:text-green-400" />
+        This card encrypts on first boot
+      </p>
+      <p className="mt-1 text-xs text-muted-foreground">
+        Keep its recovery key — it's your only way in if the key servers are
+        unreachable, and it isn't stored on the card.
+      </p>
+      <code className="mt-2 block break-all rounded bg-muted/50 px-2 py-1 text-xs">
+        {encryption.recoveryKey}
+      </code>
+      <Button
+        type="button"
+        size="sm"
+        variant="secondary"
+        className="mt-2"
+        onClick={() => {
+          void saveRecoveryKey(
+            encryption.tangServers,
+            encryption.threshold,
+            hostname,
+            encryption.recoveryKey,
+          )
+            .then((ok) => setSaved(ok))
+            .catch(() => setSaved(false));
+        }}
+      >
+        <Download className="size-4" />
+        {saved ? "Saved" : "Download recovery key"}
+      </Button>
+    </div>
+  );
+}
+
 export function JobView({
   hostname,
   remoteEnrolled,
+  encryption,
   success,
   cancelled,
   error,
@@ -169,6 +217,7 @@ export function JobView({
 }: {
   hostname: string;
   remoteEnrolled: boolean;
+  encryption: EncryptionConfig | null;
   success: boolean;
   cancelled: boolean;
   error: string | null;
@@ -205,6 +254,9 @@ export function JobView({
             </li>
           </ol>
         </div>
+        {encryption ? (
+          <EncryptionReminder hostname={hostname} encryption={encryption} />
+        ) : null}
         <DeviceFinder hostname={hostname} remoteEnrolled={remoteEnrolled} />
         <div className="flex w-full items-center justify-between gap-3 rounded-xl border border-border px-4 py-3 text-left">
           <div className="flex min-w-0 flex-col gap-0.5">

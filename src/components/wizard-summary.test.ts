@@ -15,6 +15,7 @@ const base: SummaryInput = {
   sshKey: "",
   detectedKeys: [],
   devicePassword: "",
+  encryption: false,
 };
 
 const rowOf = (input: SummaryInput, label: string) =>
@@ -144,4 +145,9 @@ test("the default hostname is the lowest number not already in use", () => {
   assert.equal(defaultHostname(["AIRCAST-01", "aircast-03"]), "aircast-02");
   // Names that are not ours never shift the sequence.
   assert.equal(defaultHostname(["falcon", "owel-3"]), "aircast-01");
+});
+
+test("reports whether the data partition is encrypted", () => {
+  assert.equal(valueOf(base, "Disk encryption"), "Off");
+  assert.equal(valueOf({ ...base, encryption: true }, "Disk encryption"), "LUKS2 · Tang");
 });

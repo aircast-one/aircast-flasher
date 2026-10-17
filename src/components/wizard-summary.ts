@@ -20,6 +20,7 @@ export interface SummaryInput {
   sshKey: string;
   detectedKeys: SshPublicKey[];
   devicePassword: string;
+  encryption: boolean;
 }
 
 const IMAGE_DEFAULT_LOGIN = "Image default (pi / raspberry)";
@@ -89,6 +90,11 @@ export function buildSummary(input: SummaryInput): SummaryItem[] {
       label: "Device access",
       value: access,
       warn: access === IMAGE_DEFAULT_LOGIN,
+      step: STEP.access,
+    },
+    {
+      label: "Disk encryption",
+      value: input.encryption ? "LUKS2 · Tang" : "Off",
       step: STEP.access,
     },
   ];

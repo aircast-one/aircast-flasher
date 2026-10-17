@@ -4,6 +4,10 @@
 
 use crate::{psk, AccessConfig, InitFormat, ProvisionConfig, SshMode, TailscaleConfig, WifiConfig};
 
+/// Boot-partition file the image's first-boot service reads to enrol disk
+/// encryption, then wipes.
+const ENCRYPT_MARKER_NAME: &str = "aircast-encrypt";
+
 const TS_STATE_PATH: &str = "/var/lib/aircastd/tailscale.json";
 const TS_KEY_PATH: &str = "/var/lib/aircastd/tailscale.authkey";
 
@@ -72,6 +76,74 @@ pub enum ProvisionPlan {
         script: ProvisionFile,
         cmdline_append: String,
     },
+}
+
+/// The boot-partition files that enrol disk encryption: the marker (sourced by
+/// the first-boot service for the Tang URL and recovery key) and the Tang
+/// advertisement sidecar. Empty unless a complete [`EncryptionConfig`] is set.
+///
+/// These are written whatever the init format, since the image's own first-boot
+/// service consumes them — not cloud-init or firstrun.sh.
+pub fn encryption_files(config: &ProvisionConfig) -> Vec<ProvisionFile> {
+    let Some(enc) = config.encryption.as_ref().filter(|e| e.is_complete()) else {
+        return Vec::new();
+    };
+    let Some(clevis_cfg) = clevis_sss_config(enc) else {
+        return Vec::new();
+    };
+    // Single-line (control chars stripped so a value can't start a fresh shell
+    // statement) and single-quoted (the helper escapes any embedded quote), so
+    // sourcing the marker is safe whatever the values are. CLEVIS_CFG is a JSON
+    // sss policy with each Tang advertisement inlined, so first boot binds with
+    // no network.
+    let mut marker = format!(
+        "# aircast disk-encryption enrolment seed — consumed and wiped by\n\
+         # aircast-firstboot-data.sh on first boot. Holds a clear recovery key;\n\
+         # do not keep a copy of this file.\n\
+         CLEVIS_CFG='{cfg}'\n\
+         RECOVERY_KEY='{key}'\n",
+        cfg = shell_single_quote(&sanitize_line(&clevis_cfg)),
+        key = shell_single_quote(&sanitize_line(&enc.recovery_key)),
+    );
+    // When wifi is the uplink, the initramfs must associate it before it can
+    // reach Tang to unlock — so first boot bakes these creds into the initramfs.
+    // The wifi PSK therefore can't be protected (it's needed pre-decryption);
+    // only the data partition is. Derive the PSK so the plaintext passphrase is
+    // never written.
+    if let Some(wifi) = &config.wifi {
+        // Hex-encode the SSID so the initramfs supplicant config needs no
+        // quoting (wpa_supplicant accepts a bare hex ssid), which a `"` or other
+        // special character in the SSID would otherwise break.
+        marker.push_str(&format!(
+            "WIFI_SSID_HEX='{ssid}'\n\
+             WIFI_PSK='{psk}'\n\
+             WIFI_COUNTRY='{country}'\n",
+            ssid = hex::encode(wifi.ssid.as_bytes()),
+            psk = shell_single_quote(&psk::derive(&wifi.ssid, &wifi.password)),
+            country = shell_single_quote(&sanitize_line(&wifi.country)),
+        ));
+    }
+    vec![ProvisionFile::plain(ENCRYPT_MARKER_NAME, marker)]
+}
+
+/// Build the Clevis `sss` policy JSON for the configured Tang servers, with each
+/// server's advertisement inlined. Returns `None` if any advertisement isn't
+/// valid JSON (a wrong URL captured an error page). `sss` with one pin and
+/// threshold 1 is valid, so this covers the single-server case too.
+fn clevis_sss_config(enc: &crate::EncryptionConfig) -> Option<String> {
+    let pins = enc
+        .tang_servers
+        .iter()
+        .map(|s| {
+            let adv: serde_json::Value = serde_json::from_str(&s.adv).ok()?;
+            Some(serde_json::json!({ "url": s.url.trim(), "adv": adv }))
+        })
+        .collect::<Option<Vec<_>>>()?;
+    let cfg = serde_json::json!({
+        "t": enc.threshold,
+        "pins": { "tang": pins },
+    });
+    Some(cfg.to_string())
 }
 
 /// Build the provisioning plan for `config`.
@@ -441,6 +513,7 @@ mod tests {
             }),
             tailscale: None,
             access: None,
+            encryption: None,
             init_format: init,
         }
     }
@@ -454,6 +527,7 @@ mod tests {
                 auth_key: "hskey-auth-abc123".into(),
             }),
             access: None,
+            encryption: None,
             init_format: init,
         }
     }
@@ -464,6 +538,7 @@ mod tests {
             wifi: None,
             tailscale: None,
             access: Some(access),
+            encryption: None,
             init_format: init,
         }
     }
@@ -830,6 +905,120 @@ mod tests {
             panic!("expected CloudInit plan");
         };
         assert!(files.iter().all(|f| !f.contents.contains("write_files")));
+    }
+
+    fn tang(url: &str) -> crate::TangServer {
+        crate::TangServer {
+            url: url.into(),
+            adv: format!("{{\"payload\":\"{url}\",\"signatures\":[]}}"),
+        }
+    }
+
+    fn enc_cfg() -> ProvisionConfig {
+        let mut c = cfg(InitFormat::CloudInit, false, None);
+        c.encryption = Some(crate::EncryptionConfig {
+            tang_servers: vec![tang("http://10.0.0.5")],
+            threshold: 1,
+            recovery_key: "correct-horse-battery".into(),
+        });
+        c
+    }
+
+    #[test]
+    fn encryption_marker_carries_an_sss_clevis_policy() {
+        let files = encryption_files(&enc_cfg());
+        let marker = &files.iter().find(|f| f.name == "aircast-encrypt").unwrap().contents;
+        assert!(marker.contains("RECOVERY_KEY='correct-horse-battery'"));
+        // One file only now — the advertisement is inlined into CLEVIS_CFG.
+        assert_eq!(files.len(), 1);
+        let cfg_line = marker.lines().find(|l| l.starts_with("CLEVIS_CFG=")).unwrap();
+        let json = cfg_line
+            .trim_start_matches("CLEVIS_CFG=")
+            .trim_matches('\'');
+        let v: serde_json::Value = serde_json::from_str(json).unwrap();
+        assert_eq!(v["t"], 1);
+        assert_eq!(v["pins"]["tang"][0]["url"], "http://10.0.0.5");
+        assert_eq!(v["pins"]["tang"][0]["adv"]["payload"], "http://10.0.0.5");
+    }
+
+    #[test]
+    fn encryption_policy_binds_multiple_tang_with_a_threshold() {
+        let mut c = enc_cfg();
+        let e = c.encryption.as_mut().unwrap();
+        e.tang_servers = vec![tang("http://a"), tang("http://b"), tang("http://c")];
+        e.threshold = 2;
+        let marker = &encryption_files(&c)
+            .into_iter()
+            .find(|f| f.name == "aircast-encrypt")
+            .unwrap()
+            .contents;
+        let json = marker
+            .lines()
+            .find(|l| l.starts_with("CLEVIS_CFG="))
+            .unwrap()
+            .trim_start_matches("CLEVIS_CFG=")
+            .trim_matches('\'');
+        let v: serde_json::Value = serde_json::from_str(json).unwrap();
+        assert_eq!(v["t"], 2);
+        assert_eq!(v["pins"]["tang"].as_array().unwrap().len(), 3);
+    }
+
+    #[test]
+    fn a_threshold_above_the_server_count_is_not_complete() {
+        let mut c = enc_cfg();
+        c.encryption.as_mut().unwrap().threshold = 2; // only one server
+        assert!(encryption_files(&c).is_empty());
+    }
+
+    #[test]
+    fn encryption_marker_carries_wifi_for_initramfs_unlock() {
+        let mut c = enc_cfg();
+        c.wifi = Some(WifiConfig {
+            ssid: "field-net".into(),
+            password: "password".into(),
+            country: "UA".into(),
+        });
+        let marker = &encryption_files(&c)
+            .into_iter()
+            .find(|f| f.name == "aircast-encrypt")
+            .unwrap()
+            .contents;
+        // SSID hex-encoded ("field-net" → 6669656c642d6e6574) so no quoting.
+        assert!(marker.contains("WIFI_SSID_HEX='6669656c642d6e6574'"));
+        assert!(marker.contains("WIFI_COUNTRY='UA'"));
+        // The derived PSK, never the plaintext passphrase.
+        assert!(marker.contains("WIFI_PSK='"));
+        assert!(!marker.contains("password"));
+    }
+
+    #[test]
+    fn encryption_marker_omits_wifi_when_wired() {
+        let marker = &encryption_files(&enc_cfg())
+            .into_iter()
+            .find(|f| f.name == "aircast-encrypt")
+            .unwrap()
+            .contents;
+        assert!(!marker.contains("WIFI_SSID"));
+    }
+
+    #[test]
+    fn encryption_absent_or_incomplete_writes_nothing() {
+        assert!(encryption_files(&cfg(InitFormat::CloudInit, false, None)).is_empty());
+        let mut c = enc_cfg();
+        c.encryption.as_mut().unwrap().tang_servers[0].url = "   ".into();
+        assert!(encryption_files(&c).is_empty());
+    }
+
+    #[test]
+    fn encryption_marker_values_cannot_break_out_of_the_shell_quote() {
+        let mut c = enc_cfg();
+        c.encryption.as_mut().unwrap().recovery_key = "a'; rm -rf /\n#".into();
+        let files = encryption_files(&c);
+        let marker = &files.iter().find(|f| f.name == "aircast-encrypt").unwrap().contents;
+        // Newline stripped (no fresh shell statement) and the quote escaped as
+        // '\'' so the value stays inside its quotes without being mangled.
+        assert!(marker.contains(r"RECOVERY_KEY='a'\''; rm -rf /#'"));
+        assert!(!marker.contains("rm -rf /\n"));
     }
 
     #[test]

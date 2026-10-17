@@ -18,5 +18,8 @@ pub mod win;
 pub use device::AlignedDevice;
 pub use engine::{flash, BlockDevice, FlashParams, FlashStage, BLOCK};
 
-pub use model::{AccessConfig, InitFormat, ProvisionConfig, SshMode, TailscaleConfig, WifiConfig};
-pub use provision::{plan, ProvisionFile, ProvisionPlan};
+pub use model::{
+    AccessConfig, EncryptionConfig, InitFormat, ProvisionConfig, SshMode, TailscaleConfig,
+    TangServer, WifiConfig,
+};
+pub use provision::{encryption_files, plan, ProvisionFile, ProvisionPlan};

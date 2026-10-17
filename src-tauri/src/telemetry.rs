@@ -174,6 +174,7 @@ pub struct ConfigFacts {
     pub hostname: bool,
     pub remote: &'static str,
     pub ssh: &'static str,
+    pub encryption: bool,
     pub init_format: &'static str,
 }
 
@@ -195,6 +196,7 @@ pub fn describe_config(cfg: &ProvisionConfig) -> ConfigFacts {
             Some(SshMode::Password) => "password",
             Some(SshMode::Disabled) => "disabled",
         },
+        encryption: cfg.encryption.as_ref().is_some_and(|e| e.is_complete()),
         init_format: match cfg.init_format {
             InitFormat::CloudInit => "cloud-init",
             InitFormat::FirstRun => "first-run",
@@ -350,6 +352,7 @@ mod tests {
                 password: Some("device-password".into()),
                 authorized_key: None,
             }),
+            encryption: None,
             init_format: InitFormat::CloudInit,
         }
     }
@@ -383,6 +386,7 @@ mod tests {
             wifi: None,
             tailscale: None,
             access: None,
+            encryption: None,
             init_format: InitFormat::FirstRun,
         });
         let json = serde_json::to_string(&facts).expect("serialize");
@@ -399,6 +403,7 @@ mod tests {
             wifi: None,
             tailscale: None,
             access: None,
+            encryption: None,
             init_format: InitFormat::CloudInit,
         });
         assert!(!facts.hostname);
@@ -414,6 +419,7 @@ mod tests {
                 auth_key: "tskey-auth-x".into(),
             }),
             access: None,
+            encryption: None,
             init_format: InitFormat::CloudInit,
         });
         assert_eq!(facts.remote, "tailscale");

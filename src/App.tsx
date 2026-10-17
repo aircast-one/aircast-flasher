@@ -17,6 +17,8 @@ import {
 } from "@/api";
 import type {
   AccessConfig,
+  EncryptionConfig,
+  TangServer,
   BlockDevice,
   DownloadProgress,
   InitFormat,
@@ -30,6 +32,7 @@ import { defaultHostname } from "@/components/default-hostname";
 import { nextFreeHostname } from "@/components/next-hostname";
 import { randomHex } from "@/lib/random-id";
 import { buildSummary } from "@/components/wizard-summary";
+import { isCaptured } from "@/components/encryption";
 import { isValidControlServer } from "@/components/step-network.validation";
 import { useSettings } from "@/lib/use-settings";
 import { useLocalTailscale } from "@/lib/use-local-tailscale";
@@ -106,6 +109,27 @@ function App() {
   const [authKey, setAuthKey] = useState("");
   const [sshMode, setSshMode] = useState<SshMode>("key-only");
   const [devicePassword, setDevicePassword] = useState("");
+
+  const [encryptEnabled, setEncryptEnabled] = useState(false);
+  const [tangServers, setTangServers] = useState<TangServer[]>([
+    { url: "", adv: "" },
+  ]);
+  const [threshold, setThreshold] = useState(1);
+  const [recoveryKey, setRecoveryKey] = useState("");
+  const [recoverySaved, setRecoverySaved] = useState(false);
+  const enableEncryption = (on: boolean) => {
+    setEncryptEnabled(on);
+    if (on) {
+      if (recoveryKey === "") setRecoveryKey(randomHex(24));
+      // Prefill the servers remembered from a previous flash (advs re-captured).
+      const remembered = settings.tangUrls;
+      if (remembered.length > 0 && tangServers.every((s) => s.url === "")) {
+        setTangServers(remembered.map((url) => ({ url, adv: "" })));
+      }
+    } else {
+      setRecoverySaved(false);
+    }
+  };
 
   const password = settings.wifiPassword;
   const setPassword = (wifiPassword: string) => update({ wifiPassword });
@@ -299,10 +323,15 @@ function App() {
         hostname: vars.hostname,
         tailscale: vars.tailscale,
         access: vars.access,
+        encryption: vars.encryption,
         initFormat: "cloud-init" satisfies InitFormat,
       });
     },
     onSuccess: (_result, vars) => {
+      // Remember the Tang servers so the next card in a batch doesn't retype them.
+      if (vars.encryption) {
+        update({ tangUrls: vars.encryption.tangServers.map((s) => s.url) });
+      }
       const written = vars.hostname.trim();
       if (written === "" || settings.flashedHostnames.includes(written)) return;
       update({
@@ -366,6 +395,7 @@ function App() {
     sshKey,
     detectedKeys,
     devicePassword,
+    encryption: encryptEnabled && tangServers.some(isCaptured),
   });
 
   async function handlePickLocal() {
@@ -403,6 +433,17 @@ function App() {
 
     const access = buildAccess(sshMode, sshKey, devicePassword);
 
+    const capturedServers = tangServers
+      .filter(isCaptured)
+      .map((s) => ({ url: s.url.trim(), adv: s.adv }));
+    const encryption: EncryptionConfig | null =
+      encryptEnabled &&
+      capturedServers.length >= 1 &&
+      threshold >= 1 &&
+      threshold <= capturedServers.length
+        ? { tangServers: capturedServers, threshold, recoveryKey }
+        : null;
+
     const vars: FlashVars = {
       jobId: randomHex(8),
       sourceKind,
@@ -413,6 +454,7 @@ function App() {
       hostname: trimmedHostname,
       tailscale,
       access,
+      encryption,
     };
     setLastVars(vars);
     flashMutation.mutate(vars);
@@ -531,6 +573,19 @@ function App() {
                 devicePassword,
                 onDevicePassword: setDevicePassword,
               }}
+              encryption={{
+                enabled: encryptEnabled,
+                onEnabled: enableEncryption,
+                servers: tangServers,
+                onServers: setTangServers,
+                threshold,
+                onThreshold: setThreshold,
+                recoveryKey,
+                recoverySaved,
+                onRecoverySaved: setRecoverySaved,
+                wifiUplink: !noWifi && ssid.trim() !== "",
+                hostname,
+              }}
               onBack={() => setStep(STEP.network)}
               onNext={() => setStep(STEP.storage)}
             />
@@ -551,6 +606,7 @@ function App() {
             <JobView
               hostname={hostname.trim()}
               remoteEnrolled={remoteEnrolled}
+              encryption={lastVars?.encryption ?? null}
               success={flashMutation.isSuccess}
               cancelled={cancelled && flashMutation.isError}
               error={

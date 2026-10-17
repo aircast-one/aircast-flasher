@@ -33,6 +33,10 @@ pub struct Settings {
     /// there is nothing else that knows a name is taken, so a batch flashed
     /// offline would otherwise hand out the same default every time.
     pub flashed_hostnames: Vec<String>,
+    /// Tang server URLs for disk encryption, remembered across a batch so the
+    /// operator doesn't retype them per card. Advertisements are re-captured
+    /// each flash (they are not persisted).
+    pub tang_urls: Vec<String>,
 }
 
 fn settings_path(app: &AppHandle) -> Result<PathBuf, String> {
@@ -153,6 +157,7 @@ mod tests {
             telemetry: None,
             install_id: None,
             flashed_hostnames: vec!["aircast-01".into()],
+            tang_urls: vec!["http://10.0.0.5".into()],
         }
     }
 

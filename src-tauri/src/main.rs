@@ -47,6 +47,8 @@ async fn main() {
             flasher::devices::list_block_devices,
             flasher::download::download_image,
             flasher::flash::flash_image,
+            flasher::encrypt::fetch_tang_adv,
+            flasher::encrypt::save_recovery_file,
             flasher::wifi::list_wifi_networks,
             flasher::flash::cancel_flash,
             flasher::sshkeys::detect_ssh_keys,

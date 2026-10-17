@@ -39,6 +39,56 @@ pub struct TailscaleConfig {
     pub auth_key: String,
 }
 
+/// One Tang server the device can unlock against: its URL plus a captured
+/// advertisement so first-boot enrolment needs no network.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TangServer {
+    /// e.g. `http://10.0.0.5`. Must be reachable from the device over plain IP;
+    /// the Tang protocol needs no secure channel.
+    pub url: String,
+    /// The Tang advertisement (`GET <url>/adv`), verbatim JSON.
+    pub adv: String,
+}
+
+impl TangServer {
+    fn is_complete(&self) -> bool {
+        !self.url.trim().is_empty() && !self.adv.trim().is_empty()
+    }
+}
+
+/// Disk encryption for the device's data partition (settings, credentials,
+/// tailnet state). The partition is LUKS2, unlocked at every boot by Clevis
+/// against one or more Tang servers (network-bound disk encryption) — so a
+/// pulled card, or a powered device on a network without a Tang server, gives
+/// nothing up. With several servers a `threshold` of them must answer (Clevis
+/// `sss`), so one box being down does not lock the fleet out. The image enrols
+/// this on first boot, then wipes the clear recovery key off the card.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EncryptionConfig {
+    /// The Tang servers to bind to.
+    pub tang_servers: Vec<TangServer>,
+    /// How many of them must answer at unlock (1..=tang_servers.len()).
+    pub threshold: u32,
+    /// Break-glass recovery passphrase (LUKS slot 0). The operator keeps this;
+    /// it is wiped off the card once first boot has enrolled the binding.
+    pub recovery_key: String,
+}
+
+impl EncryptionConfig {
+    /// True once encryption can actually be enrolled: a recovery key, at least
+    /// one fully-captured server, and a threshold that fits the server count.
+    pub fn is_complete(&self) -> bool {
+        let servers = self.tang_servers.len() as u32;
+        !self.recovery_key.trim().is_empty()
+            && servers >= 1
+            && self.tang_servers.iter().all(TangServer::is_complete)
+            && self.threshold >= 1
+            && self.threshold <= servers
+    }
+}
+
 /// How SSH should be set up on the device. Defaults are left untouched unless
 /// the chosen mode is "effective" (see [`AccessConfig::is_effective`]).
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -93,6 +143,8 @@ pub struct ProvisionConfig {
     pub tailscale: Option<TailscaleConfig>,
     #[serde(default)]
     pub access: Option<AccessConfig>,
+    #[serde(default)]
+    pub encryption: Option<EncryptionConfig>,
     pub init_format: InitFormat,
 }
 

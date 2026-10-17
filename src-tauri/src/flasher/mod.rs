@@ -6,6 +6,7 @@
 
 pub mod devices;
 pub mod download;
+pub mod encrypt;
 pub mod flash;
 pub mod releases;
 pub mod sshkeys;

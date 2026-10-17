@@ -1,6 +1,7 @@
 import type {
   AccessConfig,
   DownloadProgress,
+  EncryptionConfig,
   FlashProgress,
   Release,
   TailscaleConfig,
@@ -34,4 +35,5 @@ export interface FlashVars {
   hostname: string;
   tailscale: TailscaleConfig | null;
   access: AccessConfig | null;
+  encryption: EncryptionConfig | null;
 }

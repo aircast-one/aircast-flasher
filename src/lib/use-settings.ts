@@ -16,6 +16,7 @@ const EMPTY: Settings = {
   telemetry: null,
   installId: null,
   flashedHostnames: [],
+  tangUrls: [],
 };
 
 export function useSettings(): {

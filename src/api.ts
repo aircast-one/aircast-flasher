@@ -13,6 +13,7 @@ import type {
   Channel,
   DownloadProgress,
   DownloadResult,
+  EncryptionConfig,
   FlashProgress,
   InitFormat,
   ListReleasesResponse,
@@ -70,6 +71,7 @@ export function flashImage(args: {
   hostname: string | null;
   tailscale: TailscaleConfig | null;
   access: AccessConfig | null;
+  encryption: EncryptionConfig | null;
   initFormat: InitFormat;
 }): Promise<void> {
   return invoke<void>("flash_image", {
@@ -80,8 +82,24 @@ export function flashImage(args: {
     hostname: args.hostname,
     tailscale: args.tailscale,
     access: args.access,
+    encryption: args.encryption,
     initFormat: args.initFormat,
   });
+}
+
+// Fetch a Tang server's advertisement (its public signed key set) so a card can
+// be enrolled for encryption offline. Throws if the URL isn't a reachable Tang.
+export function fetchTangAdv(url: string): Promise<string> {
+  return invoke<string>("fetch_tang_adv", { url });
+}
+
+// Show a save dialog (owned by the backend) and write the recovery escrow file.
+// Resolves true if saved, false if cancelled.
+export function saveRecoveryFile(
+  defaultName: string,
+  contents: string,
+): Promise<boolean> {
+  return invoke<boolean>("save_recovery_file", { defaultName, contents });
 }
 
 export function listWifiNetworks(): Promise<WifiNetworks> {

@@ -48,6 +48,7 @@ pub async fn flash_image(
     hostname: Option<String>,
     tailscale: Option<TailscaleConfig>,
     access: Option<flasher_core::AccessConfig>,
+    encryption: Option<flasher_core::EncryptionConfig>,
     init_format: flasher_core::InitFormat,
 ) -> Result<(), String> {
     let config = ProvisionConfig {
@@ -55,6 +56,7 @@ pub async fn flash_image(
         wifi,
         tailscale,
         access,
+        encryption,
         init_format,
     };
     let facts = telemetry::describe_config(&config);
