@@ -3,13 +3,13 @@ import { Cable, Eye, EyeOff, RefreshCw, Wifi } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
-  Combobox,
-  ComboboxContent,
-  ComboboxEmpty,
-  ComboboxInput,
-  ComboboxItem,
-  ComboboxList,
-} from "@/components/ui/combobox";
+  Autocomplete,
+  AutocompleteContent,
+  AutocompleteEmpty,
+  AutocompleteInput,
+  AutocompleteItem,
+  AutocompleteList,
+} from "@/components/ui/autocomplete";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { StepShell } from "@/components/step-shell";
@@ -111,15 +111,15 @@ export function StepNetwork({
             <div className="flex flex-col gap-2">
               <Label htmlFor="ssid">WiFi network (SSID)</Label>
               <div className="flex items-start gap-2">
-                <Combobox
+                <Autocomplete
                   items={knownNetworks}
-                  inputValue={ssid}
-                  onInputValueChange={(value) => {
+                  value={ssid}
+                  onValueChange={(value) => {
                     setSsidTouched(true);
                     onSsid(value);
                   }}
                 >
-                  <ComboboxInput
+                  <AutocompleteInput
                     id="ssid"
                     placeholder="Pick a known network or type one"
                     className="flex-1"
@@ -127,20 +127,20 @@ export function StepNetwork({
                     aria-invalid={ssidMissing && ssidTouched}
                     aria-describedby="ssid-help"
                   />
-                  <ComboboxContent>
-                    <ComboboxEmpty>
+                  <AutocompleteContent>
+                    <AutocompleteEmpty>
                       No matching network — it'll be saved as typed.
-                    </ComboboxEmpty>
-                    <ComboboxList>
+                    </AutocompleteEmpty>
+                    <AutocompleteList>
                       {(network: string) => (
-                        <ComboboxItem key={network} value={network}>
+                        <AutocompleteItem key={network} value={network}>
                           <Wifi className="text-muted-foreground" />
                           {network}
-                        </ComboboxItem>
+                        </AutocompleteItem>
                       )}
-                    </ComboboxList>
-                  </ComboboxContent>
-                </Combobox>
+                    </AutocompleteList>
+                  </AutocompleteContent>
+                </Autocomplete>
                 <Button
                   type="button"
                   variant="secondary"
