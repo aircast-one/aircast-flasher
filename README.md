@@ -16,8 +16,11 @@ list_releases ─► download_image ─► flash_image ─► provision_device
                                                       eject)
 ```
 
-- **Image source** — `downloads.aircast.one/images/releases.json` (channels:
-  `stable` / `development` / `staging`), or a local `.img`/`.img.xz`/`.img.gz`.
+- **Image source** — `/lite/releases.json` on the channel's downloads host
+  (`stable` → `downloads.aircast.one`, `staging` → `downloads.stage.aircast.one`,
+  `development` → `downloads-dev.aircast.one`), or a local
+  `.img`/`.img.xz`/`.img.gz`. The Flasher's own installers are listed in
+  `/flasher/releases.json`, and the updater reads `/flasher/latest.json`.
 - **Progress** — download and write both report a rate over the same
   one-second window (`SPEED_WINDOW`). The write is the longest wait in the app,
   so a bar alone would answer "is it moving" but not "how long"; the meter
