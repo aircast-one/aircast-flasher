@@ -1,11 +1,11 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import {
   Check,
+  CircleCheck,
   Copy,
   Download,
   Loader2,
   Plus,
-  ShieldCheck,
   Trash2,
   TriangleAlert,
 } from "lucide-react";
@@ -14,7 +14,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import type { TangServer } from "@/types";
-import { hasUrl, isCaptured } from "@/components/encryption";
+import { hasUrl, isCaptured, serversReady } from "@/components/encryption";
+import { cn } from "@/lib/utils";
 
 const COPIED_FEEDBACK_MS = 2000;
 
@@ -32,24 +33,60 @@ export interface DiskEncryptionProps {
   hostname: string;
 }
 
+function Stage({
+  n,
+  title,
+  done,
+  children,
+}: {
+  n: number;
+  title: string;
+  done: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <div className="flex gap-3">
+      <span
+        className={cn(
+          "flex size-5 shrink-0 items-center justify-center rounded-full text-xs font-medium",
+          done
+            ? "bg-green-500/15 text-green-600 dark:text-green-400"
+            : "bg-muted text-muted-foreground",
+        )}
+        aria-label={done ? `Step ${n} done` : `Step ${n}`}
+      >
+        {done ? <Check className="size-3.5" /> : n}
+      </span>
+      <div className="flex min-w-0 flex-1 flex-col gap-2">
+        <p className="text-sm leading-5 font-medium">{title}</p>
+        {children}
+      </div>
+    </div>
+  );
+}
+
 export function DiskEncryptionSection(props: DiskEncryptionProps) {
   return (
-    <div className="flex flex-col gap-4">
-      <TangServers
-        servers={props.servers}
-        onServers={props.onServers}
-        threshold={props.threshold}
-        onThreshold={props.onThreshold}
-      />
+    <div className="flex flex-col gap-5">
+      <Stage n={1} title="Key server (Tang)" done={serversReady(props)}>
+        <TangServers
+          servers={props.servers}
+          onServers={props.onServers}
+          threshold={props.threshold}
+          onThreshold={props.onThreshold}
+        />
+      </Stage>
+      <Stage n={2} title="Recovery key" done={props.recoverySaved}>
+        <RecoveryKeyField
+          recoveryKey={props.recoveryKey}
+          recoverySaved={props.recoverySaved}
+          onRecoverySaved={props.onRecoverySaved}
+          servers={props.servers}
+          threshold={props.threshold}
+          hostname={props.hostname}
+        />
+      </Stage>
       {props.wifiUplink ? <WifiPskNote /> : null}
-      <RecoveryKeyField
-        recoveryKey={props.recoveryKey}
-        recoverySaved={props.recoverySaved}
-        onRecoverySaved={props.onRecoverySaved}
-        servers={props.servers}
-        threshold={props.threshold}
-        hostname={props.hostname}
-      />
     </div>
   );
 }
@@ -102,12 +139,9 @@ function TangServers({
 
   return (
     <div className="flex flex-col gap-2">
-      <Label>Key servers (Tang)</Label>
       <p className="text-sm text-muted-foreground">
-        Each time a drone starts, it gets its unlock from a key server on your
-        network. That's what keeps a seized drone locked: away from your network
-        it can't unlock, even powered on. If the server is ever down, the
-        recovery key below unlocks the card by hand.
+        The drone unlocks at boot only if it can reach this server, so away
+        from your network it stays locked.
       </p>
       <div className="flex flex-col gap-2">
         {servers.map((s, i) => (
@@ -115,23 +149,25 @@ function TangServers({
             <div className="flex items-start gap-2">
               <Input
                 className="flex-1"
-                placeholder="http://10.0.0.5"
+                placeholder={`http://10.0.0.5:${KEY_SERVER_PORT}`}
                 value={s.url}
                 aria-label={`Tang server ${i + 1}`}
                 onChange={(e) => setUrl(i, e.target.value)}
               />
               {isCaptured(s) ? (
                 <span
-                  className="flex items-center gap-1 whitespace-nowrap px-1 text-sm text-green-600 dark:text-green-400"
-                  title="Advertisement captured"
+                  className="flex h-8 items-center px-1 text-green-600 dark:text-green-400"
+                  role="img"
+                  aria-label="Reachable"
+                  title="Reachable"
                 >
-                  <ShieldCheck className="size-4" />
+                  <CircleCheck className="size-4" />
                 </span>
               ) : null}
               {servers.length > 1 ? (
                 <Button
                   type="button"
-                  size="sm"
+                  size="icon"
                   variant="ghost"
                   aria-label={`Remove server ${i + 1}`}
                   onClick={() => removeRow(i)}
@@ -156,7 +192,7 @@ function TangServers({
           onClick={captureAll}
         >
           {busy ? <Loader2 className="size-4 animate-spin" /> : null}
-          Test &amp; capture
+          Test connection
         </Button>
         <Button type="button" variant="ghost" onClick={addRow}>
           <Plus className="size-4" />
@@ -167,21 +203,23 @@ function TangServers({
       {urlCount > 1 ? (
         <div className="flex items-center gap-2 pt-1">
           <Label htmlFor="threshold" className="whitespace-nowrap">
-            Servers needed to unlock
+            Unlock with
           </Label>
           <Input
             id="threshold"
             type="number"
             min={1}
             max={urlCount}
-            className="w-20"
+            className="w-16"
             value={threshold}
             onChange={(e) => {
               const n = Number(e.target.value);
               onThreshold(Math.max(1, Math.min(urlCount, Number.isFinite(n) ? n : 1)));
             }}
           />
-          <span className="text-sm text-muted-foreground">of {urlCount}</span>
+          <span className="text-sm text-muted-foreground">
+            of {urlCount} servers
+          </span>
         </div>
       ) : null}
     </div>
@@ -209,7 +247,7 @@ function KeyServerSetup() {
         className="h-auto self-start p-0 text-sm"
         onClick={() => setOpen(true)}
       >
-        Don't have a key server? Set one up in one step
+        Don't have one? Set it up in one step
       </Button>
     );
   }
@@ -248,7 +286,7 @@ function KeyServerSetup() {
       </div>
       <p className="text-sm text-muted-foreground">
         Then enter <code className="text-xs">http://&lt;that box's address&gt;:{KEY_SERVER_PORT}</code>{" "}
-        above and press Test &amp; capture. You only do this once — the flasher
+        above and press Test connection. You only do this once — the flasher
         remembers it for every card after.
       </p>
     </div>
@@ -260,10 +298,8 @@ function WifiPskNote() {
     <div className="flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2">
       <TriangleAlert className="mt-0.5 size-4 shrink-0 text-amber-600 dark:text-amber-400" />
       <p className="text-sm text-muted-foreground">
-        This is a Wi-Fi device: the Wi-Fi password is stored unencrypted so the
-        card can connect before it unlocks. The data partition (settings,
-        credentials, tailnet key) stays protected. Use Ethernet if the Wi-Fi
-        password itself must not leak.
+        The Wi-Fi password stays unencrypted so the drone can connect before it
+        unlocks. Use Ethernet if that password must not leak.
       </p>
     </div>
   );
@@ -340,14 +376,16 @@ function RecoveryKeyField({
 
   return (
     <div className="flex flex-col gap-2">
-      <Label htmlFor="recovery-key">Recovery key</Label>
       <p className="text-sm text-muted-foreground">
-        Break-glass passphrase to unlock the card by hand if the key servers are
-        unreachable. It is wiped off the card after first boot, so this is your
-        only copy — save it now.
+        Unlocks the card by hand if the server is ever down. It's wiped from the
+        card after first boot, so this is your only copy.
       </p>
       <div className="flex items-start gap-2 rounded-md bg-muted/50 px-2.5 py-2">
-        <code id="recovery-key" className="min-w-0 flex-1 break-all text-xs">
+        <code
+          id="recovery-key"
+          aria-label="Recovery key"
+          className="min-w-0 flex-1 break-all font-mono text-xs"
+        >
           {recoveryKey}
         </code>
         <Button
