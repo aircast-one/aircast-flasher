@@ -130,9 +130,9 @@ async function attachToAppWindow() {
 }
 
 async function openRemoteAccess() {
-  const section = $("button*=Remote access");
-  if ((await section.getAttribute("aria-expanded")) !== "true") {
-    await section.click();
+  const toggle = $('[role="switch"][aria-label="Remote access"]');
+  if ((await toggle.getAttribute("aria-checked")) !== "true") {
+    await toggle.click();
   }
 }
 
@@ -248,14 +248,14 @@ describe("flasher wizard", () => {
   it("warns about a Headscale key with no control server without blocking", async () => {
     await onAccessStep();
     await openRemoteAccess();
-    await $("button*=self-hosted control server").click();
+    await $("button=Headscale").click();
     await $("#auth-key").setValue("hskey-auth-abc123");
     await expect($("#control-server-error")).toHaveText(
       expect.stringContaining("Enter your control server URL"),
     );
     await expect($("button=Next")).toBeEnabled();
 
-    await $("button=Use Tailscale").click();
+    await $("button=Tailscale").click();
     await expect($("button=Next")).toBeEnabled();
     await $("#auth-key").clearValue();
   });
@@ -263,7 +263,7 @@ describe("flasher wizard", () => {
   it("keeps the caret where it is when editing the control server", async () => {
     await onAccessStep();
     await openRemoteAccess();
-    await $("button*=self-hosted control server").click();
+    await $("button=Headscale").click();
     const field = await $("#control-server");
     await field.setValue("https://hs.example.com");
     await browser.execute((el: HTMLElement) => {
@@ -292,7 +292,7 @@ describe("flasher wizard", () => {
   it("shows the login the device will ship with, without being asked", async () => {
     await onAccessStep();
     await expect($("button=SSH key")).toBeDisplayed();
-    await expect($("button=Disabled")).toBeDisplayed();
+    await expect($("button=Off")).toBeDisplayed();
   });
 
   it("persists settings to disk, on every platform", async () => {

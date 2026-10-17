@@ -4,7 +4,6 @@ import {
   Copy,
   Download,
   Loader2,
-  Lock,
   Plus,
   ShieldCheck,
   Trash2,
@@ -29,34 +28,11 @@ export interface DiskEncryptionProps {
   recoveryKey: string;
   recoverySaved: boolean;
   onRecoverySaved: (v: boolean) => void;
-  /** True when wifi is the device's uplink — surfaces the PSK-exposure note. */
   wifiUplink: boolean;
-  /** Used to name the exported recovery-key file. */
   hostname: string;
 }
 
 export function DiskEncryptionSection(props: DiskEncryptionProps) {
-  if (!props.enabled) {
-    return (
-      <div className="flex flex-col gap-2 rounded-xl border border-border p-4">
-        <p className="text-sm font-medium">The data partition is not encrypted</p>
-        <p className="text-sm text-muted-foreground">
-          Settings, credentials and tailnet keys are written to the card in the
-          clear. Encrypt it so a pulled card gives nothing up.
-        </p>
-        <Button
-          type="button"
-          variant="secondary"
-          className="mt-1 self-start"
-          onClick={() => props.onEnabled(true)}
-        >
-          <Lock className="size-4" />
-          Encrypt the data partition
-        </Button>
-      </div>
-    );
-  }
-
   return (
     <div className="flex flex-col gap-4">
       <TangServers
@@ -74,14 +50,6 @@ export function DiskEncryptionSection(props: DiskEncryptionProps) {
         threshold={props.threshold}
         hostname={props.hostname}
       />
-      <Button
-        type="button"
-        variant="ghost"
-        className="self-start text-muted-foreground"
-        onClick={() => props.onEnabled(false)}
-      >
-        Don't encrypt
-      </Button>
     </div>
   );
 }
@@ -327,8 +295,6 @@ export function recoveryEscrowText(
   ].join("\n");
 }
 
-/** Open the backend save dialog and write the recovery escrow file. Returns
- * true if the operator saved, false if they cancelled. */
 export function saveRecoveryKey(
   servers: TangServer[],
   threshold: number,

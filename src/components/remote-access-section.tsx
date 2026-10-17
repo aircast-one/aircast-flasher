@@ -1,11 +1,12 @@
 import { useState } from "react";
-import { Check, Copy, Download, ExternalLink, Plus } from "lucide-react";
+import { Check, Copy, Download, ExternalLink } from "lucide-react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 
 import { track } from "@/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Segmented } from "@/components/segmented";
 import { useLocalTailscale } from "@/lib/use-local-tailscale";
 
 const KEYS_URL = "https://login.tailscale.com/admin/settings/keys";
@@ -47,42 +48,47 @@ function HeadscaleCommand() {
   );
 }
 
-function WhereTheKeyComesFrom({ selfHosted }: { selfHosted: boolean }) {
+function KeyLinks() {
   const local = useLocalTailscale();
 
-  if (selfHosted) return <HeadscaleCommand />;
-
   return (
-    <div className="flex flex-wrap gap-2">
-      <Button
-        type="button"
-        size="sm"
-        variant="secondary"
-        onClick={() => {
-          track("tailscale_keys_page_click");
-          void openUrl(KEYS_URL);
-        }}
-      >
-        <ExternalLink className="size-4" />
-        Get a key
-      </Button>
+    <div className="flex items-center gap-3">
       {local !== null && !local.installed ? (
         <Button
           type="button"
-          size="sm"
-          variant="secondary"
+          variant="link"
+          className="h-auto p-0"
           onClick={() => {
             track("tailscale_client_download_click");
             void openUrl(DOWNLOAD_URL);
           }}
         >
-          <Download className="size-4" />
+          <Download />
           Get Tailscale
         </Button>
       ) : null}
+      <Button
+        type="button"
+        variant="link"
+        className="h-auto p-0"
+        onClick={() => {
+          track("tailscale_keys_page_click");
+          void openUrl(KEYS_URL);
+        }}
+      >
+        Get a key
+        <ExternalLink />
+      </Button>
     </div>
   );
 }
+
+type Provider = "tailscale" | "headscale";
+
+const PROVIDERS: { value: Provider; label: string }[] = [
+  { value: "tailscale", label: "Tailscale" },
+  { value: "headscale", label: "Headscale" },
+];
 
 export interface RemoteAccessProps {
   controlServer: string;
@@ -105,30 +111,24 @@ export function RemoteAccessSection({
   controlServerValid,
   controlServerMissing,
 }: RemoteAccessProps) {
-  function switchToTailscale() {
-    onControlServer("");
-    onSelfHosted(false);
-  }
+  const pickProvider = (provider: Provider) => {
+    onSelfHosted(provider === "headscale");
+    if (provider === "tailscale") onControlServer("");
+  };
 
   return (
-    <div className="flex flex-col gap-4">
-      <p className="text-sm text-muted-foreground">
-        Reach this drone from anywhere over a private{" "}
-        {selfHosted ? "Headscale" : "Tailscale"} network.
-      </p>
+    <>
+      <Segmented
+        label="Control server"
+        options={PROVIDERS}
+        value={selfHosted ? "headscale" : "tailscale"}
+        onChange={pickProvider}
+        className="self-start"
+      />
 
-      {selfHosted && (
+      {selfHosted ? (
         <div className="flex flex-col gap-2">
-          <div className="flex items-baseline justify-between">
-            <Label htmlFor="control-server">Control server (Headscale)</Label>
-            <button
-              type="button"
-              onClick={switchToTailscale}
-              className="text-sm text-muted-foreground underline hover:text-foreground"
-            >
-              Use Tailscale
-            </button>
-          </div>
+          <Label htmlFor="control-server">Control server URL</Label>
           <Input
             id="control-server"
             value={controlServer}
@@ -143,7 +143,7 @@ export function RemoteAccessSection({
           {controlServerMissing ? (
             <p id="control-server-error" className="text-sm text-destructive">
               Enter your control server URL — without it the key is sent to
-              Tailscale, not your server. Or switch to Tailscale.
+              Tailscale, not your server.
             </p>
           ) : !controlServerValid ? (
             <p id="control-server-error" className="text-sm text-destructive">
@@ -152,19 +152,20 @@ export function RemoteAccessSection({
             </p>
           ) : null}
         </div>
-      )}
+      ) : null}
 
       <div className="flex flex-col gap-2">
-        <Label htmlFor="auth-key">Pre-auth key</Label>
+        <div className="flex items-center justify-between gap-3">
+          <Label htmlFor="auth-key">Pre-auth key</Label>
+          {selfHosted ? null : <KeyLinks />}
+        </div>
         <Input
           id="auth-key"
           type="password"
           value={authKey}
           onChange={(e) => onAuthKey(e.currentTarget.value)}
           placeholder={
-            selfHosted
-              ? "Pre-auth key from your control server"
-              : "tskey-auth-…"
+            selfHosted ? "Pre-auth key from your control server" : "tskey-auth-…"
           }
           autoCapitalize="none"
           autoCorrect="off"
@@ -172,25 +173,11 @@ export function RemoteAccessSection({
           aria-describedby="auth-key-help"
         />
         <p id="auth-key-help" className="text-sm text-muted-foreground">
-          Written to the card and used once on first boot, so prefer a{" "}
-          <span className="font-medium text-foreground">
-            short-expiry or ephemeral
-          </span>{" "}
-          key. Leave blank to sign the device in after boot instead.
+          Used once on first boot, so pick a short-expiry or ephemeral key.
+          {selfHosted ? " Create one on your server with:" : null}
         </p>
-        <WhereTheKeyComesFrom selfHosted={selfHosted} />
+        {selfHosted ? <HeadscaleCommand /> : null}
       </div>
-
-      {!selfHosted && (
-        <button
-          type="button"
-          onClick={() => onSelfHosted(true)}
-          className="flex items-center gap-1.5 self-start text-sm text-muted-foreground hover:text-foreground"
-        >
-          <Plus className="size-4" />
-          Use a self-hosted control server (Headscale)
-        </button>
-      )}
-    </div>
+    </>
   );
 }

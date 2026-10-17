@@ -1,70 +1,213 @@
-import { useEffect, useState } from "react";
-import { Eye, EyeOff, KeyRound } from "lucide-react";
+import { useState, type ReactNode } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { Eye, EyeOff, FileKey } from "lucide-react";
 
 import { identifyPublicKey } from "@/api";
-import type { SshKeyIdentity } from "@/types";
-
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { Segmented } from "@/components/segmented";
 import { MIN_DEVICE_PASSWORD } from "@/components/step-network.validation";
-import type { SshMode, SshPublicKey } from "@/types";
+import { cn } from "@/lib/utils";
+import type { SshKeyIdentity, SshMode, SshPublicKey } from "@/types";
 
 const SSH_MODES: { value: SshMode; label: string }[] = [
-  { value: "password", label: "Password" },
   { value: "key-only", label: "SSH key" },
-  { value: "disabled", label: "Disabled" },
+  { value: "password", label: "Password" },
+  { value: "disabled", label: "Off" },
 ];
 
-// This key is about to turn password login off, and a wrong one means
-// re-flashing the card to get back in. The input truncates before the comment,
-// which is the only part a human recognises — so name the key, and print the
-// fingerprint `ssh-keygen -lf` prints so it can actually be compared.
-function KeyIdentity({ sshKey }: { sshKey: string }) {
-  const [identity, setIdentity] = useState<SshKeyIdentity | null>(null);
+const OTHER_KEY = "other";
 
-  useEffect(() => {
-    const key = sshKey.trim();
-    if (key === "") {
-      setIdentity(null);
-      return;
-    }
-    let cancelled = false;
-    identifyPublicKey(key)
-      .then((id) => {
-        if (!cancelled) setIdentity(id);
-      })
-      .catch(() => undefined);
-    return () => {
-      cancelled = true;
-    };
-  }, [sshKey]);
+export function SshModePicker({
+  value,
+  onChange,
+}: {
+  value: SshMode;
+  onChange: (v: SshMode) => void;
+}) {
+  return (
+    <Segmented
+      label="SSH login"
+      options={SSH_MODES}
+      value={value}
+      onChange={onChange}
+    />
+  );
+}
 
+function useKeyIdentity(sshKey: string): SshKeyIdentity | null {
+  const key = sshKey.trim();
+  const { data } = useQuery({
+    queryKey: ["ssh-key-identity", key],
+    queryFn: () => identifyPublicKey(key),
+    enabled: key !== "",
+    retry: false,
+    staleTime: Infinity,
+  });
+  return key === "" ? null : (data ?? null);
+}
+
+function Hint({
+  id,
+  tone = "muted",
+  children,
+}: {
+  id?: string;
+  tone?: "muted" | "warn" | "error";
+  children: ReactNode;
+}) {
+  return (
+    <p
+      id={id}
+      className={cn(
+        "text-sm",
+        tone === "muted" && "text-muted-foreground",
+        tone === "warn" && "text-amber-600 dark:text-amber-400",
+        tone === "error" && "text-destructive",
+      )}
+    >
+      {children}
+    </p>
+  );
+}
+
+function KeyOption({ sshKey: k }: { sshKey: SshPublicKey }) {
+  const identity = useKeyIdentity(k.contents);
+  const name = identity?.comment || k.label;
+
+  return (
+    <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-border px-3 py-2.5 transition-colors hover:bg-muted/40 has-data-checked:border-primary has-data-checked:bg-primary/5">
+      <RadioGroupItem value={k.label} className="mt-0.5" />
+      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <span className="truncate text-sm">
+          <span className="font-medium">{name}</span>
+          <span className="text-muted-foreground">
+            {" · "}
+            {k.label}
+          </span>
+        </span>
+        {identity ? (
+          <span className="truncate font-mono text-xs text-muted-foreground">
+            {identity.fingerprint}
+          </span>
+        ) : null}
+      </span>
+    </label>
+  );
+}
+
+function PastedKeyIdentity({ sshKey }: { sshKey: string }) {
+  const identity = useKeyIdentity(sshKey);
   if (identity === null) return null;
 
   return (
-    <div className="flex items-start gap-2 rounded-md bg-muted/50 px-2.5 py-1.5">
-      <KeyRound className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
-      <div className="flex min-w-0 flex-col">
-        <span className="truncate text-xs">
-          {identity.comment === "" ? (
-            <span className="text-muted-foreground">
-              {identity.algorithm} · no comment
-            </span>
-          ) : (
-            <>
-              <span className="font-medium">{identity.comment}</span>
-              <span className="text-muted-foreground">
-                {" · "}
-                {identity.algorithm}
-              </span>
-            </>
-          )}
+    <div className="flex flex-col rounded-md bg-muted/50 px-2.5 py-1.5 text-xs">
+      <span className="truncate">
+        <span className="font-medium">
+          {identity.comment === "" ? "No comment" : identity.comment}
         </span>
-        <span className="truncate font-mono text-xs text-muted-foreground">
-          {identity.fingerprint}
+        <span className="text-muted-foreground">
+          {" · "}
+          {identity.algorithm}
         </span>
+      </span>
+      <span className="truncate font-mono text-muted-foreground">
+        {identity.fingerprint}
+      </span>
+    </div>
+  );
+}
+
+function PastedKey({
+  sshKey,
+  onSshKey,
+  onChooseKeyFile,
+  sshKeyInvalid,
+}: {
+  sshKey: string;
+  onSshKey: (v: string) => void;
+  onChooseKeyFile: () => void;
+  sshKeyInvalid: boolean;
+}) {
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex gap-2">
+        <Input
+          id="ssh-key"
+          aria-label="Public key"
+          className="flex-1 font-mono"
+          value={sshKey}
+          onChange={(e) => onSshKey(e.currentTarget.value)}
+          placeholder="Paste a key — ssh-ed25519 AAAA… you@host"
+          autoCapitalize="none"
+          autoCorrect="off"
+          spellCheck={false}
+          aria-invalid={sshKeyInvalid}
+          aria-describedby="ssh-key-help"
+        />
+        <Button type="button" variant="secondary" onClick={onChooseKeyFile}>
+          <FileKey />
+          Choose file…
+        </Button>
       </div>
+      <PastedKeyIdentity sshKey={sshKey} />
+    </div>
+  );
+}
+
+function KeyPicker({
+  sshKey,
+  onSshKey,
+  detectedKeys,
+  onChooseKeyFile,
+  sshKeyInvalid,
+}: {
+  sshKey: string;
+  onSshKey: (v: string) => void;
+  detectedKeys: SshPublicKey[];
+  onChooseKeyFile: () => void;
+  sshKeyInvalid: boolean;
+}) {
+  const matched = detectedKeys.find(
+    (k) => k.contents.trim() === sshKey.trim(),
+  );
+  const pasted = sshKey.trim() !== "" && matched === undefined;
+  const [otherPicked, setOtherPicked] = useState(pasted);
+  const other = otherPicked || pasted;
+
+  const pick = (value: unknown) => {
+    setOtherPicked(value === OTHER_KEY);
+    onSshKey(detectedKeys.find((k) => k.label === value)?.contents ?? "");
+  };
+
+  const pastedKey = (
+    <PastedKey
+      sshKey={sshKey}
+      onSshKey={onSshKey}
+      onChooseKeyFile={onChooseKeyFile}
+      sshKeyInvalid={sshKeyInvalid}
+    />
+  );
+
+  if (detectedKeys.length === 0) return pastedKey;
+
+  return (
+    <div className="flex flex-col gap-2">
+      <RadioGroup
+        aria-label="Public key"
+        value={other ? OTHER_KEY : (matched?.label ?? null)}
+        onValueChange={pick}
+      >
+        {detectedKeys.map((k) => (
+          <KeyOption key={k.label} sshKey={k} />
+        ))}
+        <label className="flex cursor-pointer items-center gap-3 rounded-lg border border-border px-3 py-2.5 text-sm font-medium transition-colors hover:bg-muted/40 has-data-checked:border-primary has-data-checked:bg-primary/5">
+          <RadioGroupItem value={OTHER_KEY} />
+          Another key
+        </label>
+      </RadioGroup>
+      {other ? pastedKey : null}
     </div>
   );
 }
@@ -84,7 +227,6 @@ export interface DeviceAccessProps {
 
 export function DeviceAccessSection({
   sshMode,
-  onSshMode,
   sshKey,
   onSshKey,
   detectedKeys,
@@ -96,139 +238,82 @@ export function DeviceAccessSection({
 }: DeviceAccessProps) {
   const [showDevicePassword, setShowDevicePassword] = useState(false);
 
-  return (
-    <>
-      <p className="text-sm text-muted-foreground">
-        Default login is <span className="font-medium text-foreground">pi</span>{" "}
-        / <span className="font-medium text-foreground">raspberry</span> — set a
-        key or password before deploying.
-      </p>
-      <div className="flex gap-2">
-        {SSH_MODES.map((m) => (
-          <Button
-            key={m.value}
-            type="button"
-            variant={sshMode === m.value ? "default" : "secondary"}
-            onClick={() => onSshMode(m.value)}
-            aria-pressed={sshMode === m.value}
-          >
-            {m.label}
-          </Button>
-        ))}
-      </div>
+  if (sshMode === "disabled") {
+    return (
+      <Hint>
+        SSH is turned off. Manage this drone from its web dashboard instead.
+      </Hint>
+    );
+  }
 
-      {sshMode === "key-only" && (
-        <div className="flex flex-col gap-2">
-          <Label htmlFor="ssh-key">Public key</Label>
-          <div className="flex flex-wrap gap-2">
-            {detectedKeys.map((k) => (
-              <Button
-                key={k.label}
-                type="button"
-                variant="secondary"
-                size="sm"
-                onClick={() => onSshKey(k.contents)}
-                aria-pressed={sshKey.trim() === k.contents.trim()}
-              >
-                Use {k.label}
-              </Button>
-            ))}
-            <Button
-              type="button"
-              variant="secondary"
-              size="sm"
-              onClick={onChooseKeyFile}
-            >
-              Choose file…
-            </Button>
-          </div>
+  if (sshMode === "password") {
+    return (
+      <>
+        <div className="flex gap-2">
           <Input
-            id="ssh-key"
-            className="font-mono"
-            value={sshKey}
-            onChange={(e) => onSshKey(e.currentTarget.value)}
-            placeholder="ssh-ed25519 AAAA… you@host"
+            id="device-password"
+            aria-label="Device password"
+            type={showDevicePassword ? "text" : "password"}
+            value={devicePassword}
+            onChange={(e) => onDevicePassword(e.currentTarget.value)}
+            placeholder="New password for the pi account"
             autoCapitalize="none"
             autoCorrect="off"
             spellCheck={false}
-            aria-invalid={sshKeyInvalid}
-            aria-describedby="ssh-key-help"
+            aria-invalid={devicePasswordWeak}
+            aria-describedby="device-password-help"
+            className="flex-1"
           />
-          <KeyIdentity sshKey={sshKey} />
-          <p id="ssh-key-help" className="text-sm text-muted-foreground">
-            {sshKeyInvalid ? (
-              <span className="text-destructive">
-                That doesn't look like an SSH public key — it should start with
-                ssh-ed25519, ssh-rsa, …
-              </span>
-            ) : sshKey.trim() === "" ? (
-              <>
-                Add a key to turn password login off. Blank keeps the image
-                default —{" "}
-                <span className="font-medium text-foreground">
-                  pi / raspberry
-                </span>{" "}
-                stays usable.
-              </>
-            ) : (
-              <>
-                Password login is off on the device — check the key above is
-                the one you hold, or you'll need to re-flash to get back in.
-              </>
-            )}
-          </p>
+          <Button
+            type="button"
+            variant="secondary"
+            size="icon"
+            onClick={() => setShowDevicePassword((v) => !v)}
+            aria-label={showDevicePassword ? "Hide password" : "Show password"}
+          >
+            {showDevicePassword ? <EyeOff /> : <Eye />}
+          </Button>
         </div>
-      )}
+        {devicePasswordWeak ? (
+          <Hint id="device-password-help" tone="error">
+            Use at least {MIN_DEVICE_PASSWORD} characters.
+          </Hint>
+        ) : devicePassword === "" ? (
+          <Hint id="device-password-help" tone="warn">
+            Blank keeps the default pi / raspberry login.
+          </Hint>
+        ) : (
+          <Hint id="device-password-help">
+            Replaces the default password on the pi account.
+          </Hint>
+        )}
+      </>
+    );
+  }
 
-      {sshMode === "password" && (
-        <div className="flex flex-col gap-2">
-          <Label htmlFor="device-password">Device password</Label>
-          <div className="flex gap-2">
-            <Input
-              id="device-password"
-              type={showDevicePassword ? "text" : "password"}
-              value={devicePassword}
-              onChange={(e) => onDevicePassword(e.currentTarget.value)}
-              placeholder="New password for the pi account"
-              autoCapitalize="none"
-              autoCorrect="off"
-              spellCheck={false}
-              aria-invalid={devicePasswordWeak}
-              aria-describedby="device-password-help"
-              className="flex-1"
-            />
-            <Button
-              type="button"
-              variant="secondary"
-              size="icon"
-              onClick={() => setShowDevicePassword((v) => !v)}
-              aria-label={
-                showDevicePassword ? "Hide password" : "Show password"
-              }
-            >
-              {showDevicePassword ? <EyeOff /> : <Eye />}
-            </Button>
-          </div>
-          <p id="device-password-help" className="text-sm text-muted-foreground">
-            {devicePasswordWeak ? (
-              <span className="text-destructive">
-                Use at least {MIN_DEVICE_PASSWORD} characters.
-              </span>
-            ) : (
-              <>
-                Sets the <span className="font-medium text-foreground">pi</span>{" "}
-                account password, replacing the default. Leave blank to keep the
-                image default.
-              </>
-            )}
-          </p>
-        </div>
-      )}
-
-      {sshMode === "disabled" && (
-        <p className="text-sm text-muted-foreground">
-          SSH is turned off. Manage this drone from its web dashboard instead.
-        </p>
+  return (
+    <>
+      <KeyPicker
+        sshKey={sshKey}
+        onSshKey={onSshKey}
+        detectedKeys={detectedKeys}
+        onChooseKeyFile={onChooseKeyFile}
+        sshKeyInvalid={sshKeyInvalid}
+      />
+      {sshKeyInvalid ? (
+        <Hint id="ssh-key-help" tone="error">
+          That doesn't look like an SSH public key — it should start with
+          ssh-ed25519, ssh-rsa, …
+        </Hint>
+      ) : sshKey.trim() === "" ? (
+        <Hint id="ssh-key-help" tone="warn">
+          No key yet — the default pi / raspberry login stays on.
+        </Hint>
+      ) : (
+        <Hint id="ssh-key-help">
+          Password login is turned off, so only this key gets in. Lose it and
+          you'll need to re-flash.
+        </Hint>
       )}
     </>
   );

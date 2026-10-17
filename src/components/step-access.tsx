@@ -1,13 +1,16 @@
 import { useState } from "react";
+import { Globe, Lock, SquareTerminal } from "lucide-react";
 
 import { StepShell } from "@/components/step-shell";
-import { CollapsibleSection } from "@/components/collapsible-section";
+import { SettingCard } from "@/components/setting-card";
+import { Switch } from "@/components/ui/switch";
 import {
   RemoteAccessSection,
   type RemoteAccessProps,
 } from "@/components/remote-access-section";
 import {
   DeviceAccessSection,
+  SshModePicker,
   type DeviceAccessProps,
 } from "@/components/device-access-section";
 import {
@@ -55,6 +58,7 @@ export function StepAccess({
   const [selfHosted, setSelfHosted] = useState(
     () => remote.controlServer.trim() !== "",
   );
+  const [remoteOn, setRemoteOn] = useState(() => remote.authKey.trim() !== "");
 
   const controlServerValid = isValidControlServer(remote.controlServer);
   const controlServerMissing = needsControlServer(
@@ -62,7 +66,6 @@ export function StepAccess({
     remote.controlServer,
     remote.authKey,
   );
-  const remoteAccessValid = controlServerValid && !controlServerMissing;
 
   const sshKeyInvalid =
     access.sshMode === "key-only" && isInvalidSshKey(access.sshKey);
@@ -71,10 +74,15 @@ export function StepAccess({
     isWeakDevicePassword(access.devicePassword);
   const encryptionPending = encryptionIncomplete(encryption);
 
+  const toggleRemote = (on: boolean) => {
+    setRemoteOn(on);
+    if (!on) remote.onAuthKey("");
+  };
+
   return (
     <StepShell
       heading="Access"
-      description="How you reach this device once it's running. Both are optional — skip and the image defaults apply."
+      description="How you'll get into this drone once it's running."
       back={{ onClick: onBack }}
       next={{
         label: "Next",
@@ -82,40 +90,59 @@ export function StepAccess({
         disabled: sshKeyInvalid || devicePasswordWeak || encryptionPending,
       }}
     >
-      <div className="flex max-w-xl flex-col gap-5">
-        <CollapsibleSection
-          title="Remote access (optional)"
-          forceOpen={!remoteAccessValid}
-          initiallyOpen={remote.authKey.trim() !== ""}
-        >
-          <RemoteAccessSection
-            {...remote}
-            selfHosted={selfHosted}
-            onSelfHosted={setSelfHosted}
-            controlServerValid={controlServerValid}
-            controlServerMissing={controlServerMissing}
-          />
-        </CollapsibleSection>
-
-        <CollapsibleSection
-          title="Device access"
-          forceOpen={sshKeyInvalid || devicePasswordWeak}
-          initiallyOpen
+      <div className="flex max-w-xl flex-col gap-4">
+        <SettingCard
+          icon={<SquareTerminal />}
+          title="SSH login"
+          description="Log in to the drone's shell"
+          action={
+            <SshModePicker value={access.sshMode} onChange={access.onSshMode} />
+          }
         >
           <DeviceAccessSection
             {...access}
             sshKeyInvalid={sshKeyInvalid}
             devicePasswordWeak={devicePasswordWeak}
           />
-        </CollapsibleSection>
+        </SettingCard>
 
-        <CollapsibleSection
-          title={encryption.enabled ? "Disk encryption · On" : "Disk encryption (optional)"}
-          forceOpen={encryptionPending}
-          initiallyOpen={encryption.enabled}
+        <SettingCard
+          icon={<Globe />}
+          title="Remote access"
+          description={`Reach it from anywhere over ${selfHosted ? "Headscale" : "Tailscale"}`}
+          action={
+            <Switch
+              aria-label="Remote access"
+              checked={remoteOn}
+              onCheckedChange={toggleRemote}
+            />
+          }
         >
-          <DiskEncryptionSection {...encryption} />
-        </CollapsibleSection>
+          {remoteOn ? (
+            <RemoteAccessSection
+              {...remote}
+              selfHosted={selfHosted}
+              onSelfHosted={setSelfHosted}
+              controlServerValid={controlServerValid}
+              controlServerMissing={controlServerMissing}
+            />
+          ) : null}
+        </SettingCard>
+
+        <SettingCard
+          icon={<Lock />}
+          title="Disk encryption"
+          description="A pulled card gives nothing away"
+          action={
+            <Switch
+              aria-label="Disk encryption"
+              checked={encryption.enabled}
+              onCheckedChange={encryption.onEnabled}
+            />
+          }
+        >
+          {encryption.enabled ? <DiskEncryptionSection {...encryption} /> : null}
+        </SettingCard>
       </div>
     </StepShell>
   );
