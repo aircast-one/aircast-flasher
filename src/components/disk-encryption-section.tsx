@@ -136,9 +136,10 @@ function TangServers({
     <div className="flex flex-col gap-2">
       <Label>Key servers (Tang)</Label>
       <p className="text-sm text-muted-foreground">
-        The device fetches its unlock from these at every boot, over plain IP. If
-        none are reachable the card stays locked — the recovery key below is the
-        only way in. Run each on an always-on box, not this laptop.
+        Each time a drone starts, it gets its unlock from a key server on your
+        network. That's what keeps a seized drone locked: away from your network
+        it can't unlock, even powered on. If the server is ever down, the
+        recovery key below unlocks the card by hand.
       </p>
       <div className="flex flex-col gap-2">
         {servers.map((s, i) => (
@@ -194,6 +195,7 @@ function TangServers({
           Add a server
         </Button>
       </div>
+      <KeyServerSetup />
       {urlCount > 1 ? (
         <div className="flex items-center gap-2 pt-1">
           <Label htmlFor="threshold" className="whitespace-nowrap">
@@ -214,6 +216,73 @@ function TangServers({
           <span className="text-sm text-muted-foreground">of {urlCount}</span>
         </div>
       ) : null}
+    </div>
+  );
+}
+
+const KEY_SERVER_PORT = 7500;
+const KEY_SERVER_SETUP = [
+  "sudo apt-get install -y tang",
+  "sudo mkdir -p /etc/systemd/system/tangd.socket.d",
+  `printf '[Socket]\\nListenStream=\\nListenStream=${KEY_SERVER_PORT}\\n' | sudo tee /etc/systemd/system/tangd.socket.d/port.conf`,
+  "sudo systemctl daemon-reload",
+  "sudo systemctl enable --now tangd.socket",
+].join("\n");
+
+function KeyServerSetup() {
+  const [open, setOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  if (!open) {
+    return (
+      <Button
+        type="button"
+        variant="link"
+        className="h-auto self-start p-0 text-sm"
+        onClick={() => setOpen(true)}
+      >
+        Don't have a key server? Set one up in one step
+      </Button>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-2 rounded-md border border-border px-3 py-2.5">
+      <p className="text-sm">
+        On any always-on Debian, Ubuntu or Raspberry Pi OS box on the drones'
+        network, run:
+      </p>
+      <div className="flex items-start gap-2 rounded-md bg-muted/50 px-2.5 py-2">
+        <pre className="min-w-0 flex-1 whitespace-pre-wrap break-all text-xs">
+          {KEY_SERVER_SETUP}
+        </pre>
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          aria-label="Copy setup commands"
+          onClick={() => {
+            navigator.clipboard
+              ?.writeText(KEY_SERVER_SETUP)
+              .then(() => {
+                setCopied(true);
+                setTimeout(() => setCopied(false), COPIED_FEEDBACK_MS);
+              })
+              .catch(() => setCopied(false));
+          }}
+        >
+          {copied ? (
+            <Check className="size-4 text-green-500 dark:text-green-400" />
+          ) : (
+            <Copy className="size-4" />
+          )}
+        </Button>
+      </div>
+      <p className="text-sm text-muted-foreground">
+        Then enter <code className="text-xs">http://&lt;that box's address&gt;:{KEY_SERVER_PORT}</code>{" "}
+        above and press Test &amp; capture. You only do this once — the flasher
+        remembers it for every card after.
+      </p>
     </div>
   );
 }

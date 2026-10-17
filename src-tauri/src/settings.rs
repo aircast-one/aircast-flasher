@@ -37,6 +37,8 @@ pub struct Settings {
     /// operator doesn't retype them per card. Advertisements are re-captured
     /// each flash (they are not persisted).
     pub tang_urls: Vec<String>,
+    /// The k-of-n unlock threshold, remembered alongside the URLs. 0 = unset.
+    pub tang_threshold: u32,
 }
 
 fn settings_path(app: &AppHandle) -> Result<PathBuf, String> {
@@ -158,6 +160,7 @@ mod tests {
             install_id: None,
             flashed_hostnames: vec!["aircast-01".into()],
             tang_urls: vec!["http://10.0.0.5".into()],
+            tang_threshold: 1,
         }
     }
 

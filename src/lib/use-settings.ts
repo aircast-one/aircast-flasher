@@ -17,6 +17,7 @@ const EMPTY: Settings = {
   installId: null,
   flashedHostnames: [],
   tangUrls: [],
+  tangThreshold: 1,
 };
 
 export function useSettings(): {

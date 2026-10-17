@@ -4,6 +4,7 @@ import {
   cancelFlash,
   detectSshKeys,
   downloadImage,
+  fetchTangAdv,
   flashImage,
   listBlockDevices,
   listReleases,
@@ -119,15 +120,27 @@ function App() {
   const [recoverySaved, setRecoverySaved] = useState(false);
   const enableEncryption = (on: boolean) => {
     setEncryptEnabled(on);
-    if (on) {
-      if (recoveryKey === "") setRecoveryKey(randomHex(24));
-      // Prefill the servers remembered from a previous flash (advs re-captured).
-      const remembered = settings.tangUrls;
-      if (remembered.length > 0 && tangServers.every((s) => s.url === "")) {
-        setTangServers(remembered.map((url) => ({ url, adv: "" })));
-      }
-    } else {
+    if (!on) {
       setRecoverySaved(false);
+      return;
+    }
+    if (recoveryKey === "") setRecoveryKey(randomHex(24));
+    // A remembered key server makes the per-card step zero-touch: prefill the
+    // URLs and the threshold, and re-capture their advertisements automatically
+    // (they aren't persisted). The operator only reviews and confirms.
+    const remembered = settings.tangUrls;
+    if (remembered.length > 0 && tangServers.every((s) => s.url === "")) {
+      setThreshold(Math.max(1, Math.min(settings.tangThreshold || 1, remembered.length)));
+      setTangServers(remembered.map((url) => ({ url, adv: "" })));
+      Promise.all(
+        remembered.map(async (url) => {
+          try {
+            return { url, adv: await fetchTangAdv(url) };
+          } catch {
+            return { url, adv: "" };
+          }
+        }),
+      ).then(setTangServers);
     }
   };
 
@@ -328,9 +341,12 @@ function App() {
       });
     },
     onSuccess: (_result, vars) => {
-      // Remember the Tang servers so the next card in a batch doesn't retype them.
+      // Remember the Tang servers + threshold so the next card is zero-touch.
       if (vars.encryption) {
-        update({ tangUrls: vars.encryption.tangServers.map((s) => s.url) });
+        update({
+          tangUrls: vars.encryption.tangServers.map((s) => s.url),
+          tangThreshold: vars.encryption.threshold,
+        });
       }
       const written = vars.hostname.trim();
       if (written === "" || settings.flashedHostnames.includes(written)) return;

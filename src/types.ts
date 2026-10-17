@@ -147,6 +147,8 @@ export interface Settings {
   flashedHostnames: string[];
   /** Tang server URLs remembered across a batch (advertisements re-captured). */
   tangUrls: string[];
+  /** The k-of-n unlock threshold remembered alongside the URLs. 0 = unset. */
+  tangThreshold: number;
 }
 
 export interface SshKeyIdentity {
