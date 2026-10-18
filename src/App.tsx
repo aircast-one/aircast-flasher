@@ -34,7 +34,7 @@ import { defaultHostname } from "@/components/default-hostname";
 import { nextFreeHostname } from "@/components/next-hostname";
 import { randomHex } from "@/lib/random-id";
 import { buildSummary } from "@/components/wizard-summary";
-import { isCaptured } from "@/components/encryption";
+import { isCaptured, releaseSupportsEncryption } from "@/components/encryption";
 import { cardLabel, withCloudServer } from "@/components/cloud";
 import { isValidControlServer } from "@/components/step-network.validation";
 import { useSettings } from "@/lib/use-settings";
@@ -376,6 +376,10 @@ function App() {
 
   const sourceReady =
     sourceKind === "aircast" ? release !== null : localPath !== null;
+  const encryptionAvailable =
+    sourceKind === "local" ||
+    (release !== null && releaseSupportsEncryption(release.version));
+  const encrypting = encryptEnabled && encryptionAvailable;
   const requiredCardBytes =
     sourceKind === "aircast" && release !== null
       ? (release.image.uncompressed_size ?? releasesQuery.data?.min_card_bytes)
@@ -412,7 +416,7 @@ function App() {
     sshKey,
     detectedKeys,
     devicePassword,
-    encryption: encryptEnabled
+    encryption: encrypting
       ? { tang: tangServers.some(isCaptured), cloud: cloudKeyServer }
       : null,
     fightMode,
@@ -458,7 +462,7 @@ function App() {
       .map((s) => ({ url: s.url.trim(), adv: s.adv }));
     const keyServers = capturedServers.length + (cloudKeyServer ? 1 : 0);
     const encryption: EncryptionConfig | null =
-      encryptEnabled &&
+      encrypting &&
       keyServers >= 1 &&
       threshold >= 1 &&
       threshold <= keyServers
@@ -476,7 +480,7 @@ function App() {
       tailscale,
       access,
       encryption,
-      cloudKeyServer: encryptEnabled && cloudKeyServer,
+      cloudKeyServer: encrypting && cloudKeyServer,
       fightMode,
     };
     setLastVars(vars);
@@ -598,8 +602,9 @@ function App() {
                 devicePassword,
                 onDevicePassword: setDevicePassword,
               }}
+              encryptionAvailable={encryptionAvailable}
               encryption={{
-                enabled: encryptEnabled,
+                enabled: encrypting,
                 onEnabled: enableEncryption,
                 servers: tangServers,
                 onServers: setTangServers,

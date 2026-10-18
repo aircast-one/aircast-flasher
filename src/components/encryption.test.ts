@@ -1,7 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { encryptionIncomplete, isCaptured } from "./encryption.ts";
+import {
+  encryptionIncomplete,
+  isCaptured,
+  releaseSupportsEncryption,
+} from "./encryption.ts";
 
 const cap = { url: "http://a", adv: "{}" };
 const uncap = { url: "http://b", adv: "" };
@@ -90,4 +94,15 @@ test("an uncaptured unit server still blocks, cloud or not", () => {
     encryptionIncomplete({ enabled: true, servers: [uncap], threshold: 1, cloud: true, recoverySaved: true }),
     true,
   );
+});
+
+test("Aircast images before v0.3.6 can't encrypt, so the flasher must not offer it", () => {
+  const supports = releaseSupportsEncryption;
+  assert.equal(supports("v0.3.5"), false);
+  assert.equal(supports("v0.3.5-beta.2"), false);
+  assert.equal(supports("v0.3.6-dev.1"), true);
+  assert.equal(supports("v0.3.6-beta.1"), true);
+  assert.equal(supports("v0.3.6"), true);
+  assert.equal(supports("v0.4.0"), true);
+  assert.equal(supports("not-a-version"), false);
 });

@@ -1,4 +1,10 @@
+import { gte, valid } from "semver";
 import type { TangServer } from "@/types";
+
+export const ENCRYPTION_MIN_IMAGE = "0.3.6";
+
+export const releaseSupportsEncryption = (version: string) =>
+  valid(version) !== null && gte(version, `${ENCRYPTION_MIN_IMAGE}-0`);
 
 export const hasUrl = (s: TangServer) => s.url.trim() !== "";
 export const isCaptured = (s: TangServer) =>

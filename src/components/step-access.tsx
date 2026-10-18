@@ -17,7 +17,10 @@ import {
   DiskEncryptionSection,
   type DiskEncryptionProps,
 } from "@/components/disk-encryption-section";
-import { encryptionIncomplete } from "@/components/encryption";
+import {
+  ENCRYPTION_MIN_IMAGE,
+  encryptionIncomplete,
+} from "@/components/encryption";
 import {
   isInvalidSshKey,
   isValidControlServer,
@@ -46,6 +49,7 @@ export function StepAccess({
   remote,
   access,
   encryption,
+  encryptionAvailable,
   fight,
   onBack,
   onNext,
@@ -53,6 +57,7 @@ export function StepAccess({
   remote: RemoteAccessInputs;
   access: DeviceAccessInputs;
   encryption: DiskEncryptionProps;
+  encryptionAvailable: boolean;
   fight: { enabled: boolean; onEnabled: (v: boolean) => void };
   onBack: () => void;
   onNext: () => void;
@@ -139,10 +144,15 @@ export function StepAccess({
         <SettingCard
           icon={<Lock />}
           title="Disk encryption"
-          description="A pulled card gives nothing away"
+          description={
+            encryptionAvailable
+              ? "A pulled card gives nothing away"
+              : `Needs Aircast OS v${ENCRYPTION_MIN_IMAGE} or newer — pick it in Operating system`
+          }
           action={
             <Switch
               aria-label="Disk encryption"
+              disabled={!encryptionAvailable}
               checked={encryption.enabled}
               onCheckedChange={encryption.onEnabled}
             />
