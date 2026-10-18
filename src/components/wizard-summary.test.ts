@@ -165,7 +165,19 @@ test("reports whether the data partition is encrypted", () => {
 test("fight mode is stated either way", () => {
   assert.equal(valueOf(base, "Fight mode"), "Off");
   assert.equal(
-    valueOf({ ...base, fightMode: true }, "Fight mode"),
+    valueOf({ ...base, fightMode: true, authKey: "tskey-auth-abc" }, "Fight mode"),
     "On · no logs, tailnet only",
   );
+});
+
+test("fight mode without a tailnet is flagged as unreachable", () => {
+  const stranded = { ...base, fightMode: true };
+  assert.equal(valueOf(stranded, "Fight mode"), "On · needs remote access");
+  assert.equal(rowOf(stranded, "Fight mode")?.warn, true);
+  const badServer = {
+    ...stranded,
+    authKey: "hskey-auth-abc",
+    controlServer: "hs.example.com",
+  };
+  assert.equal(rowOf(badServer, "Fight mode")?.warn, true);
 });

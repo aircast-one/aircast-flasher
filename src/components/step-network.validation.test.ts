@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
+  fightModeUnreachable,
   isInvalidWifiPassword,
   needsControlServer,
 } from "./step-network.validation.ts";
@@ -29,4 +30,16 @@ test("a blank control server is only a problem once a key exists", () => {
     false,
   );
   assert.equal(needsControlServer(false, "", "hskey-auth-abc"), false);
+});
+
+test("fight mode is unreachable until the drone joins a tailnet", () => {
+  assert.equal(fightModeUnreachable(false, "", ""), false);
+  assert.equal(fightModeUnreachable(true, "", ""), true);
+  assert.equal(fightModeUnreachable(true, "  ", ""), true);
+  assert.equal(fightModeUnreachable(true, "hskey-auth-abc", "hs.example.com"), true);
+  assert.equal(fightModeUnreachable(true, "tskey-auth-abc", ""), false);
+  assert.equal(
+    fightModeUnreachable(true, "hskey-auth-abc", "https://hs.example.com"),
+    false,
+  );
 });

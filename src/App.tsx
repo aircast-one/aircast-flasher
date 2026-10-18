@@ -36,7 +36,10 @@ import { randomHex } from "@/lib/random-id";
 import { buildSummary } from "@/components/wizard-summary";
 import { isCaptured, releaseSupportsEncryption } from "@/components/encryption";
 import { cardLabel, withCloudServer } from "@/components/cloud";
-import { isValidControlServer } from "@/components/step-network.validation";
+import {
+  fightModeUnreachable,
+  joinsTailnet,
+} from "@/components/step-network.validation";
 import { useSettings } from "@/lib/use-settings";
 import { useLocalTailscale } from "@/lib/use-local-tailscale";
 import { ConsentBanner } from "@/components/consent-banner";
@@ -394,7 +397,11 @@ function App() {
     selectedDevice !== undefined &&
     selectedDevice.size > 0 &&
     selectedDevice.size < requiredCardBytes;
-  const canProceed = sourceReady && selectedDisk !== "" && !cardTooSmall;
+  const canProceed =
+    sourceReady &&
+    selectedDisk !== "" &&
+    !cardTooSmall &&
+    !fightModeUnreachable(fightMode, authKey, controlServer);
 
   const remoteEnrolled = authKey.trim() !== "";
   const detectedKeys = sshKeysQuery.data ?? [];
@@ -452,12 +459,12 @@ function App() {
           };
     const trimmedHostname = hostname.trim();
 
-    const trimmedKey = authKey.trim();
-    const trimmedControl = controlServer.trim();
-    const tailscale: TailscaleConfig | null =
-      trimmedKey === "" || !isValidControlServer(trimmedControl)
-        ? null
-        : { controlServer: trimmedControl, authKey: trimmedKey };
+    const tailscale: TailscaleConfig | null = joinsTailnet(
+      authKey,
+      controlServer,
+    )
+      ? { controlServer: controlServer.trim(), authKey: authKey.trim() }
+      : null;
 
     const access = buildAccess(sshMode, sshKey, devicePassword);
 

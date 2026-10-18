@@ -332,6 +332,31 @@ describe("flasher wizard", () => {
     await expect($("button=Password")).toBeDisplayed();
   });
 
+  it("won't let fight mode write a drone nothing can reach", async () => {
+    await onAccessStep();
+    const fight = $('[role="switch"][aria-label="Fight mode"]');
+    const remote = $('[role="switch"][aria-label="Remote access"]');
+    await fight.click();
+
+    await expect(remote).toHaveAttribute("aria-checked", "true");
+    await expect(remote).toHaveAttribute("aria-disabled", "true");
+    await expect($("#fight-mode-help")).toHaveText(
+      expect.stringContaining("Finish Remote access"),
+    );
+    await expect($("button=Next")).toBeDisabled();
+
+    await $("button=Tailscale").click();
+    await $("#auth-key").setValue("tskey-auth-abc123");
+    await expect($("#fight-mode-help")).not.toBeDisplayed();
+    await expect($("button=Next")).toBeEnabled();
+
+    await $("#auth-key").clearValue();
+    await expect($("button=Next")).toBeDisabled();
+    await fight.click();
+    await expect(remote).not.toHaveAttribute("aria-disabled", "true");
+    await expect($("button=Next")).toBeEnabled();
+  });
+
   it("shows what will be written before the destructive step", async () => {
     await onAccessStep();
     await $("button=Next").click();

@@ -22,6 +22,7 @@ import {
   encryptionIncomplete,
 } from "@/components/encryption";
 import {
+  fightModeUnreachable,
   isInvalidSshKey,
   isValidControlServer,
   isWeakDevicePassword,
@@ -65,7 +66,9 @@ export function StepAccess({
   const [selfHosted, setSelfHosted] = useState(
     () => remote.controlServer.trim() !== "",
   );
-  const [remoteOn, setRemoteOn] = useState(() => remote.authKey.trim() !== "");
+  const [remoteOn, setRemoteOn] = useState(
+    () => fight.enabled || remote.authKey.trim() !== "",
+  );
 
   const controlServerValid = isValidControlServer(remote.controlServer);
   const controlServerMissing = needsControlServer(
@@ -80,10 +83,18 @@ export function StepAccess({
     access.sshMode === "password" &&
     isWeakDevicePassword(access.devicePassword);
   const encryptionPending = encryptionIncomplete(encryption);
+  const unreachable =
+    fightModeUnreachable(fight.enabled, remote.authKey, remote.controlServer) ||
+    (fight.enabled && controlServerMissing);
 
   const toggleRemote = (on: boolean) => {
     setRemoteOn(on);
     if (!on) remote.onAuthKey("");
+  };
+
+  const toggleFight = (on: boolean) => {
+    if (on) setRemoteOn(true);
+    fight.onEnabled(on);
   };
 
   return (
@@ -94,7 +105,11 @@ export function StepAccess({
       next={{
         label: "Next",
         onClick: onNext,
-        disabled: sshKeyInvalid || devicePasswordWeak || encryptionPending,
+        disabled:
+          sshKeyInvalid ||
+          devicePasswordWeak ||
+          encryptionPending ||
+          unreachable,
       }}
     >
       <div className="flex max-w-xl flex-col gap-4">
@@ -121,11 +136,16 @@ export function StepAccess({
         <SettingCard
           icon={<Globe />}
           title="Remote access"
-          description={`Reach it from anywhere over ${selfHosted ? "Headscale" : "Tailscale"}`}
+          description={
+            fight.enabled
+              ? "The only way in while fight mode is on"
+              : `Reach it from anywhere over ${selfHosted ? "Headscale" : "Tailscale"}`
+          }
           action={
             <Switch
               aria-label="Remote access"
               checked={remoteOn}
+              disabled={fight.enabled}
               onCheckedChange={toggleRemote}
             />
           }
@@ -169,24 +189,33 @@ export function StepAccess({
             <Switch
               aria-label="Fight mode"
               checked={fight.enabled}
-              onCheckedChange={fight.onEnabled}
+              onCheckedChange={toggleFight}
             />
           }
         >
           {fight.enabled ? (
-            <>
-              <p className="text-sm text-muted-foreground">
-                The drone records no video and wipes its flight log and journal
-                on every start, along with the flight controller's logs. Only
-                the tailnet gets in, and only with an SSH key. This computer
-                forgets the WiFi password, SSH key and drone names.
+            <div className="flex flex-col gap-2 text-sm text-muted-foreground">
+              <p>
+                <span className="font-medium text-foreground">
+                  On the drone:
+                </span>{" "}
+                no video is recorded, and the flight log, journal and flight
+                controller logs are wiped on every start. Only the tailnet gets
+                in, and only with an SSH key.
               </p>
-              {remote.authKey.trim() === "" ? (
-                <p className="text-sm text-amber-600 dark:text-amber-400">
-                  Remote access is off, so nothing can connect to this drone.
+              <p>
+                <span className="font-medium text-foreground">
+                  On this computer:
+                </span>{" "}
+                the WiFi password, SSH key and drone names aren't saved.
+              </p>
+              {unreachable ? (
+                <p id="fight-mode-help" className="text-destructive">
+                  Finish Remote access above to continue. In fight mode the
+                  tailnet is the only way into this drone.
                 </p>
               ) : null}
-            </>
+            </div>
           ) : null}
         </SettingCard>
       </div>

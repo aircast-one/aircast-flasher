@@ -9,14 +9,24 @@ export function isValidControlServer(value: string): boolean {
   return v === "" || /^https?:\/\/.+/.test(v);
 }
 
-// Only a danger once a key exists: with no key nothing is written at all, so a
-// blank server on an untouched optional section is not an error.
 export function needsControlServer(
   selfHosted: boolean,
   controlServer: string,
   authKey: string,
 ): boolean {
   return selfHosted && controlServer.trim() === "" && authKey.trim() !== "";
+}
+
+export function joinsTailnet(authKey: string, controlServer: string): boolean {
+  return authKey.trim() !== "" && isValidControlServer(controlServer);
+}
+
+export function fightModeUnreachable(
+  fightMode: boolean,
+  authKey: string,
+  controlServer: string,
+): boolean {
+  return fightMode && !joinsTailnet(authKey, controlServer);
 }
 
 export function needsSsid(noWifi: boolean, ssid: string): boolean {

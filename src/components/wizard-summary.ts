@@ -1,6 +1,9 @@
 import type { SshMode, SshPublicKey } from "@/types";
 import { STEP, type WizardStep } from "@/components/wizard-types";
-import { isValidControlServer } from "@/components/step-network.validation";
+import {
+  isValidControlServer,
+  joinsTailnet,
+} from "@/components/step-network.validation";
 
 export interface SummaryItem {
   label: string;
@@ -76,6 +79,14 @@ function encryptionValue(e: SummaryInput["encryption"]): string {
   return e.cloud ? "LUKS2 · Aircast Cloud" : "LUKS2 · your key server";
 }
 
+function fight(input: SummaryInput): SummaryItem {
+  const row = { label: "Fight mode", step: STEP.access };
+  if (!input.fightMode) return { ...row, value: "Off" };
+  return joinsTailnet(input.authKey, input.controlServer)
+    ? { ...row, value: "On · no logs, tailnet only" }
+    : { ...row, value: "On · needs remote access", warn: true };
+}
+
 export function buildSummary(input: SummaryInput): SummaryItem[] {
   const hostname = input.hostname.trim();
   const access = deviceAccess(
@@ -104,10 +115,6 @@ export function buildSummary(input: SummaryInput): SummaryItem[] {
       value: encryptionValue(input.encryption),
       step: STEP.access,
     },
-    {
-      label: "Fight mode",
-      value: input.fightMode ? "On · no logs, tailnet only" : "Off",
-      step: STEP.access,
-    },
+    fight(input),
   ];
 }
