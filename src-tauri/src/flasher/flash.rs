@@ -7,6 +7,7 @@ use super::hidden_command;
 use super::private_temp_dir;
 use super::randbits;
 use super::validate_disk_path;
+use super::validate_fight_access;
 use super::validate_image_file;
 use super::AppHandle;
 use super::Arc;
@@ -45,6 +46,7 @@ pub async fn flash_image(
     tailscale: Option<TailscaleConfig>,
     access: Option<flasher_core::AccessConfig>,
     encryption: Option<flasher_core::EncryptionConfig>,
+    fight_mode: bool,
     init_format: flasher_core::InitFormat,
 ) -> Result<(), String> {
     let config = ProvisionConfig {
@@ -53,6 +55,7 @@ pub async fn flash_image(
         tailscale,
         access,
         encryption,
+        fight_mode,
         init_format,
     };
     let facts = telemetry::describe_config(&config);
@@ -130,6 +133,7 @@ async fn flash_image_inner(
     trace: &mut FlashTrace,
 ) -> Result<(), String> {
     validate_disk_path(&target_disk)?;
+    validate_fight_access(config)?;
     let src_path = validate_image_file(std::path::Path::new(&image_path))?;
 
     let devices = list_block_devices().await?;

@@ -16,6 +16,7 @@ const base: SummaryInput = {
   detectedKeys: [],
   devicePassword: "",
   encryption: null,
+  fightMode: false,
 };
 
 const rowOf = (input: SummaryInput, label: string) =>
@@ -158,5 +159,13 @@ test("reports whether the data partition is encrypted", () => {
   assert.equal(
     valueOf({ ...base, encryption: { tang: true, cloud: true } }, "Disk encryption"),
     "LUKS2 · your key server + Aircast Cloud",
+  );
+});
+
+test("fight mode is stated either way", () => {
+  assert.equal(valueOf(base, "Fight mode"), "Off");
+  assert.equal(
+    valueOf({ ...base, fightMode: true }, "Fight mode"),
+    "On · no logs, tailnet only",
   );
 });

@@ -105,7 +105,8 @@ function App() {
   const [localPath, setLocalPath] = useState<string | null>(null);
   const [pickedDisk, setPickedDisk] = useState<string>("");
 
-  const { settings, update } = useSettings();
+  const [fightMode, setFightMode] = useState(false);
+  const { settings, update, forget } = useSettings(fightMode);
   const [showPassword, setShowPassword] = useState(false);
   const [authKey, setAuthKey] = useState("");
   const [sshMode, setSshMode] = useState<SshMode>("key-only");
@@ -141,6 +142,13 @@ function App() {
         }),
       ).then(setTangServers);
     }
+  };
+
+  const enableFightMode = (on: boolean) => {
+    setFightMode(on);
+    if (!on) return;
+    forget();
+    if (sshMode === "password") setSshMode("key-only");
   };
 
   const password = settings.wifiPassword;
@@ -334,11 +342,13 @@ function App() {
         tailscale: vars.tailscale,
         access: vars.access,
         encryption,
+        fightMode: vars.fightMode,
         initFormat: "cloud-init" satisfies InitFormat,
       });
       return encryption;
     },
     onSuccess: (_result, vars) => {
+      if (vars.fightMode) return;
       if (vars.encryption) {
         update({
           tangUrls: vars.encryption.tangServers.map((s) => s.url),
@@ -405,6 +415,7 @@ function App() {
     encryption: encryptEnabled
       ? { tang: tangServers.some(isCaptured), cloud: cloudKeyServer }
       : null,
+    fightMode,
   });
 
   async function handlePickLocal() {
@@ -466,6 +477,7 @@ function App() {
       access,
       encryption,
       cloudKeyServer: encryptEnabled && cloudKeyServer,
+      fightMode,
     };
     setLastVars(vars);
     flashMutation.mutate(vars);
@@ -601,6 +613,7 @@ function App() {
                 wifiUplink: !noWifi && ssid.trim() !== "",
                 hostname,
               }}
+              fight={{ enabled: fightMode, onEnabled: enableFightMode }}
               onBack={() => setStep(STEP.network)}
               onNext={() => setStep(STEP.storage)}
             />

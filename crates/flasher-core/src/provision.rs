@@ -1,6 +1,7 @@
 use crate::{psk, AccessConfig, InitFormat, ProvisionConfig, SshMode, TailscaleConfig, WifiConfig};
 
 const ENCRYPT_MARKER_NAME: &str = "aircast-encrypt";
+const FIGHT_MARKER_NAME: &str = "aircast-fight-mode";
 
 const TS_STATE_PATH: &str = "/var/lib/aircastd/tailscale.json";
 const TS_KEY_PATH: &str = "/var/lib/aircastd/tailscale.authkey";
@@ -66,6 +67,17 @@ pub enum ProvisionPlan {
         script: ProvisionFile,
         cmdline_append: String,
     },
+}
+
+pub fn boot_markers(config: &ProvisionConfig) -> Vec<ProvisionFile> {
+    encryption_files(config)
+        .into_iter()
+        .chain(
+            config
+                .fight_mode
+                .then(|| ProvisionFile::plain(FIGHT_MARKER_NAME, String::new())),
+        )
+        .collect()
 }
 
 pub fn encryption_files(config: &ProvisionConfig) -> Vec<ProvisionFile> {
@@ -154,7 +166,7 @@ fn cloud_init_user_data(config: &ProvisionConfig) -> Option<String> {
     let mut top = String::new();
     let mut write_files: Vec<String> = Vec::new();
     let mut runcmd: Vec<String> = Vec::new();
-    let mut scrub = false;
+    let mut scrub = config.wifi.is_some();
 
     if let Some(host) = &config.hostname {
         top.push_str(&format!(
@@ -172,7 +184,7 @@ fn cloud_init_user_data(config: &ProvisionConfig) -> Option<String> {
     }
 
     if scrub {
-        runcmd.push(SCRUB_USERDATA_ITEM.to_string());
+        runcmd.push(SCRUB_SEED_ITEM.to_string());
     }
 
     if top.is_empty() && write_files.is_empty() && runcmd.is_empty() {
@@ -293,7 +305,7 @@ fn install_key_runcmd() -> String {
     format!("  - [ sh, {INSTALL_KEY_PATH} ]\n")
 }
 
-const SCRUB_USERDATA_ITEM: &str = "  - [ sh, -c, \"rm -f /boot/firmware/user-data /var/lib/cloud/instance/user-data.txt /var/lib/cloud/instances/*/user-data.txt 2>/dev/null; true\" ]\n";
+const SCRUB_SEED_ITEM: &str = "  - [ sh, -c, \"rm -f /boot/firmware/user-data /boot/firmware/network-config /var/lib/cloud/instance/user-data.txt /var/lib/cloud/instances/*/user-data.txt 2>/dev/null; true\" ]\n";
 
 fn tailscale_write_files_entry(control_server: &str, auth_key: &str) -> String {
     let json = tailscale_state_json(control_server);
@@ -429,6 +441,7 @@ mod tests {
             tailscale: None,
             access: None,
             encryption: None,
+            fight_mode: false,
             init_format: init,
         }
     }
@@ -443,6 +456,7 @@ mod tests {
             }),
             access: None,
             encryption: None,
+            fight_mode: false,
             init_format: init,
         }
     }
@@ -454,6 +468,7 @@ mod tests {
             tailscale: None,
             access: Some(access),
             encryption: None,
+            fight_mode: false,
             init_format: init,
         }
     }
@@ -956,6 +971,32 @@ mod tests {
             .contents;
         assert!(marker.contains(r"RECOVERY_KEY='a'\''; rm -rf /#'"));
         assert!(!marker.contains("rm -rf /\n"));
+    }
+
+    #[test]
+    fn fight_mode_flags_the_boot_partition_for_aircastd() {
+        let mut c = cfg(InitFormat::CloudInit, false, None);
+        assert!(boot_markers(&c).is_empty());
+
+        c.fight_mode = true;
+        let markers = boot_markers(&c);
+        assert_eq!(markers.len(), 1);
+        assert_eq!(markers[0].name, "aircast-fight-mode");
+        assert!(markers[0].contents.is_empty());
+    }
+
+    #[test]
+    fn fight_mode_keeps_the_encryption_marker() {
+        let mut c = enc_cfg();
+        c.fight_mode = true;
+        let names: Vec<_> = boot_markers(&c).into_iter().map(|f| f.name).collect();
+        assert_eq!(names, ["aircast-encrypt", "aircast-fight-mode"]);
+    }
+
+    #[test]
+    fn the_wifi_key_does_not_outlive_first_boot_on_the_boot_partition() {
+        let ud = cloud_user_data(&cfg(InitFormat::CloudInit, true, None));
+        assert!(ud.contains("rm -f /boot/firmware/user-data /boot/firmware/network-config"));
     }
 
     #[test]

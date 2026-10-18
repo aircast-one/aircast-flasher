@@ -94,6 +94,8 @@ pub struct ProvisionConfig {
     pub access: Option<AccessConfig>,
     #[serde(default)]
     pub encryption: Option<EncryptionConfig>,
+    #[serde(default)]
+    pub fight_mode: bool,
     pub init_format: InitFormat,
 }
 

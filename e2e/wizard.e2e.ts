@@ -13,9 +13,6 @@ async function heading(): Promise<string> {
     .catch(() => "");
 }
 
-/// What the webview actually holds, for when the app renders nothing at all —
-/// re-importing an already-failed ES module re-throws, which surfaces a
-/// load-time exception that no console is around to catch.
 async function pageDiagnostics(): Promise<string> {
   const dump = await browser
     .execute(() => {
@@ -54,6 +51,12 @@ async function pageDiagnostics(): Promise<string> {
     .catch((e: unknown) => `module probe failed: ${String(e)}`);
 
   return `page=${dump} ${moduleError}`;
+}
+
+function savedSettings(): Record<string, unknown> {
+  return fs.existsSync(settingsFile())
+    ? JSON.parse(fs.readFileSync(settingsFile(), "utf8"))
+    : {};
 }
 
 async function waitForHeading(text: string) {
@@ -99,12 +102,6 @@ async function knownGoodNetworkState() {
   await $("#password").clearValue();
 }
 
-/// The session does not necessarily start on the app: on Linux the first handle
-/// is an about:blank window, which is why a bare switchToWindow(handles[0])
-/// looked exactly like an app that renders nothing. Find the window that holds
-/// the wizard, and switch to it explicitly — that also sets the service's
-/// suppression flag, which stops it polling window state before every element
-/// lookup (5s per command otherwise).
 async function showsApp(): Promise<boolean> {
   return browser
     .execute(() => Boolean(document.getElementById("root")))
@@ -307,6 +304,32 @@ describe("flasher wizard", () => {
         timeoutMsg: `settings never reached ${settingsFile()} — the wizard would forget them on restart`,
       },
     );
+  });
+
+  it("keeps nothing on this computer in fight mode", async () => {
+    await onAccessStep();
+    await browser.waitUntil(() => savedSettings().hostname === "falcon-01", {
+      timeout: 10_000,
+      timeoutMsg: "the drone name never reached the settings file",
+    });
+
+    const fight = $('[role="switch"][aria-label="Fight mode"]');
+    await fight.click();
+    await browser.waitUntil(
+      () => {
+        const saved = savedSettings();
+        return saved.hostname === null && saved.ssid === null;
+      },
+      {
+        timeout: 10_000,
+        timeoutMsg: `fight mode left the drone's settings in ${settingsFile()}`,
+      },
+    );
+    await expect($("button=Password")).not.toBeDisplayed();
+    await expect($("button=SSH key")).toBeDisplayed();
+
+    await fight.click();
+    await expect($("button=Password")).toBeDisplayed();
   });
 
   it("shows what will be written before the destructive step", async () => {

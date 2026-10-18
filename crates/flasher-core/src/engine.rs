@@ -150,8 +150,8 @@ fn customize(
     provision: &ProvisionConfig,
 ) -> Result<(), String> {
     let plan = crate::provision::plan(provision);
-    let encrypt_files = crate::provision::encryption_files(provision);
-    if matches!(plan, ProvisionPlan::Noop) && encrypt_files.is_empty() {
+    let markers = crate::provision::boot_markers(provision);
+    if matches!(plan, ProvisionPlan::Noop) && markers.is_empty() {
         return Ok(());
     }
 
@@ -179,7 +179,7 @@ fn customize(
                 append_cmdline(&root, &cmdline_append)?;
             }
         }
-        for f in &encrypt_files {
+        for f in &markers {
             write_fat_file(&root, f)?;
         }
     }
@@ -429,6 +429,7 @@ mod tests {
             tailscale: None,
             access: None,
             encryption: None,
+            fight_mode: false,
             init_format: InitFormat::CloudInit,
         }
     }
@@ -498,6 +499,7 @@ mod tests {
             tailscale: None,
             access: None,
             encryption: None,
+            fight_mode: false,
             init_format: InitFormat::FirstRun,
         };
         let params = FlashParams {
@@ -521,6 +523,38 @@ mod tests {
             cmdline.contains("systemd.run=/boot/firstrun.sh"),
             "appended firstrun fragment"
         );
+    }
+
+    #[test]
+    fn fight_mode_alone_lands_its_flag_on_the_card() {
+        let image = build_image();
+        let image_len = image.len() as u64;
+        let mut device = MemDevice::zeroed(image.len());
+
+        let cfg = ProvisionConfig {
+            hostname: None,
+            wifi: None,
+            tailscale: None,
+            access: None,
+            encryption: None,
+            fight_mode: true,
+            init_format: InitFormat::CloudInit,
+        };
+        let params = FlashParams {
+            image_len,
+            verify: false,
+        };
+
+        let mut reader = Cursor::new(image);
+        flash(&mut device, &mut reader, &params, &cfg, &mut |_, _, _| {})
+            .expect("flash a fight card");
+
+        let written = device.into_bytes();
+        assert_eq!(
+            read_fat_file(&written, "aircast-fight-mode").as_deref(),
+            Some("")
+        );
+        assert!(read_fat_file(&written, "user-data").is_none());
     }
 
     #[test]

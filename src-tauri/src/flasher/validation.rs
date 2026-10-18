@@ -1,11 +1,6 @@
 use super::format_bytes;
+use flasher_core::{ProvisionConfig, SshMode};
 
-// ---------------------------------------------------------------------------
-// Validation
-// ---------------------------------------------------------------------------
-
-/// Validate the disk path is /dev/disk\d+ (macOS) or /dev/sd[a-z]+ (Linux).
-/// This is the dangerous input — it goes to `dd`/`diskutil` as root.
 pub(crate) fn validate_disk_path(path: &str) -> Result<(), String> {
     let valid = if cfg!(target_os = "macos") {
         path.starts_with("/dev/disk")
@@ -20,8 +15,6 @@ pub(crate) fn validate_disk_path(path: &str) -> Result<(), String> {
                 .all(|c| c.is_ascii_lowercase())
             && path.len() > "/dev/sd".len()
     } else if cfg!(target_os = "windows") {
-        // Accept only `\\.\PhysicalDriveN` (N = digits). This id flows into the
-        // elevated write helper, so keep it as tight as the unix device paths.
         const PREFIX: &str = r"\\.\PhysicalDrive";
         path.starts_with(PREFIX)
             && path[PREFIX.len()..].chars().all(|c| c.is_ascii_digit())
@@ -35,9 +28,17 @@ pub(crate) fn validate_disk_path(path: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Validate that the image path resolves to an existing regular file. The image
-/// is only ever read; the native file dialog is the trust boundary for local
-/// picks, so we don't restrict its directory (unlike the dangerous disk path).
+pub(crate) fn validate_fight_access(config: &ProvisionConfig) -> Result<(), String> {
+    let password = config
+        .access
+        .as_ref()
+        .is_some_and(|a| a.ssh == SshMode::Password);
+    if config.fight_mode && password {
+        return Err("Fight mode takes SSH keys only — pick a key or turn SSH off.".to_string());
+    }
+    Ok(())
+}
+
 pub(crate) fn validate_image_file(path: &std::path::Path) -> Result<std::path::PathBuf, String> {
     let canon = path
         .canonicalize()
@@ -48,8 +49,6 @@ pub(crate) fn validate_image_file(path: &std::path::Path) -> Result<std::path::P
     Ok(canon)
 }
 
-/// Validate and normalize a SHA-256 hex digest (lowercase, 64 chars). Rejects
-/// HTML error pages and truncated downloads.
 pub(crate) fn parse_sha256(raw: &str) -> Result<String, String> {
     if raw.len() != 64 || !raw.chars().all(|c| c.is_ascii_hexdigit()) {
         return Err(format!(
@@ -60,7 +59,6 @@ pub(crate) fn parse_sha256(raw: &str) -> Result<String, String> {
     Ok(raw.to_ascii_lowercase())
 }
 
-/// Extract a filename from a URL, stripping query params.
 pub(crate) fn filename_from_url(url_str: &str) -> String {
     url::Url::parse(url_str)
         .ok()
@@ -73,19 +71,12 @@ pub(crate) fn filename_from_url(url_str: &str) -> String {
         .unwrap_or_else(|| "image.img.xz".to_string())
 }
 
-/// Hex from the OS CSPRNG, for temp names an attacker must not be able to
-/// predict. The PID is guessable and reused; these paths are read by a root
-/// process, so guessable is the whole problem.
 pub fn randbits() -> String {
     let mut bytes = [0u8; 8];
     getrandom::fill(&mut bytes).expect("OS randomness");
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
-/// The scratch directory the decompressed image, the provision blob and the
-/// ready-file handshake live in. All three are consumed by the *elevated*
-/// helper, so on Unix the directory is 0700 and must already be ours: a shared
-/// `/tmp` otherwise lets any local user swap the image root writes to the card.
 pub(crate) fn private_temp_dir() -> Result<std::path::PathBuf, String> {
     let dir = std::env::temp_dir().join("aircast-flasher");
     std::fs::create_dir_all(&dir).map_err(|e| format!("Failed to create temp dir: {e}"))?;
@@ -111,8 +102,6 @@ pub(crate) fn private_temp_dir() -> Result<std::path::PathBuf, String> {
     Ok(dir)
 }
 
-/// Whether the decompressed image fits, as a check both the pre-elevation and
-/// post-decompress paths share.
 pub(crate) fn fits_on_card(
     image_bytes: u64,
     card_size: u64,
@@ -128,7 +117,6 @@ pub(crate) fn fits_on_card(
     Ok(())
 }
 
-/// Check available disk space at `path`.
 pub(crate) fn check_available_space(path: &std::path::Path, required: u64) -> Result<(), String> {
     #[cfg(unix)]
     {
@@ -155,4 +143,34 @@ pub(crate) fn check_available_space(path: &std::path::Path, required: u64) -> Re
         let _ = (path, required);
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use flasher_core::{AccessConfig, InitFormat};
+
+    fn config(ssh: SshMode, fight_mode: bool) -> ProvisionConfig {
+        ProvisionConfig {
+            hostname: None,
+            wifi: None,
+            tailscale: None,
+            access: Some(AccessConfig {
+                ssh,
+                authorized_key: None,
+                password: Some("device-password".into()),
+            }),
+            encryption: None,
+            fight_mode,
+            init_format: InitFormat::CloudInit,
+        }
+    }
+
+    #[test]
+    fn fight_mode_refuses_a_password_login() {
+        assert!(validate_fight_access(&config(SshMode::Password, true)).is_err());
+        assert!(validate_fight_access(&config(SshMode::KeyOnly, true)).is_ok());
+        assert!(validate_fight_access(&config(SshMode::Disabled, true)).is_ok());
+        assert!(validate_fight_access(&config(SshMode::Password, false)).is_ok());
+    }
 }

@@ -72,6 +72,7 @@ export function flashImage(args: {
   tailscale: TailscaleConfig | null;
   access: AccessConfig | null;
   encryption: EncryptionConfig | null;
+  fightMode: boolean;
   initFormat: InitFormat;
 }): Promise<void> {
   return invoke<void>("flash_image", {
@@ -83,6 +84,7 @@ export function flashImage(args: {
     tailscale: args.tailscale,
     access: args.access,
     encryption: args.encryption,
+    fightMode: args.fightMode,
     initFormat: args.initFormat,
   });
 }

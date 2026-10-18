@@ -324,6 +324,7 @@ mod tests {
                 authorized_key: None,
             }),
             encryption: None,
+            fight_mode: false,
             init_format: InitFormat::CloudInit,
         }
     }
@@ -358,6 +359,7 @@ mod tests {
             tailscale: None,
             access: None,
             encryption: None,
+            fight_mode: false,
             init_format: InitFormat::FirstRun,
         });
         let json = serde_json::to_string(&facts).expect("serialize");
@@ -375,6 +377,7 @@ mod tests {
             tailscale: None,
             access: None,
             encryption: None,
+            fight_mode: false,
             init_format: InitFormat::CloudInit,
         });
         assert!(!facts.hostname);
@@ -391,6 +394,7 @@ mod tests {
             }),
             access: None,
             encryption: None,
+            fight_mode: false,
             init_format: InitFormat::CloudInit,
         });
         assert_eq!(facts.remote, "tailscale");

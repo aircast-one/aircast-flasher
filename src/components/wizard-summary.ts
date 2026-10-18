@@ -21,6 +21,7 @@ export interface SummaryInput {
   detectedKeys: SshPublicKey[];
   devicePassword: string;
   encryption: { tang: boolean; cloud: boolean } | null;
+  fightMode: boolean;
 }
 
 const IMAGE_DEFAULT_LOGIN = "Image default (pi / raspberry)";
@@ -101,6 +102,11 @@ export function buildSummary(input: SummaryInput): SummaryItem[] {
     {
       label: "Disk encryption",
       value: encryptionValue(input.encryption),
+      step: STEP.access,
+    },
+    {
+      label: "Fight mode",
+      value: input.fightMode ? "On · no logs, tailnet only" : "Off",
       step: STEP.access,
     },
   ];

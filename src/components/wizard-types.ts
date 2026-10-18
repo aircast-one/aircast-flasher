@@ -39,4 +39,5 @@ export interface FlashVars {
   access: AccessConfig | null;
   encryption: EncryptionConfig | null;
   cloudKeyServer: boolean;
+  fightMode: boolean;
 }

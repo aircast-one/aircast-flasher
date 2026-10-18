@@ -79,6 +79,7 @@ fn main() -> Result<(), String> {
         tailscale: None,
         access: None,
         encryption: encryption(&args)?,
+        fight_mode: args.iter().any(|a| a == "--fight-mode"),
         init_format: InitFormat::CloudInit,
     };
 

@@ -22,14 +22,18 @@ const OTHER_KEY = "other";
 export function SshModePicker({
   value,
   onChange,
+  keysOnly,
 }: {
   value: SshMode;
   onChange: (v: SshMode) => void;
+  keysOnly: boolean;
 }) {
   return (
     <Segmented
       label="SSH login"
-      options={SSH_MODES}
+      options={
+        keysOnly ? SSH_MODES.filter((m) => m.value !== "password") : SSH_MODES
+      }
       value={value}
       onChange={onChange}
     />
@@ -223,6 +227,7 @@ export interface DeviceAccessProps {
   onDevicePassword: (v: string) => void;
   sshKeyInvalid: boolean;
   devicePasswordWeak: boolean;
+  keysOnly: boolean;
 }
 
 export function DeviceAccessSection({
@@ -235,6 +240,7 @@ export function DeviceAccessSection({
   onDevicePassword,
   sshKeyInvalid,
   devicePasswordWeak,
+  keysOnly,
 }: DeviceAccessProps) {
   const [showDevicePassword, setShowDevicePassword] = useState(false);
 
@@ -307,7 +313,9 @@ export function DeviceAccessSection({
         </Hint>
       ) : sshKey.trim() === "" ? (
         <Hint id="ssh-key-help" tone="warn">
-          No key yet — the default pi / raspberry login stays on.
+          {keysOnly
+            ? "No key yet — nobody can log in over SSH."
+            : "No key yet — the default pi / raspberry login stays on."}
         </Hint>
       ) : (
         <Hint id="ssh-key-help">

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Globe, Lock, SquareTerminal } from "lucide-react";
+import { Globe, Lock, SquareTerminal, Swords } from "lucide-react";
 
 import { StepShell } from "@/components/step-shell";
 import { SettingCard } from "@/components/setting-card";
@@ -46,12 +46,14 @@ export function StepAccess({
   remote,
   access,
   encryption,
+  fight,
   onBack,
   onNext,
 }: {
   remote: RemoteAccessInputs;
   access: DeviceAccessInputs;
   encryption: DiskEncryptionProps;
+  fight: { enabled: boolean; onEnabled: (v: boolean) => void };
   onBack: () => void;
   onNext: () => void;
 }) {
@@ -96,13 +98,18 @@ export function StepAccess({
           title="SSH login"
           description="Log in to the drone's shell"
           action={
-            <SshModePicker value={access.sshMode} onChange={access.onSshMode} />
+            <SshModePicker
+              value={access.sshMode}
+              onChange={access.onSshMode}
+              keysOnly={fight.enabled}
+            />
           }
         >
           <DeviceAccessSection
             {...access}
             sshKeyInvalid={sshKeyInvalid}
             devicePasswordWeak={devicePasswordWeak}
+            keysOnly={fight.enabled}
           />
         </SettingCard>
 
@@ -142,6 +149,35 @@ export function StepAccess({
           }
         >
           {encryption.enabled ? <DiskEncryptionSection {...encryption} /> : null}
+        </SettingCard>
+
+        <SettingCard
+          icon={<Swords />}
+          title="Fight mode"
+          description="No logs on the drone or on this computer"
+          action={
+            <Switch
+              aria-label="Fight mode"
+              checked={fight.enabled}
+              onCheckedChange={fight.onEnabled}
+            />
+          }
+        >
+          {fight.enabled ? (
+            <>
+              <p className="text-sm text-muted-foreground">
+                The drone records no video and wipes its flight log and journal
+                on every start, along with the flight controller's logs. Only
+                the tailnet gets in, and only with an SSH key. This computer
+                forgets the WiFi password, SSH key and drone names.
+              </p>
+              {remote.authKey.trim() === "" ? (
+                <p className="text-sm text-amber-600 dark:text-amber-400">
+                  Remote access is off, so nothing can connect to this drone.
+                </p>
+              ) : null}
+            </>
+          ) : null}
         </SettingCard>
       </div>
     </StepShell>
