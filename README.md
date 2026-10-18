@@ -17,7 +17,7 @@ list_releases ─► download_image ─► flash_image ─► provision_device
 ```
 
 - **Image source** — `/lite/releases.json` on the channel's downloads host
-  (`stable` → `downloads.aircast.one`, `staging` → `downloads.stage.aircast.one`,
+  (`stable` → `downloads.aircast.one`, `staging` → `downloads-stage.aircast.one`,
   `development` → `downloads-dev.aircast.one`), or a local
   `.img`/`.img.xz`/`.img.gz`. The Flasher's own installers are listed in
   `/flasher/releases.json`, and the updater reads `/flasher/latest.json`.
