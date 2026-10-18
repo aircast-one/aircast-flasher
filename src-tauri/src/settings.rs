@@ -100,13 +100,47 @@ pub fn read_settings(app_handle: AppHandle) -> Result<Settings, String> {
 }
 
 #[tauri::command]
-pub fn write_settings(app_handle: AppHandle, settings: Settings) -> Result<(), String> {
+pub fn update_settings(
+    app_handle: AppHandle,
+    patch: serde_json::Map<String, serde_json::Value>,
+) -> Result<Settings, String> {
     let path = settings_path(&app_handle)?;
-    let next = with_install_id(settings);
-    if next.install_id.is_some() && load_from(&path).install_id.is_none() {
+    let had_id = load_from(&path).install_id.is_some();
+    let next = merge_into(&path, patch)?;
+    if next.install_id.is_some() && !had_id {
         crate::telemetry::mark_all_sent(&app_handle);
     }
-    save_to(&path, &next)
+    Ok(next)
+}
+
+fn merge_into(
+    path: &Path,
+    patch: serde_json::Map<String, serde_json::Value>,
+) -> Result<Settings, String> {
+    let lock = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(path.with_extension("json.lock"))
+        .map_err(|e| format!("Failed to open settings lock: {e}"))?;
+    lock.lock()
+        .map_err(|e| format!("Failed to lock settings: {e}"))?;
+    let current = serde_json::to_value(load_from(path))
+        .map_err(|e| format!("Failed to encode settings: {e}"))?;
+    let merged = match current {
+        serde_json::Value::Object(fields) => {
+            serde_json::Value::Object(patch.into_iter().fold(fields, |mut acc, (k, v)| {
+                acc.insert(k, v);
+                acc
+            }))
+        }
+        other => other,
+    };
+    let settings: Settings =
+        serde_json::from_value(merged).map_err(|e| format!("Invalid settings update: {e}"))?;
+    let next = with_install_id(settings);
+    save_to(path, &next)?;
+    Ok(next)
 }
 
 #[cfg(test)]
@@ -190,6 +224,38 @@ mod tests {
             let mode = std::fs::metadata(&path).expect("stat").permissions().mode();
             assert_eq!(mode & 0o777, 0o600, "settings must be owner-only");
         }
+    }
+
+    fn patch(json: serde_json::Value) -> serde_json::Map<String, serde_json::Value> {
+        match json {
+            serde_json::Value::Object(map) => map,
+            _ => panic!("patch must be an object"),
+        }
+    }
+
+    #[test]
+    fn two_open_windows_saving_different_fields_keep_both() {
+        let path = temp_path("merge");
+        save_to(&path, &sample()).expect("seed");
+        merge_into(
+            &path,
+            patch(serde_json::json!({ "controlServer": "https://hs.other.example" })),
+        )
+        .expect("first window");
+        merge_into(&path, patch(serde_json::json!({ "noWifi": true }))).expect("second window");
+        let saved = load_from(&path);
+        assert_eq!(saved.control_server, "https://hs.other.example");
+        assert!(saved.no_wifi);
+        assert_eq!(saved.wifi_password, sample().wifi_password);
+        assert_eq!(saved.ssid, sample().ssid);
+    }
+
+    #[test]
+    fn a_patch_that_does_not_fit_the_schema_is_refused_and_leaves_the_file_alone() {
+        let path = temp_path("bad-patch");
+        save_to(&path, &sample()).expect("seed");
+        assert!(merge_into(&path, patch(serde_json::json!({ "tangThreshold": "two" }))).is_err());
+        assert_eq!(load_from(&path), sample());
     }
 
     #[test]

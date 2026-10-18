@@ -195,8 +195,8 @@ export function readSettings(): Promise<Settings> {
   return invoke<Settings>("read_settings");
 }
 
-export function writeSettings(settings: Settings): Promise<void> {
-  return invoke<void>("write_settings", { settings });
+export function updateSettings(patch: Partial<Settings>): Promise<Settings> {
+  return invoke<Settings>("update_settings", { patch });
 }
 
 export function revealEventLog(): Promise<void> {

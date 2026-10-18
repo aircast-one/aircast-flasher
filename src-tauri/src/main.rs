@@ -67,7 +67,7 @@ async fn main() {
             connect::local_tailscale,
             connect::join_wifi,
             settings::read_settings,
-            settings::write_settings,
+            settings::update_settings,
             telemetry::track,
         ])
         .run(tauri::generate_context!())

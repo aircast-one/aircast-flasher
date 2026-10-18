@@ -1,7 +1,6 @@
-import { useState } from "react";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { readSettings, writeSettings } from "@/api";
+import { readSettings, updateSettings } from "@/api";
 import type { Settings } from "@/types";
 
 const KEY = ["settings"];
@@ -36,27 +35,25 @@ export function useSettings(ephemeral: boolean): {
   update: (patch: Partial<Settings>) => void;
   forget: () => void;
 } {
+  const queryClient = useQueryClient();
   const query = useQuery({
     queryKey: KEY,
     queryFn: readSettings,
     staleTime: Infinity,
   });
 
-  const persist = useMutation({ mutationFn: writeSettings });
-  const [edited, setEdited] = useState<Settings | null>(null);
-  const settings = edited ?? query.data ?? EMPTY;
+  const persist = useMutation({ mutationFn: updateSettings });
 
   return {
-    settings,
+    settings: query.data ?? EMPTY,
     update: (patch) => {
       if (query.data === undefined) return;
-      const next = { ...settings, ...patch };
-      setEdited(next);
-      if (!ephemeral) persist.mutate(next);
+      queryClient.setQueryData<Settings>(KEY, { ...query.data, ...patch });
+      if (!ephemeral) persist.mutate(patch);
     },
     forget: () => {
       if (query.data === undefined) return;
-      persist.mutate({ ...settings, ...FORGOTTEN });
+      persist.mutate(FORGOTTEN);
     },
   };
 }
