@@ -59,6 +59,7 @@ import {
 } from "@/components/wizard-types";
 
 const DEVICE_POLL_INTERVAL_MS = 2000;
+const RELEASES_POLL_INTERVAL_MS = 60_000;
 
 const STEP_NAME: Record<WizardStep, string> = {
   [STEP.os]: "image",
@@ -182,9 +183,12 @@ function App() {
     refetchOnWindowFocus: onStorageStep,
   });
 
+  const onOsStep = step === STEP.os;
   const releasesQuery = useQuery({
     queryKey: ["releases"],
     queryFn: () => listReleases(),
+    refetchInterval: onOsStep ? RELEASES_POLL_INTERVAL_MS : false,
+    refetchOnWindowFocus: onOsStep,
   });
 
   const wifiQuery = useQuery({
