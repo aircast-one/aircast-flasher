@@ -113,7 +113,6 @@ export function RemoteAccessSection({
 }: RemoteAccessProps) {
   const pickProvider = (provider: Provider) => {
     onSelfHosted(provider === "headscale");
-    if (provider === "tailscale") onControlServer("");
   };
 
   return (

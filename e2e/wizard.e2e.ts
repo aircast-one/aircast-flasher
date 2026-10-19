@@ -278,6 +278,51 @@ describe("flasher wizard", () => {
     await field.clearValue();
   });
 
+  it("remembers every access choice, and switching one off erases nothing", async () => {
+    await onAccessStep();
+    await openRemoteAccess();
+    await $("button=Headscale").click();
+    await $("#control-server").setValue("https://hs.example.com");
+    await $("#auth-key").setValue("hskey-auth-keep");
+    await $("button=Password").click();
+    await $("#device-password").setValue("drone-pass-1");
+    await browser.waitUntil(
+      () => {
+        const saved = savedSettings();
+        return (
+          saved.remoteAccess === true &&
+          saved.selfHosted === true &&
+          saved.controlServer === "https://hs.example.com" &&
+          saved.authKey === "hskey-auth-keep" &&
+          saved.sshMode === "password" &&
+          saved.devicePassword === "drone-pass-1"
+        );
+      },
+      { timeout: 10_000, timeoutMsg: `access choices never reached ${settingsFile()}` },
+    );
+
+    const remote = $('[role="switch"][aria-label="Remote access"]');
+    await $("button=Tailscale").click();
+    await remote.click();
+    await browser.waitUntil(() => savedSettings().remoteAccess === false, {
+      timeout: 10_000,
+      timeoutMsg: "turning remote access off was not saved",
+    });
+    expect(savedSettings().controlServer).toBe("https://hs.example.com");
+    expect(savedSettings().authKey).toBe("hskey-auth-keep");
+
+    await remote.click();
+    await $("button=Headscale").click();
+    await expect($("#control-server")).toHaveValue("https://hs.example.com");
+    await expect($("#auth-key")).toHaveValue("hskey-auth-keep");
+
+    await $("#control-server").clearValue();
+    await $("#auth-key").clearValue();
+    await $("button=Tailscale").click();
+    await $("#device-password").clearValue();
+    await $("button=SSH key").click();
+  });
+
   it("never prefills the stock device password", async () => {
     await onAccessStep();
     await $("button=Password").click();

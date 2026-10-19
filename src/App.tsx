@@ -37,6 +37,7 @@ import { randomHex } from "@/lib/random-id";
 import { buildSummary } from "@/components/wizard-summary";
 import {
   encryptionIncomplete,
+  hasUrl,
   isCaptured,
   releaseSupportsEncryption,
 } from "@/components/encryption";
@@ -113,56 +114,74 @@ function buildAccess(
 
 function App() {
   const queryClient = useQueryClient();
-  const [sourceKind, setSourceKind] = useState<SourceKind>("aircast");
   const [selectedVersion, setSelectedVersion] = useState<string | null>(null);
-  const [localPath, setLocalPath] = useState<string | null>(null);
   const [pickedDisk, setPickedDisk] = useState<string>("");
 
-  const [fightMode, setFightMode] = useState(false);
-  const { settings, update } = useSettings();
+  const { settings, update, loaded } = useSettings();
+  const sourceKind: SourceKind = settings.useLocalImage ? "local" : "aircast";
+  const setSourceKind = (kind: SourceKind) =>
+    update({ useLocalImage: kind === "local" });
+  const localPath = settings.localImagePath;
+  const fightMode = settings.fightMode;
   const [showPassword, setShowPassword] = useState(false);
-  const [authKey, setAuthKey] = useState("");
-  const [sshMode, setSshMode] = useState<SshMode>("key-only");
-  const [devicePassword, setDevicePassword] = useState("");
+  const authKey = settings.authKey;
+  const setAuthKey = (authKey: string) => update({ authKey });
+  const sshMode: SshMode = settings.sshMode ?? "key-only";
+  const setSshMode = (sshMode: SshMode) => update({ sshMode });
+  const devicePassword = settings.devicePassword;
+  const setDevicePassword = (devicePassword: string) =>
+    update({ devicePassword });
+  const tailnetKey = settings.remoteAccess ? authKey : "";
+  const tailnetServer = settings.selfHosted ? settings.controlServer : "";
 
-  const [encryptEnabled, setEncryptEnabled] = useState(false);
-  const [tangServers, setTangServers] = useState<TangServer[]>([
+  const encryptEnabled = settings.encryption;
+  const [tangServers, setTangServerRows] = useState<TangServer[]>([
     { url: "", adv: "" },
   ]);
-  const [threshold, setThreshold] = useState(1);
-  const [cloudKeyServer, setCloudKeyServer] = useState(false);
+  const setTangServers = (servers: TangServer[]) => {
+    setTangServerRows(servers);
+    update({ tangUrls: servers.map((s) => s.url.trim()).filter((u) => u !== "") });
+  };
+  const threshold = Math.max(1, settings.tangThreshold);
+  const setThreshold = (tangThreshold: number) => update({ tangThreshold });
+  const cloudKeyServer = settings.tangCloud;
+  const setCloudKeyServer = (tangCloud: boolean) => update({ tangCloud });
   const cloudSignedIn = typeof useCloudAccount().data === "string";
   const cloudOn = cloudKeyServer && cloudSignedIn;
-  const [recoveryKey, setRecoveryKey] = useState("");
+  const [recoveryKey] = useState(() => randomHex(24));
   const [recoverySaved, setRecoverySaved] = useState(false);
+  const restoreTangServers = () => {
+    const remembered = settings.tangUrls;
+    if (remembered.length === 0 || tangServers.some(hasUrl)) return;
+    setTangServerRows(remembered.map((url) => ({ url, adv: "" })));
+    Promise.all(
+      remembered.map(async (url) => {
+        try {
+          return { url, adv: await fetchTangAdv(url) };
+        } catch {
+          return { url, adv: "" };
+        }
+      }),
+    ).then(setTangServerRows);
+  };
   const enableEncryption = (on: boolean) => {
-    setEncryptEnabled(on);
+    update({ encryption: on });
     if (!on) {
       setRecoverySaved(false);
       return;
     }
-    if (recoveryKey === "") setRecoveryKey(randomHex(24));
-    if (settings.tangCloud) setCloudKeyServer(true);
-    const remembered = settings.tangUrls;
-    if (remembered.length > 0 && tangServers.every((s) => s.url === "")) {
-      setThreshold(Math.max(1, Math.min(settings.tangThreshold || 1, remembered.length)));
-      setTangServers(remembered.map((url) => ({ url, adv: "" })));
-      Promise.all(
-        remembered.map(async (url) => {
-          try {
-            return { url, adv: await fetchTangAdv(url) };
-          } catch {
-            return { url, adv: "" };
-          }
-        }),
-      ).then(setTangServers);
-    }
+    restoreTangServers();
   };
+  useEffect(() => {
+    if (loaded && settings.encryption) restoreTangServers();
+  }, [loaded]);
 
-  const enableFightMode = (on: boolean) => {
-    setFightMode(on);
-    if (on && sshMode === "password") setSshMode("key-only");
-  };
+  const enableFightMode = (on: boolean) =>
+    update({
+      fightMode: on,
+      ...(on ? { remoteAccess: true } : {}),
+      ...(on && sshMode === "password" ? { sshMode: "key-only" as const } : {}),
+    });
 
   const password = settings.wifiPassword;
   const setPassword = (wifiPassword: string) => update({ wifiPassword });
@@ -369,13 +388,6 @@ function App() {
       return encryption;
     },
     onSuccess: (_result, vars) => {
-      if (vars.encryption) {
-        update({
-          tangUrls: vars.encryption.tangServers.map((s) => s.url),
-          tangThreshold: vars.encryption.threshold,
-          tangCloud: vars.cloudKeyServer,
-        });
-      }
       const written = vars.hostname.trim();
       if (written === "" || settings.flashedHostnames.includes(written)) return;
       update({
@@ -415,7 +427,7 @@ function App() {
     sourceReady &&
     selectedDisk !== "" &&
     !cardTooSmall &&
-    !fightModeUnreachable(fightMode, authKey, controlServer) &&
+    !fightModeUnreachable(fightMode, tailnetKey, tailnetServer) &&
     !encryptionIncomplete({
       enabled: encrypting,
       servers: tangServers,
@@ -424,7 +436,7 @@ function App() {
       recoverySaved,
     });
 
-  const remoteEnrolled = authKey.trim() !== "";
+  const remoteEnrolled = tailnetKey.trim() !== "";
   const detectedKeys = sshKeysQuery.data ?? [];
   const sshKey =
     settings.authorizedKey ??
@@ -442,8 +454,8 @@ function App() {
     hostname,
     ssid,
     noWifi,
-    authKey,
-    controlServer,
+    authKey: tailnetKey,
+    controlServer: tailnetServer,
     sshMode,
     sshKey,
     detectedKeys,
@@ -456,10 +468,7 @@ function App() {
 
   async function handlePickLocal() {
     const path = await pickLocalImage();
-    if (path) {
-      setLocalPath(path);
-      setSourceKind("local");
-    }
+    if (path) update({ localImagePath: path, useLocalImage: true });
   }
 
   function handleFlash() {
@@ -481,10 +490,10 @@ function App() {
     const trimmedHostname = hostname.trim();
 
     const tailscale: TailscaleConfig | null = joinsTailnet(
-      authKey,
-      controlServer,
+      tailnetKey,
+      tailnetServer,
     )
-      ? { controlServer: controlServer.trim(), authKey: authKey.trim() }
+      ? { controlServer: tailnetServer.trim(), authKey: tailnetKey.trim() }
       : null;
 
     const access = buildAccess(sshMode, sshKey, devicePassword);
@@ -638,6 +647,10 @@ function App() {
                 onControlServer: setControlServer,
                 authKey,
                 onAuthKey: setAuthKey,
+                enabled: settings.remoteAccess,
+                onEnabled: (remoteAccess) => update({ remoteAccess }),
+                selfHosted: settings.selfHosted,
+                onSelfHosted: (selfHosted) => update({ selfHosted }),
               }}
               access={{
                 sshMode,

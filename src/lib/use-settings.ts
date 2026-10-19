@@ -1,4 +1,5 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
+import { useMutation, useQuery } from "@tanstack/react-query";
 
 import { readSettings, updateSettings } from "@/api";
 import type { Settings } from "@/types";
@@ -18,26 +19,38 @@ const EMPTY: Settings = {
   tangUrls: [],
   tangThreshold: 1,
   tangCloud: false,
+  authKey: "",
+  remoteAccess: false,
+  selfHosted: false,
+  sshMode: null,
+  devicePassword: "",
+  fightMode: false,
+  encryption: false,
+  useLocalImage: false,
+  localImagePath: null,
 };
 
 export function useSettings(): {
   settings: Settings;
   update: (patch: Partial<Settings>) => void;
+  loaded: boolean;
 } {
-  const queryClient = useQueryClient();
   const query = useQuery({
     queryKey: KEY,
     queryFn: readSettings,
     staleTime: Infinity,
   });
+  const [edited, setEdited] = useState<Settings | undefined>(undefined);
+  const current = edited ?? query.data;
 
   const persist = useMutation({ mutationFn: updateSettings });
 
   return {
-    settings: query.data ?? EMPTY,
+    settings: current ?? EMPTY,
+    loaded: current !== undefined,
     update: (patch) => {
-      if (query.data === undefined) return;
-      queryClient.setQueryData<Settings>(KEY, { ...query.data, ...patch });
+      if (current === undefined) return;
+      setEdited((prev) => ({ ...(prev ?? current), ...patch }));
       persist.mutate(patch);
     },
   };

@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 
+use flasher_core::SshMode;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
 
@@ -20,6 +21,15 @@ pub struct Settings {
     pub tang_urls: Vec<String>,
     pub tang_threshold: u32,
     pub tang_cloud: bool,
+    pub auth_key: String,
+    pub remote_access: bool,
+    pub self_hosted: bool,
+    pub ssh_mode: Option<SshMode>,
+    pub device_password: String,
+    pub fight_mode: bool,
+    pub encryption: bool,
+    pub use_local_image: bool,
+    pub local_image_path: Option<String>,
 }
 
 const E2E_CONFIG_DIR: &str = "FLASHER_E2E_CONFIG_DIR";
@@ -177,6 +187,15 @@ mod tests {
             tang_urls: vec!["http://10.0.0.5".into()],
             tang_threshold: 1,
             tang_cloud: false,
+            auth_key: "hskey-auth-abc".into(),
+            remote_access: true,
+            self_hosted: true,
+            ssh_mode: Some(SshMode::Password),
+            device_password: "drone-pass".into(),
+            fight_mode: true,
+            encryption: true,
+            use_local_image: true,
+            local_image_path: Some("/tmp/aircast.img".into()),
         }
     }
 

@@ -1,4 +1,3 @@
-import { useState } from "react";
 import { Globe, Lock, SquareTerminal, Swords } from "lucide-react";
 
 import { StepShell } from "@/components/step-shell";
@@ -31,8 +30,13 @@ import {
 
 type RemoteAccessInputs = Pick<
   RemoteAccessProps,
-  "controlServer" | "onControlServer" | "authKey" | "onAuthKey"
->;
+  | "controlServer"
+  | "onControlServer"
+  | "authKey"
+  | "onAuthKey"
+  | "selfHosted"
+  | "onSelfHosted"
+> & { enabled: boolean; onEnabled: (v: boolean) => void };
 
 type DeviceAccessInputs = Pick<
   DeviceAccessProps,
@@ -63,18 +67,15 @@ export function StepAccess({
   onBack: () => void;
   onNext: () => void;
 }) {
-  const [selfHosted, setSelfHosted] = useState(
-    () => remote.controlServer.trim() !== "",
-  );
-  const [remoteOn, setRemoteOn] = useState(
-    () => fight.enabled || remote.authKey.trim() !== "",
-  );
+  const { enabled: remoteOn, onEnabled: onRemoteOn, ...remoteFields } = remote;
+  const tailnetKey = remoteOn ? remote.authKey : "";
+  const tailnetServer = remote.selfHosted ? remote.controlServer : "";
 
   const controlServerValid = isValidControlServer(remote.controlServer);
   const controlServerMissing = needsControlServer(
-    selfHosted,
+    remote.selfHosted,
     remote.controlServer,
-    remote.authKey,
+    tailnetKey,
   );
 
   const sshKeyInvalid =
@@ -84,18 +85,8 @@ export function StepAccess({
     isWeakDevicePassword(access.devicePassword);
   const encryptionPending = encryptionIncomplete(encryption);
   const unreachable =
-    fightModeUnreachable(fight.enabled, remote.authKey, remote.controlServer) ||
+    fightModeUnreachable(fight.enabled, tailnetKey, tailnetServer) ||
     (fight.enabled && controlServerMissing);
-
-  const toggleRemote = (on: boolean) => {
-    setRemoteOn(on);
-    if (!on) remote.onAuthKey("");
-  };
-
-  const toggleFight = (on: boolean) => {
-    if (on) setRemoteOn(true);
-    fight.onEnabled(on);
-  };
 
   return (
     <StepShell
@@ -139,22 +130,20 @@ export function StepAccess({
           description={
             fight.enabled
               ? "The only way in while fight mode is on"
-              : `Reach it from anywhere over ${selfHosted ? "Headscale" : "Tailscale"}`
+              : `Reach it from anywhere over ${remote.selfHosted ? "Headscale" : "Tailscale"}`
           }
           action={
             <Switch
               aria-label="Remote access"
               checked={remoteOn}
               disabled={fight.enabled}
-              onCheckedChange={toggleRemote}
+              onCheckedChange={onRemoteOn}
             />
           }
         >
           {remoteOn ? (
             <RemoteAccessSection
-              {...remote}
-              selfHosted={selfHosted}
-              onSelfHosted={setSelfHosted}
+              {...remoteFields}
               controlServerValid={controlServerValid}
               controlServerMissing={controlServerMissing}
             />
@@ -189,7 +178,7 @@ export function StepAccess({
             <Switch
               aria-label="Fight mode"
               checked={fight.enabled}
-              onCheckedChange={toggleFight}
+              onCheckedChange={fight.onEnabled}
             />
           }
         >

@@ -157,6 +157,15 @@ export interface Settings {
   tangUrls: string[];
   tangThreshold: number;
   tangCloud: boolean;
+  authKey: string;
+  remoteAccess: boolean;
+  selfHosted: boolean;
+  sshMode: SshMode | null;
+  devicePassword: string;
+  fightMode: boolean;
+  encryption: boolean;
+  useLocalImage: boolean;
+  localImagePath: string | null;
 }
 
 export interface SshKeyIdentity {
