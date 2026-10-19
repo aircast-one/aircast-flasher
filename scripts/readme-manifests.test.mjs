@@ -7,7 +7,7 @@ const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), "utf
 const manifestPaths = (text) => new Set(text.match(/\/[a-z]+\/(?:releases|latest)\.json/g) ?? []);
 
 const fetchedByCode = new Set([
-  ...manifestPaths(read("src-tauri/src/flasher/releases.rs")),
+  ...manifestPaths(read("crates/flasher-ops/src/releases.rs")),
   ...manifestPaths(read("scripts/configure-updater.mjs")),
   ...manifestPaths(read(".github/workflows/desktop-release.yml")),
 ]);
