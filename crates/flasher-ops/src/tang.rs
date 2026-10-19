@@ -30,11 +30,12 @@ fn validate_adv(body: &str) -> Result<(), String> {
     let v: serde_json::Value =
         serde_json::from_str(body).map_err(|_| "Tang advertisement is not JSON".to_string())?;
     let has_payload = v.get("payload").and_then(|p| p.as_str()).is_some();
-    let has_sigs = v
+    let flattened = v.get("signature").and_then(|s| s.as_str()).is_some();
+    let general = v
         .get("signatures")
         .and_then(|s| s.as_array())
         .is_some_and(|a| !a.is_empty());
-    if has_payload && has_sigs {
+    if has_payload && (flattened || general) {
         Ok(())
     } else {
         Err("response is not a Tang advertisement (no payload/signatures)".into())
@@ -53,10 +54,17 @@ mod tests {
     }
 
     #[test]
+    fn accepts_the_flattened_advertisement_tangd_serves() {
+        let adv = r#"{"payload":"eyJrZXlzIjpbXX0","protected":"eyJhbGciOiJFUzUxMiJ9","signature":"abc"}"#;
+        assert!(validate_adv(adv).is_ok());
+    }
+
+    #[test]
     fn rejects_non_advertisement_responses() {
         assert!(validate_adv("<html>404</html>").is_err());
         assert!(validate_adv(r#"{"payload":"x"}"#).is_err());
         assert!(validate_adv(r#"{"signatures":[{"signature":"a"}]}"#).is_err());
         assert!(validate_adv(r#"{"payload":"x","signatures":[]}"#).is_err());
+        assert!(validate_adv(r#"{"signature":"a","protected":"e30"}"#).is_err());
     }
 }
