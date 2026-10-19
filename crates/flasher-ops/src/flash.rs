@@ -1,6 +1,5 @@
 use super::check_available_space;
 use super::devices::list_block_devices;
-use super::emit_flash_progress;
 use super::fits_on_card;
 #[cfg(target_os = "windows")]
 use super::hidden_command;
@@ -9,132 +8,63 @@ use super::randbits;
 use super::validate_disk_path;
 use super::validate_fight_access;
 use super::validate_image_file;
-use super::AppHandle;
 use super::Arc;
 use super::AtomicBool;
 use super::FlashPhase;
+use super::FlashProgress;
 use super::FlashSpeed;
-use super::FlasherState;
 use super::Ordering;
 use super::ProvisionConfig;
 use super::Read;
-use super::TailscaleConfig;
-use super::WifiConfig;
 use super::HELPER_ABORT_GRACE;
 use super::MIN_TEMP_SPACE_BYTES;
 use super::PROGRESS_THROTTLE_MS;
-use crate::telemetry;
 use std::io::Write as _;
 
+#[derive(Debug, Clone)]
+pub enum FlashEvent {
+    Progress(FlashProgress),
+    Stage { stage: &'static str, bytes: u64 },
+    Diag(String),
+}
+
+pub type FlashEvents = Arc<dyn Fn(FlashEvent) + Send + Sync>;
+
 #[derive(Default)]
-struct FlashTrace {
-    image_bytes: u64,
-    compressed: bool,
-    decompress_ms: Option<u64>,
+pub struct FlashTrace {
+    pub image_bytes: u64,
+    pub compressed: bool,
+    pub decompress_ms: Option<u64>,
 }
 
-#[tauri::command]
-#[allow(clippy::too_many_arguments)]
+fn progress(
+    events: &FlashEvents,
+    phase: FlashPhase,
+    done: u64,
+    total: u64,
+    percent: f64,
+    bps: u64,
+) {
+    events(FlashEvent::Progress(FlashProgress {
+        phase,
+        bytes_processed: done,
+        total_bytes: total,
+        percent,
+        speed_bps: bps,
+    }));
+}
+
 pub async fn flash_image(
-    app_handle: AppHandle,
-    state: tauri::State<'_, FlasherState>,
-    job_id: String,
-    image_path: String,
-    target_disk: String,
-    wifi: Option<WifiConfig>,
-    hostname: Option<String>,
-    tailscale: Option<TailscaleConfig>,
-    access: Option<flasher_core::AccessConfig>,
-    encryption: Option<flasher_core::EncryptionConfig>,
-    fight_mode: bool,
-    init_format: flasher_core::InitFormat,
-) -> Result<(), String> {
-    let config = ProvisionConfig {
-        hostname,
-        wifi,
-        tailscale,
-        access,
-        encryption,
-        fight_mode,
-        init_format,
-    };
-    let facts = telemetry::describe_config(&config);
-    let phases = Arc::new(std::sync::Mutex::new(telemetry::PhaseLog::default()));
-    let cancelled = state.user_cancel.clone();
-    let started = std::time::Instant::now();
-    let mut trace = FlashTrace::default();
-
-    let result = flash_image_inner(
-        &app_handle,
-        &state,
-        &config,
-        image_path,
-        target_disk,
-        phases.clone(),
-        &mut trace,
-    )
-    .await;
-
-    let end = std::time::Instant::now();
-    let duration_ms = started.elapsed().as_millis() as u64;
-    let log = phases.lock().expect("phase log poisoned");
-    let write_ms = log.duration_ms("write", end);
-    let outcome = match &result {
-        Ok(()) => "success",
-        Err(_) if cancelled.load(Ordering::SeqCst) => "cancelled",
-        Err(_) => "failed",
-    };
-    let failed_at = result.as_ref().err().map(|_| {
-        log.last_stage()
-            .unwrap_or(if trace.decompress_ms.is_some() {
-                "launch"
-            } else if trace.compressed {
-                "decompress"
-            } else {
-                "prepare"
-            })
-    });
-
-    telemetry::record(
-        &app_handle,
-        &telemetry::FlashEvent {
-            envelope: telemetry::Envelope::new(
-                "flash",
-                job_id,
-                &app_handle,
-                outcome,
-                duration_ms,
-                result.as_ref().err().cloned(),
-            ),
-            config: facts,
-            image_bytes: trace.image_bytes,
-            compressed: trace.compressed,
-            verified: log.saw("verify"),
-            failed_at,
-            decompress_ms: trace.decompress_ms,
-            write_ms,
-            verify_ms: log.duration_ms("verify", end),
-            customize_ms: log.duration_ms("customize", end),
-            write_mbps: write_ms.and_then(|ms| telemetry::mbps(trace.image_bytes, ms)),
-            diag: (result.is_err() && !log.diag.is_empty()).then(|| log.diag.clone()),
-        },
-    );
-
-    result
-}
-
-async fn flash_image_inner(
-    app_handle: &AppHandle,
-    state: &tauri::State<'_, FlasherState>,
     config: &ProvisionConfig,
-    image_path: String,
-    target_disk: String,
-    phases: Arc<std::sync::Mutex<telemetry::PhaseLog>>,
+    image_path: &str,
+    target_disk: &str,
+    cancel: Arc<AtomicBool>,
+    events: FlashEvents,
     trace: &mut FlashTrace,
 ) -> Result<(), String> {
-    validate_disk_path(&target_disk)?;
+    validate_disk_path(target_disk)?;
     validate_fight_access(config)?;
-    let src_path = validate_image_file(std::path::Path::new(&image_path))?;
+    let src_path = validate_image_file(std::path::Path::new(image_path))?;
 
     let devices = list_block_devices().await?;
     let Some(card) = devices.iter().find(|d| d.path == target_disk) else {
@@ -144,10 +74,6 @@ async fn flash_image_inner(
     };
     let card_size = card.size;
     let card_label = format!("{} ({})", card.name, card.size_human);
-
-    state.user_cancel.store(false, Ordering::SeqCst);
-    state.cancel.store(false, Ordering::SeqCst);
-    let cancel = state.cancel.clone();
 
     let temp_dir = private_temp_dir()?;
 
@@ -180,18 +106,17 @@ async fn flash_image_inner(
     let _ = std::fs::remove_file(&ready_file);
 
     let helper = tokio::spawn(run_elevated_flash(
-        app_handle.clone(),
-        target_disk.clone(),
+        target_disk.to_string(),
         write_path.clone(),
         ready_file.clone(),
         provision_b64,
-        phases,
+        events.clone(),
         cancel.clone(),
     ));
 
     let prepared = if trace.compressed {
         let unpack_started = std::time::Instant::now();
-        decompress(app_handle, &src_path, &write_path, &lower, cancel.clone())
+        decompress(&events, &src_path, &write_path, &lower, cancel.clone())
             .await
             .map(|_| {
                 trace.decompress_ms = Some(unpack_started.elapsed().as_millis() as u64);
@@ -209,7 +134,7 @@ async fn flash_image_inner(
     let result = match prepared {
         Ok(total) => {
             let _ = std::fs::write(&ready_file, "ok");
-            emit_flash_progress(app_handle, FlashPhase::Writing, 0, total, 0.0, 0);
+            progress(&events, FlashPhase::Writing, 0, total, 0.0, 0);
             helper
                 .await
                 .unwrap_or_else(|e| Err(format!("Elevated flash task failed: {e}")))
@@ -256,12 +181,11 @@ fn phase_from_stage(stage: &str) -> Option<FlashPhase> {
 }
 
 async fn run_elevated_flash(
-    app_handle: AppHandle,
     target_disk: String,
     image: std::path::PathBuf,
     ready_file: std::path::PathBuf,
     provision_b64: String,
-    phases: Arc<std::sync::Mutex<telemetry::PhaseLog>>,
+    events: FlashEvents,
     cancel: Arc<AtomicBool>,
 ) -> Result<(), String> {
     let exe = std::env::current_exe().map_err(|e| format!("Failed to find current exe: {e}"))?;
@@ -274,7 +198,7 @@ async fn run_elevated_flash(
     std::fs::File::create(&progress_file)
         .map_err(|e| format!("Failed to create progress file: {e}"))?;
 
-    let app = app_handle.clone();
+    let tail_events = events.clone();
     let pf_for_tail = progress_file.clone();
     let stop = Arc::new(AtomicBool::new(false));
     let stop_tail = stop.clone();
@@ -293,19 +217,18 @@ async fn run_elevated_flash(
                         }
                         if let Ok(v) = serde_json::from_str::<serde_json::Value>(line) {
                             if let Some(d) = v.get("diag").and_then(|x| x.as_str()) {
-                                if let Ok(mut log) = phases.lock() {
-                                    log.diag.push(d.to_string());
-                                }
+                                tail_events(FlashEvent::Diag(d.to_string()));
                                 continue;
                             }
                             let stage = v.get("stage").and_then(|x| x.as_str());
                             let done = v.get("done").and_then(|x| x.as_u64()).unwrap_or(0);
                             let total = v.get("total").and_then(|x| x.as_u64()).unwrap_or(0);
                             if let Some(stage) = stage {
-                                if let (Some(label), Ok(mut log)) =
-                                    (stage_label(stage), phases.lock())
-                                {
-                                    log.mark(label, done);
+                                if let Some(label) = stage_label(stage) {
+                                    tail_events(FlashEvent::Stage {
+                                        stage: label,
+                                        bytes: done,
+                                    });
                                 }
                                 if let Some(phase) = phase_from_stage(stage) {
                                     let percent = if total > 0 {
@@ -314,7 +237,7 @@ async fn run_elevated_flash(
                                         0.0
                                     };
                                     let bps = speed.sample(phase, done);
-                                    emit_flash_progress(&app, phase, done, total, percent, bps);
+                                    progress(&tail_events, phase, done, total, percent, bps);
                                 }
                             }
                         }
@@ -432,6 +355,47 @@ fn sweep_provision_files_in(dir: &std::path::Path, max_age: std::time::Duration)
     }
 }
 
+#[cfg(unix)]
+fn helper_args(
+    target_disk: &str,
+    image: &std::path::Path,
+    progress_file: &std::path::Path,
+    provision_file: &str,
+    ready_file: &std::path::Path,
+) -> Vec<String> {
+    [
+        "--flash-helper",
+        "--device",
+        target_disk,
+        "--image",
+        &image.to_string_lossy(),
+        "--progress-file",
+        &progress_file.to_string_lossy(),
+        "--provision-file",
+        provision_file,
+        "--image-ready-file",
+        &ready_file.to_string_lossy(),
+    ]
+    .iter()
+    .map(|arg| arg.to_string())
+    .collect()
+}
+
+#[cfg(unix)]
+fn running_as_root() -> bool {
+    unsafe { libc::geteuid() == 0 }
+}
+
+#[cfg(unix)]
+async fn run_helper_directly(exe: &std::path::Path, args: &[String]) -> Result<bool, String> {
+    tokio::process::Command::new(exe)
+        .args(args)
+        .status()
+        .await
+        .map(|status| status.success())
+        .map_err(|e| format!("Failed to launch the flash helper: {e}"))
+}
+
 #[cfg(target_os = "macos")]
 async fn launch_helper(
     exe: &std::path::Path,
@@ -443,39 +407,25 @@ async fn launch_helper(
 ) -> Result<bool, String> {
     use crate::macos_auth::Authorization;
 
-    let exe = exe.to_string_lossy().to_string();
-    let device = target_disk.to_string();
-    let image = image.to_string_lossy().to_string();
-    let pf = progress_file.to_string_lossy().to_string();
-    let provision = provision_file.to_string();
-    let ready = ready_file.to_string_lossy().to_string();
+    let args = helper_args(
+        target_disk,
+        image,
+        progress_file,
+        provision_file,
+        ready_file,
+    );
+    if running_as_root() {
+        return run_helper_directly(exe, &args).await;
+    }
 
+    let exe = exe.to_string_lossy().to_string();
     tokio::task::spawn_blocking(move || -> Result<bool, String> {
         let auth = Authorization::new()?;
-        match auth.execute(
-            &exe,
-            &[
-                "--flash-helper",
-                "--device",
-                &device,
-                "--image",
-                &image,
-                "--progress-file",
-                &pf,
-                "--provision-file",
-                &provision,
-                "--image-ready-file",
-                &ready,
-            ],
-        ) {
+        let args: Vec<&str> = args.iter().map(String::as_str).collect();
+        match auth.execute(&exe, &args) {
             Ok(_) => Ok(true),
-            Err(e) => {
-                if e.contains("Authentication cancelled") {
-                    Err(e)
-                } else {
-                    Ok(false)
-                }
-            }
+            Err(e) if e.contains("Authentication cancelled") => Err(e),
+            Err(_) => Ok(false),
         }
     })
     .await
@@ -491,21 +441,19 @@ async fn launch_helper(
     provision_file: &str,
     ready_file: &std::path::Path,
 ) -> Result<bool, String> {
+    let args = helper_args(
+        target_disk,
+        image,
+        progress_file,
+        provision_file,
+        ready_file,
+    );
+    if running_as_root() {
+        return run_helper_directly(exe, &args).await;
+    }
     let status = tokio::process::Command::new("pkexec")
         .arg(exe)
-        .args([
-            "--flash-helper",
-            "--device",
-            target_disk,
-            "--image",
-            &image.to_string_lossy(),
-            "--progress-file",
-            &progress_file.to_string_lossy(),
-            "--provision-file",
-            provision_file,
-            "--image-ready-file",
-            &ready_file.to_string_lossy(),
-        ])
+        .args(&args)
         .status()
         .await
         .map_err(|e| format!("Failed to launch elevated flasher via pkexec: {e}"))?;
@@ -558,18 +506,18 @@ fn ps_escape(s: &str) -> String {
     s.replace('\'', "''")
 }
 
-pub(crate) async fn decompress(
-    app_handle: &AppHandle,
+async fn decompress(
+    events: &FlashEvents,
     src: &std::path::Path,
     dst: &std::path::Path,
     lower_name: &str,
     cancel: Arc<AtomicBool>,
 ) -> Result<u64, String> {
-    emit_flash_progress(app_handle, FlashPhase::Decompressing, 0, 0, 0.0, 0);
+    progress(events, FlashPhase::Decompressing, 0, 0, 0.0, 0);
 
     let src = src.to_path_buf();
     let dst = dst.to_path_buf();
-    let app_handle = app_handle.clone();
+    let events = events.clone();
     let is_gz = lower_name.ends_with(".gz");
 
     tokio::task::spawn_blocking(move || {
@@ -601,19 +549,12 @@ pub(crate) async fn decompress(
                 .map_err(|e| format!("Write error: {e}"))?;
             bytes_written += n as u64;
             if last_emit.elapsed().as_millis() >= PROGRESS_THROTTLE_MS {
-                emit_flash_progress(
-                    &app_handle,
-                    FlashPhase::Decompressing,
-                    bytes_written,
-                    0,
-                    0.0,
-                    0,
-                );
+                progress(&events, FlashPhase::Decompressing, bytes_written, 0, 0.0, 0);
                 last_emit = std::time::Instant::now();
             }
         }
-        emit_flash_progress(
-            &app_handle,
+        progress(
+            &events,
             FlashPhase::Decompressing,
             bytes_written,
             bytes_written,
@@ -626,18 +567,11 @@ pub(crate) async fn decompress(
     .map_err(|e| format!("Decompress task failed: {e}"))?
 }
 
-#[tauri::command]
-pub async fn cancel_flash(state: tauri::State<'_, FlasherState>) -> Result<(), String> {
-    state.user_cancel.store(true, Ordering::SeqCst);
-    state.cancel.store(true, Ordering::SeqCst);
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::flasher::isolated_dir;
-    use crate::flasher::MIN_CARD_BYTES;
+    use crate::isolated_dir;
+    use crate::MIN_CARD_BYTES;
 
     #[test]
     fn card_check_uses_the_decompressed_size() {

@@ -12,8 +12,6 @@ fn probe_client() -> &'static reqwest::Client {
 }
 
 const LAN_PROBE_TIMEOUT: Duration = Duration::from_secs(8);
-
-#[tauri::command]
 pub async fn probe_device(url: String) -> bool {
     probe_client()
         .get(format!("{url}/healthz"))
@@ -34,8 +32,6 @@ fn login_error(e: &reqwest::Error) -> String {
             .to_string()
     }
 }
-
-#[tauri::command]
 pub async fn tailscale_login(url: String) -> Result<String, String> {
     #[derive(serde::Deserialize)]
     struct ConnectResponse {
@@ -65,8 +61,6 @@ pub struct TailscaleState {
     pub connected: bool,
     pub name: String,
 }
-
-#[tauri::command]
 pub async fn tailscale_status(url: String) -> Result<TailscaleState, String> {
     #[derive(serde::Deserialize)]
     #[serde(rename_all = "camelCase")]
@@ -100,8 +94,6 @@ pub async fn tailscale_status(url: String) -> Result<TailscaleState, String> {
         name,
     })
 }
-
-#[tauri::command]
 pub async fn set_device_control_server(url: String, control_server: String) -> Result<(), String> {
     probe_client()
         .put(format!("{url}/api/tailscale/control"))
@@ -114,45 +106,7 @@ pub async fn set_device_control_server(url: String, control_server: String) -> R
         .map_err(|e| login_error(&e))
         .map(|_| ())
 }
-
-#[tauri::command]
-pub async fn open_device_window(
-    app: tauri::AppHandle,
-    url: String,
-    title: String,
-) -> Result<(), String> {
-    use tauri::Manager;
-
-    let label = format!(
-        "device-{}",
-        title
-            .chars()
-            .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
-            .collect::<String>()
-    );
-
-    if let Some(existing) = app.get_webview_window(&label) {
-        let _ = existing.unminimize();
-        let _ = existing.show();
-        return existing.set_focus().map_err(|e| e.to_string());
-    }
-
-    let target = url
-        .parse()
-        .map_err(|_| format!("Not a valid address: {url}"))?;
-
-    tauri::WebviewWindowBuilder::new(&app, &label, tauri::WebviewUrl::External(target))
-        .title(title)
-        .inner_size(1100.0, 760.0)
-        .min_inner_size(700.0, 500.0)
-        .build()
-        .map(|_| ())
-        .map_err(|e| e.to_string())
-}
-
 const PEER_PROBE_TIMEOUT: Duration = Duration::from_secs(5);
-
-#[tauri::command]
 pub async fn probe_devices(urls: Vec<String>) -> Vec<String> {
     let probes = urls.into_iter().map(|url| {
         tokio::spawn(async move {
@@ -213,7 +167,7 @@ fn tailscale_cli() -> std::path::PathBuf {
 
 #[cfg(target_os = "windows")]
 fn cli_command(program: &std::path::Path) -> tokio::process::Command {
-    crate::flasher::hidden_command(&program.to_string_lossy())
+    crate::hidden_command(&program.to_string_lossy())
 }
 
 #[cfg(not(target_os = "windows"))]
@@ -273,8 +227,6 @@ pub struct TailnetPeer {
     pub ip: String,
     pub same_tailnet: bool,
 }
-
-#[tauri::command]
 pub async fn local_tailscale() -> LocalTailscale {
     #[derive(serde::Deserialize)]
     struct CliStatus {
@@ -387,15 +339,13 @@ pub async fn local_tailscale() -> LocalTailscale {
         magic_dns_suffix: tailnet.map(|t| t.magic_dns_suffix).unwrap_or_default(),
     }
 }
-
-#[tauri::command]
 pub async fn join_wifi(ssid: String, password: String) -> Result<(), String> {
     join_wifi_impl(&ssid, &password).await
 }
 
 #[cfg(target_os = "macos")]
 async fn join_wifi_impl(ssid: &str, password: &str) -> Result<(), String> {
-    let dev = crate::flasher::wifi::wifi_device_macos().await;
+    let dev = crate::wifi::wifi_device_macos().await;
     let out = tokio::process::Command::new("networksetup")
         .args(["-setairportnetwork", &dev, ssid, password])
         .output()
@@ -438,7 +388,7 @@ async fn join_wifi_impl(ssid: &str, password: &str) -> Result<(), String> {
     tokio::fs::write(&path, profile)
         .await
         .map_err(|e| e.to_string())?;
-    let add = crate::flasher::hidden_command("netsh")
+    let add = crate::hidden_command("netsh")
         .args([
             "wlan",
             "add",
@@ -452,7 +402,7 @@ async fn join_wifi_impl(ssid: &str, password: &str) -> Result<(), String> {
     if !add.status.success() {
         return Err(String::from_utf8_lossy(&add.stdout).trim().to_string());
     }
-    let connect = crate::flasher::hidden_command("netsh")
+    let connect = crate::hidden_command("netsh")
         .args(["wlan", "connect", &format!("name={ssid}")])
         .output()
         .await

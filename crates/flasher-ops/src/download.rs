@@ -1,13 +1,11 @@
 use super::filename_from_url;
 use super::http;
 use super::parse_sha256;
-use super::AppHandle;
 use super::Arc;
 use super::AtomicBool;
 use super::DownloadProgress;
 use super::DownloadResult;
 use super::Duration;
-use super::FlasherState;
 use super::Ordering;
 use super::Sha256;
 use super::BACKOFF_BASE;
@@ -17,72 +15,12 @@ use super::MAX_RETRIES;
 use super::PROGRESS_THROTTLE_MS;
 use super::SPEED_WINDOW;
 use super::STALLED_ATTEMPTS;
-use crate::telemetry;
 use futures_util::StreamExt as _;
 use sha2::Digest as _;
 use std::io::Read as _;
-use tauri::Emitter as _;
-use tauri::Manager as _;
 use tokio::io::AsyncSeekExt as _;
 use tokio::io::AsyncWriteExt as _;
 
-// ---------------------------------------------------------------------------
-// Command: download_image
-// ---------------------------------------------------------------------------
-
-#[tauri::command]
-pub async fn download_image(
-    app_handle: AppHandle,
-    state: tauri::State<'_, FlasherState>,
-    job_id: String,
-    download_url: String,
-    checksum_url: String,
-) -> Result<DownloadResult, String> {
-    let started = std::time::Instant::now();
-    let cancelled = state.user_cancel.clone();
-    let mut stats = DownloadStats::default();
-    let result =
-        download_image_inner(&app_handle, &state, download_url, checksum_url, &mut stats).await;
-    let duration_ms = started.elapsed().as_millis() as u64;
-
-    let bytes = result
-        .as_ref()
-        .ok()
-        .and_then(|r| std::fs::metadata(&r.image_path).ok().map(|m| m.len()))
-        .unwrap_or(0);
-    let cached = result.as_ref().map(|r| r.cached).unwrap_or(false);
-    let outcome = match &result {
-        Ok(_) => "success",
-        Err(_) if cancelled.load(Ordering::SeqCst) => "cancelled",
-        Err(_) => "failed",
-    };
-
-    telemetry::record(
-        &app_handle,
-        &telemetry::DownloadEvent {
-            envelope: telemetry::Envelope::new(
-                "download",
-                job_id,
-                &app_handle,
-                outcome,
-                duration_ms,
-                result.as_ref().err().cloned(),
-            ),
-            bytes,
-            cached,
-            mbps: (!cached)
-                .then(|| telemetry::mbps(bytes, stats.transfer_ms))
-                .flatten(),
-            retries: stats.retries,
-            restarts: stats.restarts,
-            resumed_bytes: stats.resumed_bytes,
-        },
-    );
-
-    result
-}
-
-/// The published checksum for a release, reduced to the bare hash.
 async fn fetch_checksum(checksum_url: &str) -> Result<String, String> {
     let raw = http()
         .get(checksum_url)
@@ -95,12 +33,6 @@ async fn fetch_checksum(checksum_url: &str) -> Result<String, String> {
     parse_sha256(raw.split_whitespace().next().unwrap_or(""))
 }
 
-/// Whether the image already on disk can stand in for a download.
-///
-/// A marker written by a previous verified download answers instantly; an
-/// older cache without one is hashed once and then given a marker, because
-/// re-hashing gigabytes on every run is what made a cached flash look like a
-/// fresh download. Anything that fails both is removed with its leftovers.
 fn reuse_cached(image_path: &std::path::Path, checksum: &str) -> Result<bool, String> {
     if marker_validates(image_path, checksum) {
         return Ok(true);
@@ -117,11 +49,6 @@ fn reuse_cached(image_path: &std::path::Path, checksum: &str) -> Result<bool, St
     Ok(false)
 }
 
-/// Stream the image, reconnecting for as long as the transfer keeps moving.
-///
-/// A link that drops repeatedly still finishes, because any progress resets the
-/// stall count; only a link that stops delivering gives up. [`MAX_RETRIES`] is
-/// the backstop for a server dribbling a byte per connection.
 async fn stream_with_retries(
     emit: &mut (dyn FnMut(&DownloadProgress) + Send),
     cancel: &Arc<AtomicBool>,
@@ -163,32 +90,21 @@ async fn stream_with_retries(
     }
 }
 
-async fn download_image_inner(
-    app_handle: &AppHandle,
-    state: &tauri::State<'_, FlasherState>,
-    download_url: String,
-    checksum_url: String,
+pub async fn download_image(
+    cache_dir: &std::path::Path,
+    download_url: &str,
+    checksum_url: &str,
+    cancel: &Arc<AtomicBool>,
+    progress: &mut (dyn FnMut(&DownloadProgress) + Send),
     stats: &mut DownloadStats,
 ) -> Result<DownloadResult, String> {
-    state.user_cancel.store(false, Ordering::SeqCst);
-    state.cancel.store(false, Ordering::SeqCst);
-    let cancel = state.cancel.clone();
+    let checksum = fetch_checksum(checksum_url).await?;
 
-    let checksum = fetch_checksum(&checksum_url).await?;
+    std::fs::create_dir_all(cache_dir).map_err(|e| format!("Failed to create cache dir: {e}"))?;
 
-    let cache_dir = app_handle
-        .path()
-        .app_cache_dir()
-        .map_err(|e| format!("Failed to resolve app cache dir: {e}"))?
-        .join("images");
-    std::fs::create_dir_all(&cache_dir).map_err(|e| format!("Failed to create cache dir: {e}"))?;
-
-    let filename = filename_from_url(&download_url);
+    let filename = filename_from_url(download_url);
     let image_path = cache_dir.join(&filename);
 
-    // A partial file from a download that died mid-flight: pick it up where it
-    // stopped. Without this, a dropped connection the retry loop could not
-    // outlast costs the whole transfer again on the next attempt.
     let resumed = resume_partial(&image_path, &checksum).await;
 
     if resumed.is_none() && image_path.exists() && reuse_cached(&image_path, &checksum)? {
@@ -204,11 +120,7 @@ async fn download_image_inner(
         None => Sink::create(&image_path).await?,
     };
 
-    let mut emit = |p: &DownloadProgress| {
-        let _ = app_handle.emit("flasher:download-progress", p);
-    };
-
-    let outcome = stream_with_retries(&mut emit, &cancel, &download_url, &mut sink, stats).await;
+    let outcome = stream_with_retries(progress, cancel, download_url, &mut sink, stats).await;
 
     if let Err(msg) = outcome {
         let _ = sink.file.flush().await;
@@ -216,8 +128,6 @@ async fn download_image_inner(
             let _ = std::fs::remove_file(&image_path);
             let _ = std::fs::remove_file(part_path(&image_path));
         } else if sink.written > 0 {
-            // Keep what arrived: the next attempt resumes from here instead of
-            // starting the whole transfer again.
             let _ = std::fs::write(
                 part_path(&image_path),
                 format!("{checksum} {}", sink.written),
@@ -235,20 +145,13 @@ async fn download_image_inner(
     let total_bytes = sink.total;
     let hasher = sink.hasher;
 
-    let _ = app_handle.emit(
-        "flasher:download-progress",
-        DownloadProgress {
-            downloaded_bytes,
-            total_bytes,
-            percent: 100.0,
-            speed_bps: 0,
-        },
-    );
+    progress(&DownloadProgress {
+        downloaded_bytes,
+        total_bytes,
+        percent: 100.0,
+        speed_bps: 0,
+    });
 
-    // Verify what we wrote against the published checksum (the hash was
-    // computed incrementally, so this costs nothing extra), then drop a marker
-    // so the next flash of this image reuses the cache without re-downloading
-    // or re-hashing.
     let actual = format!("{:x}", hasher.finalize());
     if actual != checksum.to_ascii_lowercase() {
         let _ = std::fs::remove_file(&image_path);
@@ -288,11 +191,11 @@ impl Sink {
 }
 
 #[derive(Default)]
-struct DownloadStats {
-    retries: usize,
-    restarts: usize,
-    resumed_bytes: u64,
-    transfer_ms: u64,
+pub struct DownloadStats {
+    pub retries: usize,
+    pub restarts: usize,
+    pub resumed_bytes: u64,
+    pub transfer_ms: u64,
 }
 
 enum Fail {
@@ -300,10 +203,6 @@ enum Fail {
     Fatal(String),
 }
 
-/// Reopen the leftovers of a download that died, so the next attempt continues
-/// instead of refetching gigabytes. The recorded checksum binds the partial to
-/// this exact release, and the file is truncated back to the recorded length so
-/// a half-written final chunk cannot poison the resumed hash.
 async fn resume_partial(image_path: &std::path::Path, checksum: &str) -> Option<Sink> {
     let (sha, bytes) = read_marker_file(&part_path(image_path))?;
     if bytes == 0 || !sha.eq_ignore_ascii_case(checksum) {
@@ -335,7 +234,6 @@ async fn resume_partial(image_path: &std::path::Path, checksum: &str) -> Option<
     })
 }
 
-/// SHA-256 of the first `bytes` bytes of `path`.
 fn hash_prefix(path: &std::path::Path, bytes: u64) -> std::io::Result<Sha256> {
     let mut file = std::fs::File::open(path)?;
     let mut hasher = Sha256::new();
@@ -361,13 +259,10 @@ fn percent_of(done: u64, total: u64) -> f64 {
     }
 }
 
-/// Exponential backoff, capped. No jitter: each install downloads on its own
-/// schedule, so there is no herd to spread out.
 fn backoff(stalled: usize) -> Duration {
     BACKOFF_CAP.min(BACKOFF_BASE * 2u32.saturating_pow(stalled.saturating_sub(1) as u32))
 }
 
-/// Sleep, giving up early if the flash is cancelled. Returns `false` if it was.
 async fn sleep_unless_cancelled(cancel: &Arc<AtomicBool>, total: Duration) -> bool {
     let deadline = std::time::Instant::now() + total;
     while let Some(left) = deadline.checked_duration_since(std::time::Instant::now()) {
@@ -379,8 +274,6 @@ async fn sleep_unless_cancelled(cancel: &Arc<AtomicBool>, total: Duration) -> bo
     !cancel.load(Ordering::SeqCst)
 }
 
-/// Byte offset a `206 Partial Content` response starts at, per its
-/// `Content-Range: bytes <start>-<end>/<len>` header.
 fn content_range_start(headers: &reqwest::header::HeaderMap) -> Option<u64> {
     headers
         .get(reqwest::header::CONTENT_RANGE)?
@@ -395,10 +288,6 @@ fn content_range_start(headers: &reqwest::header::HeaderMap) -> Option<u64> {
         .ok()
 }
 
-/// One attempt at streaming the image into `sink`, resuming from
-/// `sink.written` via a `Range` request. A dropped or stalled connection —
-/// what a Wi-Fi switch or cellular handover looks like — is `Transient`, so
-/// the caller retries and keeps the bytes already on disk.
 async fn stream_into(
     progress: &mut (dyn FnMut(&DownloadProgress) + Send),
     cancel: &Arc<AtomicBool>,
@@ -432,10 +321,6 @@ async fn stream_into(
         });
     }
 
-    // Where this response actually starts. A plain 200 restates the whole file;
-    // a 206 is only usable if it begins exactly where the partial file ends —
-    // a proxy answering 206 for a different range would otherwise be appended
-    // at the wrong offset and only caught by the final checksum.
     let starts_at = if response.status() == reqwest::StatusCode::PARTIAL_CONTENT {
         content_range_start(response.headers())
     } else {
@@ -523,12 +408,10 @@ fn sidecar(image_path: &std::path::Path, suffix: &str) -> std::path::PathBuf {
     std::path::PathBuf::from(name)
 }
 
-/// Sidecar for a *complete*, checksum-verified image.
 fn marker_path(image_path: &std::path::Path) -> std::path::PathBuf {
     sidecar(image_path, ".cache")
 }
 
-/// Sidecar for an *incomplete* download: how far it got, and for which release.
 fn part_path(image_path: &std::path::Path) -> std::path::PathBuf {
     sidecar(image_path, ".part")
 }
@@ -549,8 +432,6 @@ fn write_marker(image_path: &std::path::Path, checksum: &str, size: u64) {
     let _ = std::fs::write(marker_path(image_path), format!("{checksum} {size}"));
 }
 
-/// A cached image is trusted without re-hashing when a marker from a prior
-/// verified download records the same checksum and the file is still that size.
 fn marker_validates(image_path: &std::path::Path, expected: &str) -> bool {
     match (read_marker(image_path), std::fs::metadata(image_path)) {
         (Some((sha, size)), Ok(meta)) => sha.eq_ignore_ascii_case(expected) && meta.len() == size,
@@ -561,10 +442,8 @@ fn marker_validates(image_path: &std::path::Path, expected: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::flasher::isolated_dir;
+    use crate::isolated_dir;
 
-    /// Read one HTTP request head. Reads until the blank line rather than
-    /// assuming the whole head lands in a single TCP segment.
     async fn read_request(sock: &mut tokio::net::TcpStream) -> String {
         use tokio::io::AsyncReadExt;
 
@@ -579,9 +458,6 @@ mod tests {
         String::from_utf8_lossy(&head).into_owned()
     }
 
-    /// Serves BODY in two halves: the first connection dies mid-stream (what a
-    /// Wi-Fi/cellular switch does to an in-flight download), the second must
-    /// arrive with `Range: bytes=<half>-` and gets a 206 with the remainder.
     async fn flaky_server(body: &'static [u8]) -> (String, tokio::task::JoinHandle<bool>) {
         use tokio::io::AsyncWriteExt;
 
@@ -627,9 +503,6 @@ mod tests {
         (url, handle)
     }
 
-    /// Serves BODY, dying mid-stream on the first connection exactly like
-    /// [`flaky_server`], but answering the resume request with `status` and
-    /// `content_range` — the shapes a proxy or range-ignoring cache returns.
     async fn hostile_resume_server(
         body: &'static [u8],
         status: &'static str,
@@ -727,9 +600,6 @@ mod tests {
         assert!(stats.resumed_bytes > 0, "resumed bytes must be recorded");
     }
 
-    /// A 206 whose Content-Range does not start where the partial file ends
-    /// must restart, not append. Appending would corrupt the file and only be
-    /// caught by the final checksum, after the whole image was downloaded.
     #[tokio::test]
     async fn download_restarts_when_the_server_resumes_at_the_wrong_offset() {
         const BODY: &[u8] = b"aircast-image-payload-that-spans-two-http-responses";
@@ -869,17 +739,13 @@ mod tests {
         std::fs::write(&img, b"hello world").unwrap();
         let checksum = "a".repeat(64);
 
-        // No marker yet -> not trusted (forces a full verify / re-download).
         assert!(!marker_validates(&img, &checksum));
 
         write_marker(&img, &checksum, 11);
         assert!(marker_validates(&img, &checksum));
-        // Checksum comparison is case-insensitive.
         assert!(marker_validates(&img, &checksum.to_ascii_uppercase()));
-        // A different published checksum invalidates the cache.
         assert!(!marker_validates(&img, &"b".repeat(64)));
 
-        // A size change (truncation/corruption) invalidates the cache.
         std::fs::write(&img, b"hello").unwrap();
         assert!(!marker_validates(&img, &checksum));
 

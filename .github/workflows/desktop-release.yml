@@ -203,6 +203,64 @@ jobs:
           cp "$dmg" "$asset"
           gh release upload "${{ needs.setup.outputs.version }}" "$asset" --clobber -R "${{ github.repository }}"
 
+      - name: Build, sign and attach the CLI
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.PAT_TOKEN }}
+          V: ${{ needs.setup.outputs.version }}
+          OS: ${{ matrix.os }}
+          TARGETS: ${{ steps.target.outputs.rust_targets }}
+          APPLE_CERTIFICATE: ${{ matrix.os == 'macos' && secrets.APPLE_CERTIFICATE || '' }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ matrix.os == 'macos' && secrets.APPLE_CERTIFICATE_PASSWORD || '' }}
+          APPLE_SIGNING_IDENTITY: ${{ matrix.os == 'macos' && secrets.APPLE_SIGNING_IDENTITY || '' }}
+          APPLE_ID: ${{ matrix.os == 'macos' && secrets.APPLE_ID || '' }}
+          APPLE_PASSWORD: ${{ matrix.os == 'macos' && secrets.APPLE_PASSWORD || '' }}
+          APPLE_TEAM_ID: ${{ matrix.os == 'macos' && secrets.APPLE_TEAM_ID || '' }}
+        run: |
+          set -euo pipefail
+          bin=aircast-flasher-cli
+          IFS=, read -ra targets <<< "$TARGETS"
+          for t in "${targets[@]}"; do cargo build --release -p flasher-cli --target "$t"; done
+          case "$OS" in
+            macos)
+              if [ "${#targets[@]}" -gt 1 ]; then
+                lipo -create $(printf "target/%s/release/$bin " "${targets[@]}") -output "$bin"
+                arch=universal
+              else
+                cp "target/${targets[0]}/release/$bin" "$bin"
+                arch=aarch64
+              fi
+              if [ -n "$APPLE_CERTIFICATE" ]; then
+                kc="$RUNNER_TEMP/cli-signing.keychain-db"
+                pw=$(openssl rand -hex 16)
+                echo "$APPLE_CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/cli-signing.p12"
+                security create-keychain -p "$pw" "$kc"
+                security set-keychain-settings -lut 21600 "$kc"
+                security unlock-keychain -p "$pw" "$kc"
+                security import "$RUNNER_TEMP/cli-signing.p12" -P "$APPLE_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$kc"
+                security set-key-partition-list -S apple-tool:,apple: -k "$pw" "$kc" >/dev/null
+                security list-keychains -d user -s "$kc" $(security list-keychains -d user | tr -d '"')
+                codesign --force --options runtime --timestamp --sign "$APPLE_SIGNING_IDENTITY" "$bin"
+              fi
+              asset="${bin}_${V}_macos-${arch}.zip"
+              ditto -c -k --keepParent "$bin" "$asset"
+              if [ -n "$APPLE_ID" ]; then
+                xcrun notarytool submit "$asset" --apple-id "$APPLE_ID" --password "$APPLE_PASSWORD" --team-id "$APPLE_TEAM_ID" --wait
+              fi
+              ;;
+            windows)
+              cp "target/${targets[0]}/release/$bin.exe" .
+              asset="${bin}_${V}_windows-x86_64.zip"
+              pwsh -NoProfile -Command "Compress-Archive -Path '$bin.exe' -DestinationPath '$asset'"
+              ;;
+            linux)
+              cp "target/${targets[0]}/release/$bin" .
+              asset="${bin}_${V}_linux-x86_64.tar.gz"
+              tar -czf "$asset" "$bin"
+              ;;
+          esac
+          gh release upload "$V" "$asset" --clobber -R "${{ github.repository }}"
+
   mirror-to-s3:
     needs: [setup, desktop-builds]
     if: needs.desktop-builds.result == 'success'

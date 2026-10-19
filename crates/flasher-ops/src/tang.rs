@@ -1,8 +1,5 @@
 use std::time::Duration;
 
-use tauri_plugin_dialog::DialogExt;
-
-#[tauri::command]
 pub async fn fetch_tang_adv(url: String) -> Result<String, String> {
     let base = url.trim().trim_end_matches('/');
     if !(base.starts_with("http://") || base.starts_with("https://")) {
@@ -29,30 +26,6 @@ pub async fn fetch_tang_adv(url: String) -> Result<String, String> {
     validate_adv(&body)?;
     Ok(body)
 }
-
-#[tauri::command]
-pub async fn save_recovery_file(
-    app: tauri::AppHandle,
-    default_name: String,
-    contents: String,
-) -> Result<bool, String> {
-    let (tx, rx) = tokio::sync::oneshot::channel();
-    app.dialog()
-        .file()
-        .set_file_name(&default_name)
-        .add_filter("Text", &["txt"])
-        .save_file(move |path| {
-            let _ = tx.send(path);
-        });
-    let Some(path) = rx.await.map_err(|e| e.to_string())? else {
-        return Ok(false);
-    };
-    let path = path.into_path().map_err(|e| e.to_string())?;
-    std::fs::write(&path, contents)
-        .map_err(|e| format!("could not write {}: {e}", path.display()))?;
-    Ok(true)
-}
-
 fn validate_adv(body: &str) -> Result<(), String> {
     let v: serde_json::Value =
         serde_json::from_str(body).map_err(|_| "Tang advertisement is not JSON".to_string())?;

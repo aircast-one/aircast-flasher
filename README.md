@@ -115,12 +115,49 @@ crates/flasher-core/    pure, tested logic (no I/O):
   src/psk.rs              WPA-PSK derivation (PBKDF2-HMAC-SHA1)
   src/provision.rs        ProvisionPlan: cloud-init / firstrun file contents
   src/model.rs            WifiConfig · ProvisionConfig · InitFormat
+crates/flasher-ops/     everything with I/O, shared by the app and the CLI:
+  src/releases.rs · devices.rs · download.rs · flash.rs · helper.rs
+  src/tang.rs · cloud.rs · tailnet.rs · sshkeys.rs · wifi.rs · paths.rs
+crates/flasher-cli/     aircast-flasher-cli: commands, plus `mcp` for agents
 src-tauri/
-  src/flasher.rs          commands: releases, devices, download, flash, provision, cancel
-  src/macos_auth.rs       macOS Authorization Services (run dd as root)
+  src/flasher.rs          Tauri commands over flasher-ops, telemetry, save dialog
   src/main.rs             app builder, command registration
 src/                    React + TypeScript UI
 ```
+
+## CLI and MCP
+
+Every release attaches `aircast-flasher-cli` for macOS, Windows and Linux. It
+writes the same cards as the app — same image cache, same elevated helper — and
+`aircast-flasher-cli mcp` serves the same operations to agents over stdio.
+
+```sh
+aircast-flasher-cli releases
+aircast-flasher-cli cards
+aircast-flasher-cli flash --disk /dev/disk4 --hostname falcon-01 \
+  --wifi-ssid home --wifi-password '…' --tailscale-key tskey-auth-…
+aircast-flasher-cli find falcon-01
+aircast-flasher-cli devices
+aircast-flasher-cli cloud login
+```
+
+`flash` asks you to type the disk path before erasing it; `--yes` skips that,
+and without a terminal it refuses unless `--yes` is given. Writing asks for an
+administrator password unless the CLI already runs as root. Secrets can come
+from `AIRCAST_WIFI_PASSWORD`, `AIRCAST_DEVICE_PASSWORD` and
+`AIRCAST_TAILSCALE_KEY` instead of the command line. Every command takes
+`--json`.
+
+Register the MCP server with Claude Code:
+
+```sh
+claude mcp add aircast-flasher -- /path/to/aircast-flasher-cli mcp
+```
+
+It offers `list_releases`, `list_cards`, `download_image`, `flash_card`
+(which must repeat the disk in `confirmErase`), `list_devices`, `find_device`,
+`device_status`, `device_tailscale_login` and the `cloud_*` tools. A Cloud
+sign-in is kept in the Flasher config directory and shared by the CLI and MCP.
 
 ## Develop
 

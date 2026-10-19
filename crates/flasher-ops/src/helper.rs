@@ -1,25 +1,9 @@
-//! The elevated flash helper.
-//!
-//! `aircast-flasher --flash-helper ...` re-executes this same binary inside one
-//! elevated process (Touch ID on macOS, UAC on Windows, pkexec on Linux). That
-//! process opens the raw device as root/admin, holds it open for the entire
-//! write → verify → customize operation, and runs [`flasher_core::engine::flash`]
-//! over it. Holding a single handle for the whole op is the crux of the design:
-//! the OS never sees the device closed mid-flight, so it can't auto-mount and
-//! dirty the freshly written FAT boot partition.
-//!
-//! Progress is reported as JSON lines to both the `--progress-file` and stdout:
-//! `{"stage":"write|verify|customize","done":N,"total":M}`, with a final
-//! `{"stage":"done"}` on success or `{"error":"..."}` on failure. Exit 0 = ok.
-
 use std::io::Write;
 
 use base64::Engine as _;
 use flasher_core::engine::{self, FlashParams, FlashStage};
 use flasher_core::{AlignedDevice, ProvisionConfig};
 
-/// Entry point for the `--flash-helper` re-exec. Parses args, opens the device,
-/// runs the engine, reports progress, and exits the process (never returns).
 pub fn run_flash_helper() -> ! {
     let args: Vec<String> = std::env::args().collect();
     let get = |flag: &str| -> Option<String> {
@@ -46,7 +30,6 @@ pub fn run_flash_helper() -> ! {
             }
         };
 
-    // Append a single JSON line to the progress file AND stdout (best-effort).
     let started = std::time::Instant::now();
     let append = move |line: &str| {
         if let Ok(mut f) = std::fs::OpenOptions::new()
@@ -69,9 +52,6 @@ pub fn run_flash_helper() -> ! {
         }
     };
 
-    // The provision blob carries secrets (device password, Tailscale key) so it
-    // is passed by file path, not on the command line where `ps` could read it.
-    // Read it once, then remove the file so it doesn't linger.
     let provision_b64 = match std::fs::read_to_string(&provision_file) {
         Ok(s) => {
             let _ = std::fs::remove_file(&provision_file);
@@ -107,8 +87,6 @@ pub fn run_flash_helper() -> ! {
     }
 }
 
-/// Decode config, open + probe the device FIRST (fail fast, before the main
-/// process finishes decompressing), then wait for the image and run the engine.
 fn flash(
     device: &str,
     image: &str,
@@ -135,8 +113,6 @@ fn flash(
         ));
     };
 
-    // Open the raw device for this OS, wrap in AlignedDevice, run the engine,
-    // then eject/flush. The device handle is held open the whole time.
     append("{\"stage\":\"device\",\"done\":0,\"total\":0}");
     diag(&format!("opening device {device}"));
     let result = open_and_run(
@@ -149,13 +125,11 @@ fn flash(
         diag,
     );
 
-    // Best-effort eject/finalize regardless of outcome.
     eject(device);
 
     result
 }
 
-/// Per-OS: open the raw device, wrap in AlignedDevice, drive the flash.
 fn open_and_run(
     device: &str,
     image: &str,
@@ -190,18 +164,10 @@ fn open_and_run(
     }
 }
 
-/// Give up waiting for the decompressed image after this long. A ~3 GB xz
-/// unpacks in well under a minute on any machine that can run this app, so
-/// overshooting it means the main process died — and while we wait, a root
-/// process is holding the card's raw device open. Minutes, not half an hour.
 const IMAGE_WAIT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5 * 60);
 
-/// How often [`wait_for_image_ready`] re-reads the handshake file.
 const IMAGE_WAIT_POLL: std::time::Duration = std::time::Duration::from_millis(200);
 
-/// Probe the opened device (seek to its end and back — the exact operation that
-/// used to fail 50 seconds in), wait for the decompressed image if a ready-file
-/// handshake was requested, then run the engine.
 fn probe_wait_and_flash(
     dev: &mut dyn engine::BlockDevice,
     image: &str,
@@ -241,9 +207,6 @@ fn probe_wait_and_flash(
     engine::flash(dev, &mut image_file, &params, cfg, progress)
 }
 
-/// Poll for the ready file the main process writes after decompression:
-/// contents "ok" → proceed, anything else → the decompress failed or was
-/// cancelled, so exit without touching the card further.
 fn wait_for_image_ready(ready_file: &str, timeout: std::time::Duration) -> Result<(), String> {
     let started = std::time::Instant::now();
     loop {
@@ -263,10 +226,6 @@ fn wait_for_image_ready(ready_file: &str, timeout: std::time::Duration) -> Resul
         std::thread::sleep(IMAGE_WAIT_POLL.min(timeout));
     }
 }
-
-// ---------------------------------------------------------------------------
-// Unix `File` is a BlockDevice via fsync; provide sync over std::fs::File.
-// ---------------------------------------------------------------------------
 
 #[cfg(unix)]
 struct UnixDevice(std::fs::File);
@@ -296,11 +255,6 @@ impl std::io::Seek for UnixDevice {
 impl engine::BlockDevice for UnixDevice {
     fn sync(&mut self) -> std::io::Result<()> {
         use std::os::unix::io::AsRawFd;
-        // `File::sync_all()` issues `fcntl(F_FULLFSYNC)` on macOS, which a raw
-        // character device (`/dev/rdiskN`) rejects with ENOTTY ("Inappropriate
-        // ioctl for device"). Use a plain `fsync` like RPi Imager; and since the
-        // device is opened with `F_NOCACHE`/`O_DIRECT` (already unbuffered),
-        // tolerate ENOTTY as a successful no-op.
         let rc = unsafe { libc::fsync(self.0.as_raw_fd()) };
         if rc == 0 {
             return Ok(());
@@ -313,21 +267,12 @@ impl engine::BlockDevice for UnixDevice {
     }
 }
 
-// ---------------------------------------------------------------------------
-// macOS
-// ---------------------------------------------------------------------------
-
-/// Open `/dev/rdiskN` (the raw, unbuffered character device) with `F_NOCACHE`,
-/// after force-unmounting the whole disk. The helper runs as root, so diskutil
-/// and the open both succeed without prompting.
 #[cfg(target_os = "macos")]
 fn open_device_macos(device: &str) -> Result<UnixDevice, String> {
     use std::os::unix::io::FromRawFd;
 
-    // /dev/diskN → /dev/rdiskN (character device: direct, unbuffered I/O).
     let raw_device = device.replace("/dev/disk", "/dev/rdisk");
 
-    // Unmount the whole disk so the open succeeds and nothing dirties the FAT.
     let out = std::process::Command::new("/usr/sbin/diskutil")
         .args(["unmountDisk", "force", device])
         .output()
@@ -348,27 +293,15 @@ fn open_device_macos(device: &str) -> Result<UnixDevice, String> {
             std::io::Error::last_os_error()
         ));
     }
-    // Disable the unified buffer cache so our writes go straight to the device.
-    unsafe {
-        if libc::fcntl(fd, libc::F_NOCACHE, 1) < 0 {
-            // Non-fatal: AlignedDevice still keeps us sector-aligned.
-        }
-    }
+    unsafe { if libc::fcntl(fd, libc::F_NOCACHE, 1) < 0 {} }
     let file = unsafe { std::fs::File::from_raw_fd(fd) };
     Ok(UnixDevice(file))
 }
 
-// ---------------------------------------------------------------------------
-// Linux
-// ---------------------------------------------------------------------------
-
-/// Unmount any mounted partitions of the device, then open it `O_RDWR | O_DIRECT`
-/// (falling back to plain `O_RDWR` if `O_DIRECT` is rejected).
 #[cfg(target_os = "linux")]
 fn open_device_linux(device: &str) -> Result<UnixDevice, String> {
     use std::os::unix::io::FromRawFd;
 
-    // Unmount partitions like /dev/sdb1.. (best-effort; helper is root).
     for n in 1..=16 {
         let part = format!("{device}{n}");
         if std::path::Path::new(&part).exists() {
@@ -378,10 +311,8 @@ fn open_device_linux(device: &str) -> Result<UnixDevice, String> {
 
     let c_path = std::ffi::CString::new(device).map_err(|e| format!("Invalid device path: {e}"))?;
 
-    // O_DIRECT bypasses the page cache (requires the AlignedDevice wrapper).
     let mut fd = unsafe { libc::open(c_path.as_ptr(), libc::O_RDWR | libc::O_DIRECT) };
     if fd < 0 {
-        // Fall back to buffered O_RDWR if the FS/device rejects O_DIRECT.
         fd = unsafe { libc::open(c_path.as_ptr(), libc::O_RDWR) };
     }
     if fd < 0 {
@@ -394,11 +325,6 @@ fn open_device_linux(device: &str) -> Result<UnixDevice, String> {
     Ok(UnixDevice(file))
 }
 
-// ---------------------------------------------------------------------------
-// Eject / finalize
-// ---------------------------------------------------------------------------
-
-/// Best-effort eject after the engine returns, so the user can pull the card.
 fn eject(device: &str) {
     #[cfg(target_os = "macos")]
     {
@@ -408,14 +334,11 @@ fn eject(device: &str) {
     }
     #[cfg(target_os = "linux")]
     {
-        // Re-read the partition table so the kernel sees the new layout, then
-        // eject. Both best-effort.
         let _ = std::process::Command::new("partprobe").arg(device).output();
         let _ = std::process::Command::new("eject").arg(device).output();
     }
     #[cfg(not(any(target_os = "macos", target_os = "linux")))]
     {
-        // Windows: the WinDevice Drop already unlocks/flushes; nothing to do.
         let _ = device;
     }
 }
@@ -448,8 +371,6 @@ mod tests {
         assert!(err.contains("image preparation aborted"), "got: {err}");
     }
 
-    /// A missing or still-empty file means the main process is mid-decompress:
-    /// wait, then give up rather than hold the card's device open forever.
     #[test]
     fn missing_ready_file_times_out_instead_of_writing() {
         let p = temp_path("timeout");

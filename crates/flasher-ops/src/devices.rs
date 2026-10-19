@@ -1,9 +1,7 @@
 use super::format_bytes;
 use super::BlockDevice;
-
-#[tauri::command]
 pub async fn list_block_devices() -> Result<Vec<BlockDevice>, String> {
-    if cfg!(feature = "wdio") {
+    if cfg!(feature = "no-real-devices") {
         return Ok(Vec::new());
     }
     #[cfg(target_os = "macos")]

@@ -1,16 +1,27 @@
+pub mod cloud;
 pub mod devices;
 pub mod download;
-pub mod encrypt;
 pub mod flash;
+pub mod helper;
+#[cfg(target_os = "macos")]
+mod macos_auth;
+pub mod paths;
 pub mod releases;
 pub mod sshkeys;
+pub mod tailnet;
+pub mod tang;
 pub mod wifi;
 
 mod types;
 mod validation;
 
-pub(crate) use types::*;
-pub(crate) use validation::*;
+pub use types::*;
+pub use validation::*;
+
+pub use flasher_core::{
+    AccessConfig, EncryptionConfig, InitFormat, ProvisionConfig, SshMode, TailscaleConfig,
+    TangServer, WifiConfig,
+};
 
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
@@ -18,9 +29,6 @@ use std::io::Read;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
-use tauri::{AppHandle, Emitter};
-
-use flasher_core::{ProvisionConfig, TailscaleConfig, WifiConfig};
 
 pub(crate) const PROGRESS_THROTTLE_MS: u128 = 100;
 pub(crate) const MIN_TEMP_SPACE_BYTES: u64 = 4_500_000_000;
@@ -48,40 +56,6 @@ pub(crate) fn http() -> &'static reqwest::Client {
             .build()
             .expect("http client: TLS backend failed to initialise")
     })
-}
-
-pub struct FlasherState {
-    pub cancel: Arc<AtomicBool>,
-    pub user_cancel: Arc<AtomicBool>,
-}
-
-impl FlasherState {
-    pub fn new() -> Self {
-        Self {
-            cancel: Arc::new(AtomicBool::new(false)),
-            user_cancel: Arc::new(AtomicBool::new(false)),
-        }
-    }
-}
-
-pub(crate) fn emit_flash_progress(
-    app_handle: &AppHandle,
-    phase: FlashPhase,
-    bytes_processed: u64,
-    total_bytes: u64,
-    percent: f64,
-    speed_bps: u64,
-) {
-    let _ = app_handle.emit(
-        "flasher:flash-progress",
-        FlashProgress {
-            phase,
-            bytes_processed,
-            total_bytes,
-            percent,
-            speed_bps,
-        },
-    );
 }
 
 #[derive(Default)]
@@ -114,7 +88,7 @@ impl FlashSpeed {
     }
 }
 
-pub(crate) fn format_bytes(bytes: u64) -> String {
+pub fn format_bytes(bytes: u64) -> String {
     let unit = byte_unit::Byte::from_u64(bytes);
     let adjusted = unit.get_appropriate_unit(byte_unit::UnitType::Decimal);
     format!("{adjusted:.1}")

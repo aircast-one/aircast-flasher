@@ -35,8 +35,6 @@ async fn fetch_releases(channel: &str) -> Result<ReleasesResponse, String> {
         })
         .map_err(|e| format!("Failed to parse releases: {e}"))
 }
-
-#[tauri::command]
 pub async fn list_releases(channel: Option<String>) -> Result<ReleasesResponse, String> {
     if let Some(ch) = channel {
         return fetch_releases(&ch).await;

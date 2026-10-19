@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use flasher_core::SshMode;
+use flasher_ops::SshMode;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
 
@@ -97,7 +97,7 @@ fn with_install_id(settings: Settings) -> Settings {
             install_id: settings
                 .install_id
                 .filter(|id| !id.is_empty())
-                .or_else(|| Some(crate::flasher::randbits())),
+                .or_else(|| Some(flasher_ops::randbits())),
             ..settings
         },
         _ => Settings {

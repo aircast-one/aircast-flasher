@@ -1,6 +1,3 @@
-// Command: SSH public keys (auto-detect + read a picked file)
-// ---------------------------------------------------------------------------
-
 #[derive(serde::Serialize)]
 pub struct SshPublicKey {
     pub label: String,
@@ -13,9 +10,6 @@ fn home_dir() -> Option<std::path::PathBuf> {
         .map(std::path::PathBuf::from)
 }
 
-/// The operator's `~/.ssh/*.pub` public keys, so the UI can offer them instead
-/// of making the user cat-and-paste. Best-effort: returns empty on any error.
-#[tauri::command]
 pub fn detect_ssh_keys() -> Vec<SshPublicKey> {
     match home_dir() {
         Some(home) => detect_ssh_keys_in(&home.join(".ssh")),
@@ -44,9 +38,6 @@ fn detect_ssh_keys_in(ssh: &std::path::Path) -> Vec<SshPublicKey> {
 
 const MAX_PUBKEY_BYTES: u64 = 64 * 1024;
 
-/// Reads a public-key file the user picked in the file dialog. Capped so a
-/// misclick on a huge file can't be slurped into memory.
-#[tauri::command]
 pub fn read_public_key(path: String) -> Result<String, String> {
     let meta = std::fs::metadata(&path).map_err(|e| format!("Cannot read key file: {e}"))?;
     if meta.len() > MAX_PUBKEY_BYTES {
@@ -57,10 +48,6 @@ pub fn read_public_key(path: String) -> Result<String, String> {
     Ok(contents.trim().to_string())
 }
 
-/// What a public key *is*, for a human about to disable password login with it.
-/// The comment (`user@host`) is the part people recognise; the fingerprint is
-/// what `ssh-keygen -lf` prints, so it can be compared against the key they
-/// believe they hold. Returns `None` for anything that is not a key.
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SshKeyIdentity {
@@ -68,8 +55,6 @@ pub struct SshKeyIdentity {
     pub comment: String,
     pub fingerprint: String,
 }
-
-#[tauri::command]
 pub fn identify_public_key(key: String) -> Option<SshKeyIdentity> {
     use base64::Engine;
     use sha2::{Digest, Sha256};
@@ -86,7 +71,6 @@ pub fn identify_public_key(key: String) -> Option<SshKeyIdentity> {
         return None;
     }
 
-    // OpenSSH prints the SHA256 digest base64'd with the padding stripped.
     let digest = Sha256::digest(&decoded);
     let encoded = base64::engine::general_purpose::STANDARD.encode(digest);
 
@@ -97,12 +81,10 @@ pub fn identify_public_key(key: String) -> Option<SshKeyIdentity> {
     })
 }
 
-// ---------------------------------------------------------------------------
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::flasher::isolated_dir;
+    use crate::isolated_dir;
 
     #[test]
     fn detect_ssh_keys_reads_pub_files_only() {
@@ -129,12 +111,10 @@ mod tests {
 
     #[test]
     fn identifies_a_public_key_the_way_ssh_keygen_does() {
-        // ssh-keygen -lf on this key prints exactly this fingerprint.
         let key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJ3z5r1sZ0K7DxHhqTn7lVXJHkiqrxKZ+i0Ck0KFqkkn operator@base";
         let id = identify_public_key(key.to_string()).expect("a key");
         assert_eq!(id.algorithm, "ssh-ed25519");
         assert_eq!(id.comment, "operator@base");
-        // Verified against `ssh-keygen -lf` on this exact key.
         assert_eq!(
             id.fingerprint,
             "SHA256:6ToLTRFTRhCceqBA4tBy84TESMsJViBkYltFaKXXP20"

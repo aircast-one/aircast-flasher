@@ -19,6 +19,11 @@ build:
 bundle:
     npm run tauri build
 
+# Build aircast-flasher-cli (the CLI and its `mcp` server)
+[group('build')]
+cli:
+    cargo build --release -p flasher-cli
+
 # Rust + frontend unit tests
 [group('test')]
 test:

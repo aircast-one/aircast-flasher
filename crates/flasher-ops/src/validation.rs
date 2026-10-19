@@ -71,10 +71,14 @@ pub(crate) fn filename_from_url(url_str: &str) -> String {
         .unwrap_or_else(|| "image.img.xz".to_string())
 }
 
-pub fn randbits() -> String {
-    let mut bytes = [0u8; 8];
+pub fn random_hex(len: usize) -> String {
+    let mut bytes = vec![0u8; len];
     getrandom::fill(&mut bytes).expect("OS randomness");
     bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+pub fn randbits() -> String {
+    random_hex(8)
 }
 
 pub(crate) fn private_temp_dir() -> Result<std::path::PathBuf, String> {

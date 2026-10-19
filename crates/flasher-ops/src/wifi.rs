@@ -2,29 +2,18 @@
 use super::hidden_command;
 use super::Serialize;
 
-// ---------------------------------------------------------------------------
-// Command: list_wifi_networks (so the user can pick instead of typing)
-// ---------------------------------------------------------------------------
-
 #[derive(Debug, Clone, Serialize)]
 pub struct WifiNetworks {
-    /// The currently-joined SSID, if any (used to prefill the form).
     pub current: Option<String>,
-    /// Selectable SSIDs: known/preferred networks on macOS (no Location
-    /// permission needed); a live scan on Linux.
     pub known: Vec<String>,
-    /// Detected 2-letter WiFi regulatory domain from the system locale, so the
-    /// user doesn't have to type it. `None` if it can't be determined.
     pub country: Option<String>,
 }
 
-/// Extract the 2-letter region from a locale like `en_US`, `ka_GE`,
-/// `en_US@rg=...`, or `zh-Hans-CN`. Returns uppercase, or None.
 fn region_from_locale(locale: &str) -> Option<String> {
     let base = locale.split('@').next().unwrap_or(locale);
     let parts: Vec<&str> = base.split(['_', '-']).filter(|s| !s.is_empty()).collect();
     if parts.len() < 2 {
-        return None; // language only, no region
+        return None;
     }
     let region = parts.last()?;
     if region.len() == 2 && region.chars().all(|c| c.is_ascii_alphabetic()) {
@@ -33,8 +22,6 @@ fn region_from_locale(locale: &str) -> Option<String> {
         None
     }
 }
-
-#[tauri::command]
 pub async fn list_wifi_networks() -> Result<WifiNetworks, String> {
     #[cfg(target_os = "macos")]
     {
@@ -60,8 +47,6 @@ pub async fn list_wifi_networks() -> Result<WifiNetworks, String> {
 
 #[cfg(target_os = "windows")]
 async fn list_wifi_windows() -> Result<WifiNetworks, String> {
-    // Known/saved networks: `netsh wlan show profiles` lists
-    //   "    All User Profile     : <NAME>"
     let known = hidden_command("netsh")
         .args(["wlan", "show", "profiles"])
         .output()
@@ -79,9 +64,6 @@ async fn list_wifi_windows() -> Result<WifiNetworks, String> {
         })
         .unwrap_or_default();
 
-    // Current SSID: `netsh wlan show interfaces` has a line
-    //   "    SSID                   : <NAME>"
-    // Careful: there is also a "BSSID" line — match the SSID line specifically.
     let current = hidden_command("netsh")
         .args(["wlan", "show", "interfaces"])
         .output()
@@ -99,7 +81,6 @@ async fn list_wifi_windows() -> Result<WifiNetworks, String> {
         })
         .filter(|s| !s.is_empty());
 
-    // Region from the user locale, e.g. "en-US" → "US".
     let country = user_locale_windows()
         .await
         .and_then(|l| region_from_locale(&l));
@@ -111,8 +92,6 @@ async fn list_wifi_windows() -> Result<WifiNetworks, String> {
     })
 }
 
-/// Best-effort user locale name on Windows (e.g. "en-US"), via PowerShell's
-/// Get-Culture, falling back to the LANG/locale env if PowerShell is missing.
 #[cfg(target_os = "windows")]
 async fn user_locale_windows() -> Option<String> {
     if let Ok(o) = hidden_command("powershell")
@@ -133,7 +112,6 @@ async fn user_locale_windows() -> Option<String> {
 
 #[cfg(target_os = "macos")]
 pub(crate) async fn wifi_device_macos() -> String {
-    // Find the Wi-Fi hardware port's device (usually en0), fall back to en0.
     if let Ok(out) = tokio::process::Command::new("networksetup")
         .arg("-listallhardwareports")
         .output()
@@ -158,7 +136,6 @@ pub(crate) async fn wifi_device_macos() -> String {
 async fn list_wifi_macos() -> Result<WifiNetworks, String> {
     let dev = wifi_device_macos().await;
 
-    // Currently-joined SSID (may be "You are not associated…").
     let current = tokio::process::Command::new("networksetup")
         .args(["-getairportnetwork", &dev])
         .output()
@@ -171,7 +148,6 @@ async fn list_wifi_macos() -> Result<WifiNetworks, String> {
         })
         .filter(|s| !s.is_empty());
 
-    // Preferred/known networks — no Location permission required.
     let known = tokio::process::Command::new("networksetup")
         .args(["-listpreferredwirelessnetworks", &dev])
         .output()
@@ -179,14 +155,13 @@ async fn list_wifi_macos() -> Result<WifiNetworks, String> {
         .map(|o| {
             String::from_utf8_lossy(&o.stdout)
                 .lines()
-                .skip(1) // "Preferred networks on enN:"
+                .skip(1)
                 .map(|l| l.trim().to_string())
                 .filter(|l| !l.is_empty())
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
 
-    // Region from the system locale (e.g. AppleLocale "ka_GE" → "GE").
     let country = tokio::process::Command::new("defaults")
         .args(["read", "-g", "AppleLocale"])
         .output()
@@ -203,7 +178,6 @@ async fn list_wifi_macos() -> Result<WifiNetworks, String> {
 
 #[cfg(target_os = "linux")]
 async fn list_wifi_linux() -> Result<WifiNetworks, String> {
-    // Live scan via NetworkManager. `-t` terse, `-f` fields.
     let out = tokio::process::Command::new("nmcli")
         .args(["-t", "-f", "ACTIVE,SSID", "dev", "wifi"])
         .output()
@@ -213,7 +187,6 @@ async fn list_wifi_linux() -> Result<WifiNetworks, String> {
     let mut current = None;
     let mut known = Vec::new();
     for line in String::from_utf8_lossy(&out.stdout).lines() {
-        // Format: "yes:MySSID" / "no:OtherSSID"
         let (active, ssid) = line.split_once(':').unwrap_or(("no", line));
         let ssid = ssid.trim();
         if ssid.is_empty() {
@@ -227,7 +200,6 @@ async fn list_wifi_linux() -> Result<WifiNetworks, String> {
         }
     }
 
-    // Region from the locale env (e.g. LANG "en_US.UTF-8" → "US").
     let country = std::env::var("LANG")
         .or_else(|_| std::env::var("LC_ALL"))
         .ok()
@@ -239,8 +211,6 @@ async fn list_wifi_linux() -> Result<WifiNetworks, String> {
         country,
     })
 }
-
-// ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {

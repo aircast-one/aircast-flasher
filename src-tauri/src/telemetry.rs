@@ -2,7 +2,7 @@ use std::io::Write as _;
 use std::path::PathBuf;
 use std::time::Instant;
 
-use flasher_core::{InitFormat, ProvisionConfig, SshMode};
+use flasher_ops::{InitFormat, ProvisionConfig, SshMode};
 use serde::Serialize;
 use tauri::{AppHandle, Manager};
 
@@ -304,7 +304,7 @@ pub fn mbps(bytes: u64, ms: u64) -> Option<f64> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use flasher_core::{AccessConfig, TailscaleConfig, WifiConfig};
+    use flasher_ops::{AccessConfig, TailscaleConfig, WifiConfig};
 
     fn config_with_secrets() -> ProvisionConfig {
         ProvisionConfig {

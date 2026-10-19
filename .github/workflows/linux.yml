@@ -1,9 +1,5 @@
 name: Linux build
 
-# Builds the Aircast Flasher Linux app (AppImage + .deb + .rpm) and uploads them
-# as artifacts. Like the Windows job, this is also the only place the Linux
-# cfg(target_os="linux") code is actually compiled — it can't be built on macOS
-# (Tauri needs webkit2gtk/libsoup system libs).
 
 on:
   workflow_dispatch:
@@ -19,8 +15,6 @@ on:
 
 jobs:
   build:
-    # 22.04 ships webkit2gtk-4.1 and an older glibc, so the AppImage runs on a
-    # wider range of distros than one built on the latest runner.
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
@@ -52,22 +46,18 @@ jobs:
       - run: npm ci
 
       - name: Build app
-        # The committed config has createUpdaterArtifacts=true + a pubkey, so
-        # `tauri build` signs the .sig updater artifacts and needs the minisign
-        # key. Same secret the release pipeline uses; here the installers are
-        # only uploaded as CI artifacts, never published to the update endpoint.
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: npm run tauri build
 
+      - name: Build the CLI
+        run: cargo build --release -p flasher-cli
+
       - name: Upload bundles
         uses: actions/upload-artifact@v4
         with:
           name: aircast-flasher-linux-x86_64
-          # Workspace target dir is at the repo root (root Cargo.toml is the
-          # [workspace]), not src-tauri/target. The .sig files are the signed
-          # updater artifacts produced by createUpdaterArtifacts.
           path: |
             target/release/bundle/appimage/*.AppImage
             target/release/bundle/appimage/*.AppImage.sig
