@@ -11,9 +11,6 @@ fn probe_client() -> &'static reqwest::Client {
     })
 }
 
-/// An `.local` name has to be resolved over mDNS before the first byte moves,
-/// and a cold multicast lookup on a busy network can take several seconds on
-/// its own — longer than the shared client's budget for a plain HTTP call.
 const LAN_PROBE_TIMEOUT: Duration = Duration::from_secs(8);
 
 #[tauri::command]
@@ -27,13 +24,8 @@ pub async fn probe_device(url: String) -> bool {
         .unwrap_or(false)
 }
 
-/// Reaching Tailscale's coordination server to mint a login URL is a round trip
-/// over the device's own uplink, so it gets far longer than a `/healthz` probe.
 const LOGIN_TIMEOUT: Duration = Duration::from_secs(20);
 
-/// Operator-facing text for a failed call to aircastd. The transport error is
-/// jargon the operator can do nothing with; what they need is which of the two
-/// recoverable situations they are in.
 fn login_error(e: &reqwest::Error) -> String {
     if e.is_timeout() || e.is_connect() {
         "Couldn't reach the device — it may still be booting. Try again in a minute.".to_string()
@@ -43,9 +35,6 @@ fn login_error(e: &reqwest::Error) -> String {
     }
 }
 
-/// Starts aircastd's headless Tailscale login and returns the URL the operator
-/// opens to sign in (creating a tailnet if they have none). Empty when the
-/// device is already connected.
 #[tauri::command]
 pub async fn tailscale_login(url: String) -> Result<String, String> {
     #[derive(serde::Deserialize)]
@@ -70,9 +59,6 @@ pub async fn tailscale_login(url: String) -> Result<String, String> {
         .map_err(|e| login_error(&e))
 }
 
-/// What the device reports about its own tailnet membership. Polled while the
-/// operator finishes signing in, so the screen can confirm the join instead of
-/// leaving them to guess.
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TailscaleState {
@@ -115,9 +101,6 @@ pub async fn tailscale_status(url: String) -> Result<TailscaleState, String> {
     })
 }
 
-/// Points a device at a coordination server before it signs in. Without this,
-/// a Headscale shop's freshly flashed device would try to sign in to
-/// Tailscale's servers, where its operator has no account.
 #[tauri::command]
 pub async fn set_device_control_server(url: String, control_server: String) -> Result<(), String> {
     probe_client()
@@ -132,15 +115,6 @@ pub async fn set_device_control_server(url: String, control_server: String) -> R
         .map(|_| ())
 }
 
-/// Opens a device's own page in an app window rather than the system browser,
-/// so managing a device never leaves the app.
-///
-/// A native window, not an iframe: the app's origin is a secure context, so an
-/// embedded `http://` frame is mixed active content and the webviews disagree
-/// about blocking it per platform. A top-level document has no such problem.
-///
-/// The device page gets no Tauri APIs — the capability in `capabilities/` is
-/// scoped to the `main` window, so this webview inherits nothing.
 #[tauri::command]
 pub async fn open_device_window(
     app: tauri::AppHandle,
@@ -149,7 +123,6 @@ pub async fn open_device_window(
 ) -> Result<(), String> {
     use tauri::Manager;
 
-    // Labels allow a restricted alphabet; a DNS name is not one.
     let label = format!(
         "device-{}",
         title
@@ -177,13 +150,8 @@ pub async fn open_device_window(
         .map_err(|e| e.to_string())
 }
 
-/// A tailnet round trip can need DERP setup on first contact, so peers get a
-/// longer budget than a LAN `/healthz` probe.
 const PEER_PROBE_TIMEOUT: Duration = Duration::from_secs(5);
 
-/// Which of these addresses are running aircastd. `/healthz` is the signature —
-/// "is it Linux" is not: a tailnet's Linux peers include servers and stray Pis.
-/// Probed in parallel, so the wall clock is one timeout, not N.
 #[tauri::command]
 pub async fn probe_devices(urls: Vec<String>) -> Vec<String> {
     let probes = urls.into_iter().map(|url| {
@@ -208,11 +176,6 @@ pub async fn probe_devices(urls: Vec<String>) -> Vec<String> {
     reachable
 }
 
-/// Where the Tailscale CLI usually lives. These are a fast path, not the whole
-/// mechanism: `tailscale` is not on `PATH` after a Mac App Store install, so
-/// the app bundle's own binary has to be found by path. Anything unusual —
-/// snap, Nix, Windows on a drive that isn't C: — falls through to a bare
-/// `PATH` lookup, and a spawn failure is what "not installed" means.
 fn tailscale_cli() -> std::path::PathBuf {
     #[cfg(target_os = "macos")]
     let candidates: Vec<String> = [
@@ -255,15 +218,13 @@ fn cli_command(program: &std::path::Path) -> tokio::process::Command {
 
 #[cfg(not(target_os = "windows"))]
 fn cli_command(program: &std::path::Path) -> tokio::process::Command {
-    tokio::process::Command::new(program)
+    let mut command = tokio::process::Command::new(program);
+    command.env("TAILSCALE_BE_CLI", "1");
+    command
 }
 
-/// A wedged `tailscaled` makes `tailscale status` hang; the screen must not.
 const CLI_TIMEOUT: Duration = Duration::from_secs(3);
 
-/// Whether *this computer* can reach the tailnet. The drone joining is only
-/// half the job — without the client running here, the name the device reports
-/// resolves to nothing.
 #[derive(serde::Serialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct LocalTailscale {
@@ -272,17 +233,11 @@ pub struct LocalTailscale {
     pub name: String,
     pub tailnet: String,
     pub magic_dns_suffix: String,
-    /// The coordination server this computer is signed in to. Empty when it
-    /// could not be read.
     pub control_url: String,
-    /// True when `control_url` is a Headscale (or other) server rather than
-    /// Tailscale's own. Keys, sign-in and the device's own control server all
-    /// have to follow this, not the Tailscale defaults.
     pub self_hosted: bool,
     pub peers: Vec<TailnetPeer>,
 }
 
-/// `tailscale status --json` does not carry the control server; prefs do.
 async fn control_url(cli: &std::path::Path) -> String {
     #[derive(serde::Deserialize)]
     struct Prefs {
@@ -308,9 +263,6 @@ fn is_self_hosted(control_url: &str) -> bool {
     !control_url.is_empty() && !control_url.contains("tailscale.com")
 }
 
-/// One machine already on the tailnet, as the local client sees it. Shared
-/// devices from another tailnet come through with an empty `DNSName` and are
-/// dropped — they cannot be addressed by name and cannot collide.
 #[derive(serde::Serialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct TailnetPeer {
@@ -319,8 +271,6 @@ pub struct TailnetPeer {
     pub os: String,
     pub online: bool,
     pub ip: String,
-    /// False for a device shared in from a different tailnet. Only same-tailnet
-    /// names can collide, since that is the scope Tailscale renames within.
     pub same_tailnet: bool,
 }
 
@@ -373,8 +323,6 @@ pub async fn local_tailscale() -> LocalTailscale {
     )
     .await;
 
-    // A spawn error is the only reliable "not installed" signal, since the
-    // binary may have been found on PATH rather than at a known location.
     let output = match spawned {
         Ok(Ok(output)) => output,
         Ok(Err(_)) => return LocalTailscale::default(),
@@ -419,8 +367,6 @@ pub async fn local_tailscale() -> LocalTailscale {
         })
         .collect();
 
-    // Online first, then by name — the list is read to find a machine, and an
-    // offline one is not what the reader is looking for.
     peers.sort_by(|a, b| {
         b.online
             .cmp(&a.online)
