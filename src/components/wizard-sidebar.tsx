@@ -74,6 +74,7 @@ export function WizardSidebar({
   onFleetView,
   telemetry,
   onTelemetry,
+  status,
 }: {
   current: WizardStep;
   highestReached: WizardStep;
@@ -83,6 +84,7 @@ export function WizardSidebar({
   onFleetView: (view: FleetView) => void;
   telemetry: boolean | null;
   onTelemetry: (share: boolean) => void;
+  status: string;
 }) {
   return (
     <aside className="flex w-[220px] shrink-0 flex-col border-r border-sidebar-border bg-sidebar">
@@ -174,13 +176,7 @@ export function WizardSidebar({
       </nav>
 
       <div className="mt-auto flex flex-col gap-1.5 px-5 py-4 text-xs text-muted-foreground/60">
-        <span>
-          {writing
-            ? "Writing in progress"
-            : highestReached >= STEP.write
-              ? "Ready to write"
-              : "Configure your device"}
-        </span>
+        <span>{status}</span>
         <button
           type="button"
           onClick={() => onTelemetry(!telemetry)}

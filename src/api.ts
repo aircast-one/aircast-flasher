@@ -117,6 +117,9 @@ export function cloudListCards(): Promise<CloudCard[]> {
   return invoke<CloudCard[]>("cloud_list_cards");
 }
 
+export const cloudCheckSignIn = (): Promise<void> =>
+  cloudListCards().then(() => undefined);
+
 export function cloudMarkLost(id: string): Promise<void> {
   return invoke<void>("cloud_mark_lost", { id });
 }

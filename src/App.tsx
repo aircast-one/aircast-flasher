@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   cancelFlash,
+  cloudCheckSignIn,
   cloudCreateKeyset,
   detectSshKeys,
   downloadImage,
@@ -34,7 +35,11 @@ import { defaultHostname } from "@/components/default-hostname";
 import { nextFreeHostname } from "@/components/next-hostname";
 import { randomHex } from "@/lib/random-id";
 import { buildSummary } from "@/components/wizard-summary";
-import { isCaptured, releaseSupportsEncryption } from "@/components/encryption";
+import {
+  encryptionIncomplete,
+  isCaptured,
+  releaseSupportsEncryption,
+} from "@/components/encryption";
 import { cardLabel, withCloudServer } from "@/components/cloud";
 import {
   fightModeUnreachable,
@@ -51,7 +56,11 @@ import { StepNetwork } from "@/components/step-network";
 import { StepAccess } from "@/components/step-access";
 import { JobView } from "@/components/job-view";
 import { DevicesView } from "@/components/devices-view";
-import { CloudCardsView } from "@/components/cloud-cards-view";
+import {
+  ACCOUNT_KEY,
+  CloudCardsView,
+  useCloudAccount,
+} from "@/components/cloud-cards-view";
 import {
   STEP,
   type FlashProgressState,
@@ -122,6 +131,8 @@ function App() {
   ]);
   const [threshold, setThreshold] = useState(1);
   const [cloudKeyServer, setCloudKeyServer] = useState(false);
+  const cloudSignedIn = typeof useCloudAccount().data === "string";
+  const cloudOn = cloudKeyServer && cloudSignedIn;
   const [recoveryKey, setRecoveryKey] = useState("");
   const [recoverySaved, setRecoverySaved] = useState(false);
   const enableEncryption = (on: boolean) => {
@@ -170,6 +181,7 @@ function App() {
   const [fleetView, setFleetView] = useState<FleetView | null>(null);
   const [cancelled, setCancelled] = useState(false);
   const [lastVars, setLastVars] = useState<FlashVars | null>(null);
+  const [cardTouched, setCardTouched] = useState(false);
 
   const [progress, setProgress] = useState<FlashProgressState>({
     phase: "idle",
@@ -310,6 +322,9 @@ function App() {
 
   const flashMutation = useMutation<EncryptionConfig | null, unknown, FlashVars>({
     mutationFn: async (vars) => {
+      setCardTouched(false);
+      const cloud = vars.encryption !== null && vars.cloudKeyServer;
+      if (cloud) await cloudCheckSignIn();
       let imagePath: string;
 
       if (vars.sourceKind === "aircast") {
@@ -333,13 +348,14 @@ function App() {
         imagePath = vars.localPath;
       }
       const encryption =
-        vars.encryption !== null && vars.cloudKeyServer
+        vars.encryption !== null && cloud
           ? withCloudServer(
               vars.encryption,
               await cloudCreateKeyset(cardLabel(vars.hostname)),
             )
           : vars.encryption;
       setProgress({ phase: "flashing", progress: null });
+      setCardTouched(true);
       await flashImage({
         jobId: vars.jobId,
         imagePath,
@@ -371,6 +387,7 @@ function App() {
         ),
       });
     },
+    onError: () => queryClient.invalidateQueries({ queryKey: ACCOUNT_KEY }),
     onSettled: () => {
       setProgress({ phase: "idle" });
     },
@@ -401,7 +418,14 @@ function App() {
     sourceReady &&
     selectedDisk !== "" &&
     !cardTooSmall &&
-    !fightModeUnreachable(fightMode, authKey, controlServer);
+    !fightModeUnreachable(fightMode, authKey, controlServer) &&
+    !encryptionIncomplete({
+      enabled: encrypting,
+      servers: tangServers,
+      threshold,
+      cloud: cloudOn,
+      recoverySaved,
+    });
 
   const remoteEnrolled = authKey.trim() !== "";
   const detectedKeys = sshKeysQuery.data ?? [];
@@ -428,7 +452,7 @@ function App() {
     detectedKeys,
     devicePassword,
     encryption: encrypting
-      ? { tang: tangServers.some(isCaptured), cloud: cloudKeyServer }
+      ? { tang: tangServers.some(isCaptured), cloud: cloudOn }
       : null,
     fightMode,
   });
@@ -471,7 +495,7 @@ function App() {
     const capturedServers = tangServers
       .filter(isCaptured)
       .map((s) => ({ url: s.url.trim(), adv: s.adv }));
-    const keyServers = capturedServers.length + (cloudKeyServer ? 1 : 0);
+    const keyServers = capturedServers.length + (cloudOn ? 1 : 0);
     const encryption: EncryptionConfig | null =
       encrypting &&
       keyServers >= 1 &&
@@ -491,7 +515,7 @@ function App() {
       tailscale,
       access,
       encryption,
-      cloudKeyServer: encrypting && cloudKeyServer,
+      cloudKeyServer: encrypting && cloudOn,
       fightMode,
     };
     setLastVars(vars);
@@ -513,19 +537,33 @@ function App() {
     flashMutation.mutate({ ...vars, jobId: randomHex(8) });
   }
 
-  function startOver() {
+  function backTo(target: WizardStep) {
     flashMutation.reset();
     setProgress({ phase: "idle" });
     setCancelled(false);
-    setStep(STEP.os);
+    setStep(target);
     void queryClient.invalidateQueries({ queryKey: ["devices"] });
   }
 
   function flashAnother() {
     setHostname(nextFreeHostname(hostname, takenHostnames));
-    startOver();
+    backTo(STEP.os);
   }
   const writing = flashMutation.isPending;
+  const stopped = cancelled && flashMutation.isError;
+  const signedOut =
+    flashMutation.isError && lastVars?.cloudKeyServer === true && !cloudSignedIn;
+  const status = writing
+    ? "Writing in progress"
+    : flashMutation.isSuccess
+      ? "Card written"
+      : stopped
+        ? "Write stopped"
+        : flashMutation.isError
+          ? "Write failed"
+          : step === STEP.storage && canProceed
+            ? "Ready to write"
+            : "Configure your device";
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-background text-foreground">
@@ -550,6 +588,7 @@ function App() {
           }
           telemetry={settings.telemetry ?? false}
           onTelemetry={answerTelemetry}
+          status={status}
         />
 
         <main className="flex min-h-0 min-w-0 flex-1 flex-col">
@@ -621,7 +660,7 @@ function App() {
                 onServers: setTangServers,
                 threshold,
                 onThreshold: setThreshold,
-                cloud: cloudKeyServer,
+                cloud: cloudOn,
                 onCloud: setCloudKeyServer,
                 recoveryKey,
                 recoverySaved,
@@ -652,16 +691,20 @@ function App() {
               remoteEnrolled={remoteEnrolled}
               encryption={flashMutation.data ?? null}
               success={flashMutation.isSuccess}
-              cancelled={cancelled && flashMutation.isError}
+              cancelled={stopped}
               error={
                 flashMutation.isError
                   ? errorMessage(flashMutation.error, "Flashing failed.")
                   : null
               }
+              cardTouched={cardTouched}
+              signedOut={signedOut}
               progress={progress}
               onCancel={handleCancel}
               onRetry={lastVars === null ? null : () => retryFlash(lastVars)}
-              onStartOver={startOver}
+              onChangeSettings={() =>
+                backTo(signedOut ? STEP.access : STEP.storage)
+              }
               onReset={flashAnother}
               onRevealLog={() => void revealEventLog()}
             />

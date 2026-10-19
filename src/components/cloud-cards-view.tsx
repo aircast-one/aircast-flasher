@@ -16,7 +16,7 @@ import { cardState, waitForSignIn } from "@/components/cloud";
 import type { CloudCard } from "@/types";
 
 const SIGN_IN_POLL_MS = 2000;
-const ACCOUNT_KEY = ["cloud-account"];
+export const ACCOUNT_KEY = ["cloud-account"];
 const CARDS_KEY = ["cloud-cards"];
 
 const pause = () =>
@@ -116,7 +116,13 @@ function CardRow({ card }: { card: CloudCard }) {
 export const useCloudAccount = () =>
   useQuery({ queryKey: ACCOUNT_KEY, queryFn: cloudAccount });
 
-export function CloudSignInButton() {
+export function CloudSignInButton({
+  size = "sm",
+  onSignedIn,
+}: {
+  size?: "sm" | "lg";
+  onSignedIn?: () => void;
+}) {
   const queryClient = useQueryClient();
   const signIn = useMutation({
     mutationFn: async () => {
@@ -124,14 +130,17 @@ export function CloudSignInButton() {
       await openUrl(authUrl);
       return waitForSignIn(token, cloudSignInPoll, pause);
     },
-    onSuccess: (email) => queryClient.setQueryData(ACCOUNT_KEY, email),
+    onSuccess: (email) => {
+      queryClient.setQueryData(ACCOUNT_KEY, email);
+      onSignedIn?.();
+    },
   });
 
   return (
     <div className="flex flex-col items-start gap-2">
       <Button
         type="button"
-        size="sm"
+        size={size}
         disabled={signIn.isPending}
         onClick={() => signIn.mutate()}
       >

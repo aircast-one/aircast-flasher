@@ -73,10 +73,14 @@ function wifi(noWifi: boolean, ssid: string): SummaryItem {
     : { ...row, value: ssid };
 }
 
-function encryptionValue(e: SummaryInput["encryption"]): string {
-  if (e === null) return "Off";
-  if (e.tang && e.cloud) return "LUKS2 · your key server + Aircast Cloud";
-  return e.cloud ? "LUKS2 · Aircast Cloud" : "LUKS2 · your key server";
+function encryption(e: SummaryInput["encryption"]): SummaryItem {
+  const row = { label: "Disk encryption", step: STEP.access };
+  if (e === null) return { ...row, value: "Off" };
+  if (e.tang && e.cloud)
+    return { ...row, value: "LUKS2 · your key server + Aircast Cloud" };
+  if (e.cloud) return { ...row, value: "LUKS2 · Aircast Cloud" };
+  if (e.tang) return { ...row, value: "LUKS2 · your key server" };
+  return { ...row, value: "On · no key server yet", warn: true };
 }
 
 function fight(input: SummaryInput): SummaryItem {
@@ -110,11 +114,7 @@ export function buildSummary(input: SummaryInput): SummaryItem[] {
       warn: access === IMAGE_DEFAULT_LOGIN,
       step: STEP.access,
     },
-    {
-      label: "Disk encryption",
-      value: encryptionValue(input.encryption),
-      step: STEP.access,
-    },
+    encryption(input.encryption),
     fight(input),
   ];
 }

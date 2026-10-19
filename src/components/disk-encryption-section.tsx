@@ -330,7 +330,7 @@ function CloudOption({
         </div>
         <Switch
           aria-label="Aircast Cloud key server"
-          checked={cloud && signedIn}
+          checked={cloud}
           disabled={!signedIn}
           onCheckedChange={onCloud}
         />

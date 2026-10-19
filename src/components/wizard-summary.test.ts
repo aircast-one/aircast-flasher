@@ -162,6 +162,15 @@ test("reports whether the data partition is encrypted", () => {
   );
 });
 
+test("encryption with no usable key server is flagged", () => {
+  const row = buildSummary({
+    ...base,
+    encryption: { tang: false, cloud: false },
+  }).find((r) => r.label === "Disk encryption");
+  assert.equal(row?.value, "On · no key server yet");
+  assert.equal(row?.warn, true);
+});
+
 test("fight mode is stated either way", () => {
   assert.equal(valueOf(base, "Fight mode"), "Off");
   assert.equal(

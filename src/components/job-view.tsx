@@ -21,6 +21,7 @@ import { formatBytes, formatSpeed } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { FlashProgressState } from "@/components/wizard-types";
 import { saveRecoveryKey } from "@/components/disk-encryption-section";
+import { CloudSignInButton } from "@/components/cloud-cards-view";
 import type { EncryptionConfig } from "@/types";
 import { useState } from "react";
 
@@ -209,10 +210,12 @@ export function JobView({
   success,
   cancelled,
   error,
+  cardTouched,
+  signedOut,
   progress,
   onCancel,
   onRetry,
-  onStartOver,
+  onChangeSettings,
   onReset,
   onRevealLog,
 }: {
@@ -222,10 +225,12 @@ export function JobView({
   success: boolean;
   cancelled: boolean;
   error: string | null;
+  cardTouched: boolean;
+  signedOut: boolean;
   progress: FlashProgressState;
   onCancel: () => void;
   onRetry: (() => void) | null;
-  onStartOver: () => void;
+  onChangeSettings: () => void;
   onReset: () => void;
   onRevealLog: () => void;
 }) {
@@ -305,8 +310,9 @@ export function JobView({
         <div className="flex flex-col gap-1.5">
           <h2 className="text-xl font-semibold">Stopped</h2>
           <p className="text-sm text-balance text-muted-foreground">
-            You cancelled the write. The card is partly written and won't boot,
-            so flash it again before using it.
+            {cardTouched
+              ? "You cancelled the write. The card is partly written and won't boot, so flash it again before using it."
+              : "You cancelled before the write started. Nothing was written to the SD card."}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -323,7 +329,34 @@ export function JobView({
             type="button"
             size="lg"
             variant="secondary"
-            onClick={onStartOver}
+            onClick={onChangeSettings}
+          >
+            Change settings
+          </Button>
+        </div>
+      </Pane>
+    );
+  }
+
+  if (error && signedOut) {
+    return (
+      <Pane heading="Write">
+        <IconBadge icon={XCircle} tone="destructive" />
+        <div className="flex flex-col gap-1.5">
+          <h2 className="text-xl font-semibold">Sign in to Aircast Cloud</h2>
+          <p className="text-sm text-balance text-muted-foreground">
+            Your Aircast Cloud sign-in ended before the write started, so
+            nothing was written to the SD card. Sign in and the write starts
+            again.
+          </p>
+        </div>
+        <div className="flex items-start gap-2">
+          <CloudSignInButton size="lg" onSignedIn={onRetry ?? undefined} />
+          <Button
+            type="button"
+            size="lg"
+            variant="secondary"
+            onClick={onChangeSettings}
           >
             Change settings
           </Button>
@@ -339,8 +372,9 @@ export function JobView({
         <div className="flex flex-col gap-1.5">
           <h2 className="text-xl font-semibold">Flash failed</h2>
           <p className="text-sm text-balance text-muted-foreground">
-            Something went wrong while writing the SD card. It is partly
-            written and won't boot, so flash it again before using it.
+            {cardTouched
+              ? "Something went wrong while writing the SD card. It is partly written and won't boot, so flash it again before using it."
+              : "Something went wrong before the write started. Nothing was written to the SD card."}
           </p>
         </div>
         <Alert variant="destructive" className="text-left">
@@ -363,7 +397,7 @@ export function JobView({
             type="button"
             size="lg"
             variant="secondary"
-            onClick={onStartOver}
+            onClick={onChangeSettings}
           >
             Change settings
           </Button>
