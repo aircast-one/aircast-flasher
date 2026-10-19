@@ -230,6 +230,13 @@ jobs:
                 cp "target/${targets[0]}/release/$bin" "$bin"
                 arch=aarch64
               fi
+              for b in "$bin" target/*/release/aircast-flasher; do
+                if otool -L "$b" | grep -q /opt/homebrew; then
+                  echo "::error::$b links a Homebrew library and won't run on other Macs"
+                  otool -L "$b"
+                  exit 1
+                fi
+              done
               if [ -n "$APPLE_CERTIFICATE" ]; then
                 kc="$RUNNER_TEMP/cli-signing.keychain-db"
                 pw=$(openssl rand -hex 16)
@@ -243,7 +250,7 @@ jobs:
                 codesign --force --options runtime --timestamp --sign "$APPLE_SIGNING_IDENTITY" "$bin"
               fi
               asset="${bin}_${V}_macos-${arch}.zip"
-              ditto -c -k --keepParent "$bin" "$asset"
+              ditto -c -k "$bin" "$asset"
               if [ -n "$APPLE_ID" ]; then
                 xcrun notarytool submit "$asset" --apple-id "$APPLE_ID" --password "$APPLE_PASSWORD" --team-id "$APPLE_TEAM_ID" --wait
               fi
