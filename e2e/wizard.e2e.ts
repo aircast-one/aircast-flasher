@@ -306,7 +306,7 @@ describe("flasher wizard", () => {
     );
   });
 
-  it("keeps nothing on this computer in fight mode", async () => {
+  it("saves nothing in fight mode and erases nothing already saved", async () => {
     await onAccessStep();
     await browser.waitUntil(() => savedSettings().hostname === "falcon-01", {
       timeout: 10_000,
@@ -315,21 +315,23 @@ describe("flasher wizard", () => {
 
     const fight = $('[role="switch"][aria-label="Fight mode"]');
     await fight.click();
-    await browser.waitUntil(
-      () => {
-        const saved = savedSettings();
-        return saved.hostname === null && saved.ssid === null;
-      },
-      {
-        timeout: 10_000,
-        timeoutMsg: `fight mode left the drone's settings in ${settingsFile()}`,
-      },
-    );
     await expect($("button=Password")).not.toBeDisplayed();
     await expect($("button=SSH key")).toBeDisplayed();
 
+    await onNetworkStep();
+    await $("#hostname").setValue("fight-01");
+    await $("button=Next").click();
+    await waitForHeading("Access");
     await fight.click();
     await expect($("button=Password")).toBeDisplayed();
+
+    await onNetworkStep();
+    await $("#ssid").setValue("home-net");
+    await browser.waitUntil(() => savedSettings().ssid === "home-net", {
+      timeout: 10_000,
+      timeoutMsg: `the WiFi name never reached ${settingsFile()} after fight mode`,
+    });
+    expect(savedSettings().hostname).toBe("falcon-01");
   });
 
   it("won't let fight mode write a drone nothing can reach", async () => {

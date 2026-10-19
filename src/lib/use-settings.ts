@@ -20,20 +20,9 @@ const EMPTY: Settings = {
   tangCloud: false,
 };
 
-const FORGOTTEN: Partial<Settings> = {
-  ssid: null,
-  hostname: null,
-  wifiPassword: "",
-  controlServer: "",
-  authorizedKey: null,
-  flashedHostnames: [],
-  tangUrls: [],
-};
-
 export function useSettings(ephemeral: boolean): {
   settings: Settings;
   update: (patch: Partial<Settings>) => void;
-  forget: () => void;
 } {
   const queryClient = useQueryClient();
   const query = useQuery({
@@ -50,10 +39,6 @@ export function useSettings(ephemeral: boolean): {
       if (query.data === undefined) return;
       queryClient.setQueryData<Settings>(KEY, { ...query.data, ...patch });
       if (!ephemeral) persist.mutate(patch);
-    },
-    forget: () => {
-      if (query.data === undefined) return;
-      persist.mutate(FORGOTTEN);
     },
   };
 }

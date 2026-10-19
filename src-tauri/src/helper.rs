@@ -140,7 +140,13 @@ fn flash(
     append("{\"stage\":\"device\",\"done\":0,\"total\":0}");
     diag(&format!("opening device {device}"));
     let result = open_and_run(
-        device, image, ready_file, no_verify, &cfg, &mut progress, diag,
+        device,
+        image,
+        ready_file,
+        no_verify,
+        &cfg,
+        &mut progress,
+        diag,
     );
 
     // Best-effort eject/finalize regardless of outcome.
@@ -419,10 +425,8 @@ mod tests {
     use super::*;
 
     fn temp_path(name: &str) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "aircast-helper-test-{name}-{}",
-            std::process::id()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("aircast-helper-test-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir.join("ready.txt")

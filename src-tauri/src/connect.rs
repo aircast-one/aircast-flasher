@@ -109,7 +109,10 @@ pub async fn tailscale_status(url: String) -> Result<TailscaleState, String> {
         dns => dns.to_string(),
     };
 
-    Ok(TailscaleState { connected: status.logged_in, name })
+    Ok(TailscaleState {
+        connected: status.logged_in,
+        name,
+    })
 }
 
 /// Points a device at a coordination server before it signs in. Without this,
@@ -161,7 +164,9 @@ pub async fn open_device_window(
         return existing.set_focus().map_err(|e| e.to_string());
     }
 
-    let target = url.parse().map_err(|_| format!("Not a valid address: {url}"))?;
+    let target = url
+        .parse()
+        .map_err(|_| format!("Not a valid address: {url}"))?;
 
     tauri::WebviewWindowBuilder::new(&app, &label, tauri::WebviewUrl::External(target))
         .title(title)
@@ -373,10 +378,18 @@ pub async fn local_tailscale() -> LocalTailscale {
     let output = match spawned {
         Ok(Ok(output)) => output,
         Ok(Err(_)) => return LocalTailscale::default(),
-        Err(_) => return LocalTailscale { installed: true, ..Default::default() },
+        Err(_) => {
+            return LocalTailscale {
+                installed: true,
+                ..Default::default()
+            }
+        }
     };
 
-    let installed = LocalTailscale { installed: true, ..Default::default() };
+    let installed = LocalTailscale {
+        installed: true,
+        ..Default::default()
+    };
 
     let Ok(status) = serde_json::from_slice::<CliStatus>(&output.stdout) else {
         return installed;
@@ -455,7 +468,11 @@ async fn join_wifi_impl(ssid: &str, password: &str) -> Result<(), String> {
 
 #[cfg(target_os = "windows")]
 async fn join_wifi_impl(ssid: &str, password: &str) -> Result<(), String> {
-    let esc = |s: &str| s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;");
+    let esc = |s: &str| {
+        s.replace('&', "&amp;")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;")
+    };
     let profile = format!(
         r#"<?xml version="1.0"?>
 <WLANProfile xmlns="http://www.microsoft.com/networking/WLAN/profile/v1">

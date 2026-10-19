@@ -119,7 +119,7 @@ function App() {
   const [pickedDisk, setPickedDisk] = useState<string>("");
 
   const [fightMode, setFightMode] = useState(false);
-  const { settings, update, forget } = useSettings(fightMode);
+  const { settings, update } = useSettings(fightMode);
   const [showPassword, setShowPassword] = useState(false);
   const [authKey, setAuthKey] = useState("");
   const [sshMode, setSshMode] = useState<SshMode>("key-only");
@@ -161,9 +161,7 @@ function App() {
 
   const enableFightMode = (on: boolean) => {
     setFightMode(on);
-    if (!on) return;
-    forget();
-    if (sshMode === "password") setSshMode("key-only");
+    if (on && sshMode === "password") setSshMode("key-only");
   };
 
   const password = settings.wifiPassword;

@@ -1,16 +1,15 @@
+import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-const IDENTIFIER = "one.aircast.flasher";
+export const E2E_CONFIG_DIR = "FLASHER_E2E_CONFIG_DIR";
 
-/// Mirrors Tauri's app_config_dir(): dirs::config_dir()/<identifier>.
-export function settingsFile(): string {
-  const home = os.homedir();
-  const configDir =
-    process.platform === "darwin"
-      ? path.join(home, "Library", "Application Support")
-      : process.platform === "win32"
-        ? (process.env.APPDATA ?? path.join(home, "AppData", "Roaming"))
-        : (process.env.XDG_CONFIG_HOME ?? path.join(home, ".config"));
-  return path.join(configDir, IDENTIFIER, "settings.json");
+export function e2eConfigDir(): string {
+  process.env[E2E_CONFIG_DIR] ??= fs.mkdtempSync(
+    path.join(os.tmpdir(), "flasher-e2e-"),
+  );
+  return process.env[E2E_CONFIG_DIR];
 }
+
+export const settingsFile = (): string =>
+  path.join(e2eConfigDir(), "settings.json");

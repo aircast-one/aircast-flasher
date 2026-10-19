@@ -22,11 +22,20 @@ pub struct Settings {
     pub tang_cloud: bool,
 }
 
+const E2E_CONFIG_DIR: &str = "FLASHER_E2E_CONFIG_DIR";
+
+fn config_dir(app: &AppHandle) -> Result<PathBuf, String> {
+    match std::env::var_os(E2E_CONFIG_DIR).filter(|_| cfg!(feature = "wdio")) {
+        Some(dir) => Ok(PathBuf::from(dir)),
+        None => app
+            .path()
+            .app_config_dir()
+            .map_err(|e| format!("No config directory: {e}")),
+    }
+}
+
 fn settings_path(app: &AppHandle) -> Result<PathBuf, String> {
-    let dir = app
-        .path()
-        .app_config_dir()
-        .map_err(|e| format!("No config directory: {e}"))?;
+    let dir = config_dir(app)?;
     std::fs::create_dir_all(&dir).map_err(|e| format!("Failed to create config directory: {e}"))?;
     Ok(dir.join(SETTINGS_FILE))
 }
