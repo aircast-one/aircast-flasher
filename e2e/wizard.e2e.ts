@@ -77,15 +77,35 @@ async function onNetworkStep() {
   if (await back.isEnabled()) {
     await back.click();
   } else {
-    const next = $("button=Next");
-    await next.waitForEnabled({
-      timeout: CATALOG_TIMEOUT,
-      timeoutMsg:
-        "no OS image became selectable — is the release catalog reachable?",
-    });
-    await next.click();
+    await browser.waitUntil(
+      async () => {
+        await $("button=Next").click();
+        return (await heading()) === "Network";
+      },
+      {
+        timeout: CATALOG_TIMEOUT,
+        interval: 1000,
+        timeoutMsg:
+          "no OS image became selectable — is the release catalog reachable?",
+      },
+    );
   }
   await waitForHeading("Network");
+}
+
+const problems = () => $('[data-testid="step-problems"]');
+
+async function expectBlocked(button: string, mentions: string) {
+  const before = await heading();
+  await $(`button=${button}`).click();
+  await expect(problems()).toBeDisplayed();
+  await expect(problems()).toHaveText(expect.stringContaining(mentions));
+  expect(await heading()).toBe(before);
+}
+
+async function backToStep(name: string) {
+  await $('nav[aria-label="Setup steps"]').$(`button*=${name}`).click();
+  await waitForHeading(name);
 }
 
 async function onAccessStep() {
@@ -176,12 +196,12 @@ describe("flasher wizard", () => {
     await expect($("#hostname")).not.toHaveValue("");
   });
 
-  it("unblocks Next once the network is named", async () => {
+  it("names a missing network on Next and clears it once named", async () => {
     await onNetworkStep();
     await $("#ssid").clearValue();
-    await expect($("button=Next")).toBeDisabled();
+    await expectBlocked("Next", "WiFi network");
     await $("#ssid").setValue("test-net");
-    await expect($("button=Next")).toBeEnabled();
+    await expect(problems()).not.toBeDisplayed();
   });
 
   it("says why it blocks when the hostname is cleared", async () => {
@@ -190,7 +210,9 @@ describe("flasher wizard", () => {
     await expect($("#hostname-help")).toHaveText(
       "Enter a hostname to continue.",
     );
-    await expect($("button=Next")).toBeDisabled();
+    await expectBlocked("Next", "Enter a hostname");
+    await problems().$("button=Enter a hostname").click();
+    await expect($("#hostname")).toBeFocused();
   });
 
   it("keeps a cleared hostname cleared instead of refilling it", async () => {
@@ -206,7 +228,7 @@ describe("flasher wizard", () => {
     await expect($("#hostname-help")).toHaveText(
       expect.stringContaining("lowercase letters, numbers, and hyphens"),
     );
-    await expect($("button=Next")).toBeDisabled();
+    await expectBlocked("Next", "lowercase letters, numbers and hyphens");
   });
 
   it("refuses to write a card with no network at all", async () => {
@@ -215,18 +237,20 @@ describe("flasher wizard", () => {
     await expect($("#ssid-help")).toHaveText(
       expect.stringContaining("never comes online"),
     );
-    await expect($("button=Next")).toBeDisabled();
+    await expectBlocked("Next", "WiFi network");
   });
 
   it("lets a wired device skip WiFi on purpose", async () => {
     await knownGoodNetworkState();
     await $("#ssid").clearValue();
     await $("button*=Ethernet or cellular only").click();
-    await expect($("button=Next")).toBeEnabled();
+    await $("button=Next").click();
+    await waitForHeading("Access");
 
+    await backToStep("Network");
     await $("button*=Set up WiFi instead").click();
     await expect($("#ssid")).toBeDisplayed();
-    await expect($("button=Next")).toBeDisabled();
+    await expectBlocked("Next", "WiFi network");
   });
 
   it("refuses a WiFi password the device could never join with", async () => {
@@ -235,10 +259,10 @@ describe("flasher wizard", () => {
     await expect($("#password-help")).toHaveText(
       expect.stringContaining("8–63 characters"),
     );
-    await expect($("button=Next")).toBeDisabled();
+    await expectBlocked("Next", "8–63 characters");
 
     await $("#password").setValue("longenough");
-    await expect($("button=Next")).toBeEnabled();
+    await expect(problems()).not.toBeDisplayed();
     await $("#password").clearValue();
   });
 
@@ -250,10 +274,11 @@ describe("flasher wizard", () => {
     await expect($("#control-server-error")).toHaveText(
       expect.stringContaining("Enter your control server URL"),
     );
-    await expect($("button=Next")).toBeEnabled();
+    await $("button=Next").click();
+    await waitForHeading("Storage");
 
+    await backToStep("Access");
     await $("button=Tailscale").click();
-    await expect($("button=Next")).toBeEnabled();
     await $("#auth-key").clearValue();
   });
 
@@ -327,7 +352,10 @@ describe("flasher wizard", () => {
     await onAccessStep();
     await $("button=Password").click();
     await expect($("#device-password")).toHaveValue("");
-    await expect($("button=Next")).toBeEnabled();
+    await $("button=Next").click();
+    await waitForHeading("Storage");
+
+    await backToStep("Access");
     await $("button=SSH key").click();
   });
 
@@ -389,18 +417,18 @@ describe("flasher wizard", () => {
     await expect($("#fight-mode-help")).toHaveText(
       expect.stringContaining("Finish Remote access"),
     );
-    await expect($("button=Next")).toBeDisabled();
+    await expectBlocked("Next", "pre-auth key");
 
     await $("button=Tailscale").click();
     await $("#auth-key").setValue("tskey-auth-abc123");
     await expect($("#fight-mode-help")).not.toBeDisplayed();
-    await expect($("button=Next")).toBeEnabled();
+    await expect(problems()).not.toBeDisplayed();
 
     await $("#auth-key").clearValue();
-    await expect($("button=Next")).toBeDisabled();
+    await expect(problems()).toBeDisplayed();
     await fight.click();
     await expect(remote).not.toHaveAttribute("aria-disabled", "true");
-    await expect($("button=Next")).toBeEnabled();
+    await expect(problems()).not.toBeDisplayed();
   });
 
   it("shows what will be written before the destructive step", async () => {
@@ -413,7 +441,7 @@ describe("flasher wizard", () => {
     await expect(rows).toHaveText(expect.stringContaining("falcon-01.local"));
     await expect(rows).toHaveText(expect.stringContaining("test-net"));
     await expect(rows).toHaveText(expect.stringContaining("Target card"));
-    await expect($("button=Flash SD Card")).toBeDisabled();
+    await expectBlocked("Flash SD Card", "Insert an SD card");
   });
 
   it("sends you back to the step that owns a setting you want to change", async () => {

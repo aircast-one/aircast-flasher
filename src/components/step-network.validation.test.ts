@@ -5,6 +5,7 @@ import {
   fightModeUnreachable,
   isInvalidWifiPassword,
   needsControlServer,
+  networkProblems,
 } from "./step-network.validation.ts";
 
 test("an open network needs no password", () => {
@@ -41,5 +42,22 @@ test("fight mode is unreachable until the drone joins a tailnet", () => {
   assert.equal(
     fightModeUnreachable(true, "hskey-auth-abc", "https://hs.example.com"),
     false,
+  );
+});
+
+test("lists every network problem, in page order", () => {
+  const fields = networkProblems({
+    noWifi: false,
+    ssid: " ",
+    password: "short",
+    hostname: "Falcon_01",
+  }).map((p) => p.field);
+  assert.deepEqual(fields, ["ssid", "password", "hostname"]);
+});
+
+test("a wired device with a good name has no network problems", () => {
+  assert.deepEqual(
+    networkProblems({ noWifi: true, ssid: "", password: "short", hostname: "falcon-01" }),
+    [],
   );
 });

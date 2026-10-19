@@ -2,7 +2,7 @@ import { AlertTriangle, HardDrive } from "lucide-react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { SelectableCard } from "@/components/selectable-card";
-import { StepShell } from "@/components/step-shell";
+import { StepShell, type Problem } from "@/components/step-shell";
 import { cn } from "@/lib/utils";
 import type { SummaryItem } from "@/components/wizard-summary";
 import { STEP, type WizardStep } from "@/components/wizard-types";
@@ -17,7 +17,7 @@ export function StepStorage({
   onSelectDisk,
   requiredCardBytes,
   summary,
-  canProceed,
+  problems,
   onBack,
   onEditStep,
   onFlash,
@@ -28,7 +28,7 @@ export function StepStorage({
   onSelectDisk: (path: string) => void;
   requiredCardBytes: number | undefined;
   summary: SummaryItem[];
-  canProceed: boolean;
+  problems: Problem[];
   onBack: () => void;
   onEditStep: (step: WizardStep) => void;
   onFlash: () => void;
@@ -53,7 +53,7 @@ export function StepStorage({
       heading="Storage"
       description="Insert your SD card and it'll show up here on its own. Check the settings below, then write."
       back={{ onClick: onBack }}
-      next={{ label: "Flash SD Card", onClick: onFlash, disabled: !canProceed }}
+      next={{ label: "Flash SD Card", onClick: onFlash, problems }}
     >
       <div className="flex flex-col gap-4">
         {devices.length === 0 ? (

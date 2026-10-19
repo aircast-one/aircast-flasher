@@ -12,11 +12,12 @@ import {
 } from "@/components/ui/autocomplete";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { StepShell } from "@/components/step-shell";
+import { StepShell, focusField } from "@/components/step-shell";
 import {
   isInvalidWifiPassword,
   isValidHostname,
   needsSsid,
+  networkProblems,
 } from "@/components/step-network.validation";
 import { GENERATED_HOSTNAME } from "@/components/default-hostname";
 import { nextFreeHostname } from "@/components/next-hostname";
@@ -84,7 +85,9 @@ export function StepNetwork({
       next={{
         label: "Next",
         onClick: onNext,
-        disabled: !hostnameValid || ssidMissing || wifiPasswordInvalid,
+        problems: networkProblems({ noWifi, ssid, password, hostname }).map(
+          ({ field, message }) => ({ message, fix: focusField(field) }),
+        ),
       }}
     >
       <div className="flex max-w-xl flex-col gap-5">

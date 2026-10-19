@@ -1,5 +1,6 @@
 import { gte, valid } from "semver";
 import type { TangServer } from "@/types";
+import type { FieldProblem } from "@/components/step-network.validation";
 
 export const ENCRYPTION_MIN_IMAGE = "0.3.6";
 
@@ -27,12 +28,56 @@ export function serversReady(p: {
   );
 }
 
-export function encryptionIncomplete(p: {
+function keyServerProblems(p: {
+  servers: TangServer[];
+  threshold: number;
+  cloud: boolean;
+}): FieldProblem[] {
+  const total = serverCount(p);
+  const untested = p.servers.findIndex((s) => hasUrl(s) && !isCaptured(s));
+  return total === 0
+    ? [
+        {
+          field: "tang-server-0",
+          message:
+            "Add a key server for disk encryption, or turn on unlock through Aircast Cloud",
+        },
+      ]
+    : untested >= 0
+      ? [
+          {
+            field: `tang-server-${untested}`,
+            message: "Test the connection to your key server",
+          },
+        ]
+      : p.threshold < 1 || p.threshold > total
+        ? [
+            {
+              field: "threshold",
+              message: `Set the key servers needed to unlock between 1 and ${total}`,
+            },
+          ]
+        : [];
+}
+
+export function encryptionProblems(p: {
   enabled: boolean;
   servers: TangServer[];
   threshold: number;
   cloud: boolean;
   recoverySaved: boolean;
-}): boolean {
-  return p.enabled && !(serversReady(p) && p.recoverySaved);
+}): FieldProblem[] {
+  if (!p.enabled) return [];
+  return [
+    ...keyServerProblems(p),
+    ...(p.recoverySaved
+      ? []
+      : [
+          {
+            field: "recovery-key",
+            message:
+              "Save the recovery key — download it, or confirm you saved it elsewhere",
+          },
+        ]),
+  ];
 }

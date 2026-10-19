@@ -1,7 +1,7 @@
 import { FileImage, Package } from "lucide-react";
 
 import { SelectableCard } from "@/components/selectable-card";
-import { StepShell } from "@/components/step-shell";
+import { StepShell, type Problem } from "@/components/step-shell";
 import {
   Select,
   SelectContent,
@@ -24,7 +24,6 @@ export function StepImage({
   releaseError,
   localFileName,
   onPickLocal,
-  canProceed,
   cacheStatus,
   onNext,
 }: {
@@ -37,15 +36,31 @@ export function StepImage({
   releaseError: string | null;
   localFileName: string | null;
   onPickLocal: () => void;
-  canProceed: boolean;
   cacheStatus: string | null;
   onNext: () => void;
 }) {
+  const problems: Problem[] =
+    sourceKind === "local"
+      ? localFileName === null
+        ? [{ message: "Choose the image file to write", fix: onPickLocal }]
+        : []
+      : release !== null
+        ? []
+        : releaseLoading
+          ? [{ message: "Wait for the Aircast OS releases to load" }]
+          : [
+              {
+                message:
+                  "Aircast OS isn't available right now — choose a local image file instead",
+                fix: onPickLocal,
+              },
+            ];
+
   return (
     <StepShell
       heading="Operating system"
       description="Pick the image to write to the card."
-      next={{ label: "Next", onClick: onNext, disabled: !canProceed }}
+      next={{ label: "Next", onClick: onNext, problems }}
     >
       <div className="flex flex-col gap-3">
         <SelectableCard

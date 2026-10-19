@@ -168,6 +168,7 @@ function TangServers({
                 className="flex-1"
                 placeholder={`http://10.0.0.5:${KEY_SERVER_PORT}`}
                 value={s.url}
+                id={`tang-server-${i}`}
                 aria-label={`Tang server ${i + 1}`}
                 onChange={(e) => setUrl(i, e.target.value)}
               />

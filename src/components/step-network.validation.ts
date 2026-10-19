@@ -1,3 +1,8 @@
+export interface FieldProblem {
+  field: string;
+  message: string;
+}
+
 const HOSTNAME_PATTERN = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/;
 
 export function isValidHostname(value: string): boolean {
@@ -55,3 +60,34 @@ export const MIN_DEVICE_PASSWORD = 8;
 export function isWeakDevicePassword(value: string): boolean {
   return value !== "" && value.length < MIN_DEVICE_PASSWORD;
 }
+
+export const networkProblems = (p: {
+  noWifi: boolean;
+  ssid: string;
+  password: string;
+  hostname: string;
+}): FieldProblem[] => [
+  ...(needsSsid(p.noWifi, p.ssid)
+    ? [
+        {
+          field: "ssid",
+          message:
+            "Enter the WiFi network the device joins, or choose Ethernet or cellular only",
+        },
+      ]
+    : []),
+  ...(!p.noWifi && isInvalidWifiPassword(p.password)
+    ? [{ field: "password", message: "Make the WiFi password 8–63 characters" }]
+    : []),
+  ...(p.hostname.trim() === ""
+    ? [{ field: "hostname", message: "Enter a hostname" }]
+    : isValidHostname(p.hostname)
+      ? []
+      : [
+          {
+            field: "hostname",
+            message:
+              "Use only lowercase letters, numbers and hyphens in the hostname",
+          },
+        ]),
+];

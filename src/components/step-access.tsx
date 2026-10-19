@@ -1,6 +1,6 @@
 import { Globe, Lock, SquareTerminal, Swords } from "lucide-react";
 
-import { StepShell } from "@/components/step-shell";
+import { StepShell, focusField, type Problem } from "@/components/step-shell";
 import { SettingCard } from "@/components/setting-card";
 import { Switch } from "@/components/ui/switch";
 import {
@@ -18,9 +18,10 @@ import {
 } from "@/components/disk-encryption-section";
 import {
   ENCRYPTION_MIN_IMAGE,
-  encryptionIncomplete,
+  encryptionProblems,
 } from "@/components/encryption";
 import {
+  MIN_DEVICE_PASSWORD,
   fightModeUnreachable,
   isInvalidSshKey,
   isValidControlServer,
@@ -83,10 +84,48 @@ export function StepAccess({
   const devicePasswordWeak =
     access.sshMode === "password" &&
     isWeakDevicePassword(access.devicePassword);
-  const encryptionPending = encryptionIncomplete(encryption);
   const unreachable =
     fightModeUnreachable(fight.enabled, tailnetKey, tailnetServer) ||
     (fight.enabled && controlServerMissing);
+
+  const problems: Problem[] = [
+    ...(sshKeyInvalid
+      ? [
+          {
+            message:
+              "Paste a full SSH public key — it starts with ssh-ed25519, ssh-rsa, …",
+            fix: focusField("ssh-key"),
+          },
+        ]
+      : []),
+    ...(devicePasswordWeak
+      ? [
+          {
+            message: `Make the device password at least ${MIN_DEVICE_PASSWORD} characters`,
+            fix: focusField("device-password"),
+          },
+        ]
+      : []),
+    ...(unreachable
+      ? [
+          tailnetKey.trim() === ""
+            ? {
+                message:
+                  "Add a pre-auth key — in fight mode the tailnet is the only way in",
+                fix: focusField("auth-key"),
+              }
+            : {
+                message:
+                  "Enter your control server URL — in fight mode the tailnet is the only way in",
+                fix: focusField("control-server"),
+              },
+        ]
+      : []),
+    ...encryptionProblems(encryption).map(({ field, message }) => ({
+      message,
+      fix: focusField(field),
+    })),
+  ];
 
   return (
     <StepShell
@@ -96,11 +135,7 @@ export function StepAccess({
       next={{
         label: "Next",
         onClick: onNext,
-        disabled:
-          sshKeyInvalid ||
-          devicePasswordWeak ||
-          encryptionPending ||
-          unreachable,
+        problems,
       }}
     >
       <div className="flex max-w-xl flex-col gap-4">

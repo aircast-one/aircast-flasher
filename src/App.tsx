@@ -36,7 +36,7 @@ import { nextFreeHostname } from "@/components/next-hostname";
 import { randomHex } from "@/lib/random-id";
 import { buildSummary } from "@/components/wizard-summary";
 import {
-  encryptionIncomplete,
+  encryptionProblems,
   hasUrl,
   isCaptured,
   releaseSupportsEncryption,
@@ -52,6 +52,7 @@ import { ConsentBanner } from "@/components/consent-banner";
 import { UpdateBanner } from "@/components/update-banner";
 import { WizardSidebar } from "@/components/wizard-sidebar";
 import { StepStorage } from "@/components/step-storage";
+import type { Problem } from "@/components/step-shell";
 import { StepImage } from "@/components/step-image";
 import { StepNetwork } from "@/components/step-network";
 import { StepAccess } from "@/components/step-access";
@@ -423,18 +424,46 @@ function App() {
     selectedDevice !== undefined &&
     selectedDevice.size > 0 &&
     selectedDevice.size < requiredCardBytes;
-  const canProceed =
-    sourceReady &&
-    selectedDisk !== "" &&
-    !cardTooSmall &&
-    !fightModeUnreachable(fightMode, tailnetKey, tailnetServer) &&
-    !encryptionIncomplete({
+  const storageProblems: Problem[] = [
+    ...(sourceReady
+      ? []
+      : [
+          {
+            message: "Pick the operating system to write",
+            fix: () => setStep(STEP.os),
+          },
+        ]),
+    ...(selectedDisk === ""
+      ? [
+          {
+            message:
+              devices.length === 0
+                ? "Insert an SD card"
+                : "Pick the card to write to",
+          },
+        ]
+      : []),
+    ...(cardTooSmall
+      ? [{ message: "This card is too small for the image — insert a bigger one" }]
+      : []),
+    ...(fightModeUnreachable(fightMode, tailnetKey, tailnetServer)
+      ? [
+          {
+            message:
+              "Fight mode needs Remote access with a pre-auth key — the tailnet is the only way in",
+            fix: () => setStep(STEP.access),
+          },
+        ]
+      : []),
+    ...encryptionProblems({
       enabled: encrypting,
       servers: tangServers,
       threshold,
       cloud: cloudOn,
       recoverySaved,
-    });
+    }).map(({ message }) => ({ message, fix: () => setStep(STEP.access) })),
+  ];
+  const canProceed = storageProblems.length === 0;
 
   const remoteEnrolled = tailnetKey.trim() !== "";
   const detectedKeys = sshKeysQuery.data ?? [];
@@ -618,7 +647,6 @@ function App() {
               releaseError={releaseError}
               localFileName={localFileName}
               onPickLocal={handlePickLocal}
-              canProceed={sourceReady}
               cacheStatus={cacheStatus}
               onNext={() => setStep(STEP.network)}
             />
@@ -690,7 +718,7 @@ function App() {
               onSelectDisk={setPickedDisk}
               requiredCardBytes={requiredCardBytes}
               summary={summary}
-              canProceed={canProceed}
+              problems={storageProblems}
               onBack={() => setStep(STEP.access)}
               onEditStep={setStep}
               onFlash={handleFlash}
