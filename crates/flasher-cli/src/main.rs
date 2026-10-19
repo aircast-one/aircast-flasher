@@ -79,7 +79,7 @@ struct FlashArgs {
     release: Option<String>,
     #[arg(long, help = "stable, staging or development")]
     channel: Option<String>,
-    #[arg(long)]
+    #[arg(long, help = "Device name: lowercase letters, numbers and hyphens")]
     hostname: Option<String>,
     #[arg(long, help = "WiFi network the device joins on first boot")]
     wifi_ssid: Option<String>,
@@ -294,7 +294,7 @@ fn cancel_on_ctrl_c() -> Arc<AtomicBool> {
 
 async fn flash(args: &FlashArgs, json: bool) -> Result<(), String> {
     let request = args.request();
-    let problems = request::problems(&request);
+    let problems = request::problems(&request, flasher_ops::sshkeys::detect_ssh_keys().len());
     if !problems.is_empty() {
         return Err(format!(
             "Fix this to continue:\n{}",
@@ -314,6 +314,7 @@ async fn flash(args: &FlashArgs, json: bool) -> Result<(), String> {
         }
     };
     if let Some(release) = &release {
+        request::check_image(&request, release)?;
         eprintln!("Image: Aircast OS {}", release.version);
     }
     confirm_erase(&card, args.yes)?;
@@ -479,8 +480,14 @@ async fn run(cli: Cli) -> Result<(), String> {
                     if fleet.devices.is_empty() {
                         eprintln!("No Aircast device is answering on {}.", fleet.tailnet);
                     }
-                    if fleet.offline > 0 {
-                        eprintln!("{} more offline.", fleet.offline);
+                    if !fleet.offline.is_empty() {
+                        eprintln!("Offline Linux machines: {}", fleet.offline.join(", "));
+                    }
+                    if !fleet.not_answering.is_empty() {
+                        eprintln!(
+                            "Online but not answering as Aircast: {}",
+                            fleet.not_answering.join(", ")
+                        );
                     }
                     Ok(())
                 }

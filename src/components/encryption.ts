@@ -3,9 +3,16 @@ import type { TangServer } from "@/types";
 import type { FieldProblem } from "@/components/step-network.validation";
 
 export const ENCRYPTION_MIN_IMAGE = "0.3.6";
+export const FIGHT_MIN_IMAGE = "0.3.6";
+
+const atLeast = (version: string, min: string) =>
+  valid(version) !== null && gte(version, `${min}-0`);
 
 export const releaseSupportsEncryption = (version: string) =>
-  valid(version) !== null && gte(version, `${ENCRYPTION_MIN_IMAGE}-0`);
+  atLeast(version, ENCRYPTION_MIN_IMAGE);
+
+export const releaseSupportsFight = (version: string) =>
+  atLeast(version, FIGHT_MIN_IMAGE);
 
 export const hasUrl = (s: TangServer) => s.url.trim() !== "";
 export const isCaptured = (s: TangServer) =>

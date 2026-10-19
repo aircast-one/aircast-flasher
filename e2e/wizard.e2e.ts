@@ -103,6 +103,14 @@ async function expectBlocked(button: string, mentions: string) {
   expect(await heading()).toBe(before);
 }
 
+async function useNewestRelease() {
+  if ((await heading()) !== "Operating system") {
+    await backToStep("Operating system");
+  }
+  await $('[aria-label="Aircast OS version"]').click();
+  await $$('[role="option"]')[0].click();
+}
+
 async function backToStep(name: string) {
   await $('nav[aria-label="Setup steps"]').$(`button*=${name}`).click();
   await waitForHeading(name);
@@ -380,6 +388,7 @@ describe("flasher wizard", () => {
   });
 
   it("fight mode changes the card, not what this computer remembers", async () => {
+    await useNewestRelease();
     await onAccessStep();
     await browser.waitUntil(() => savedSettings().hostname === "falcon-01", {
       timeout: 10_000,
@@ -407,6 +416,7 @@ describe("flasher wizard", () => {
   });
 
   it("won't let fight mode write a drone nothing can reach", async () => {
+    await useNewestRelease();
     await onAccessStep();
     const fight = $('[role="switch"][aria-label="Fight mode"]');
     const remote = $('[role="switch"][aria-label="Remote access"]');

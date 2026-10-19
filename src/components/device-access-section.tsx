@@ -314,7 +314,7 @@ export function DeviceAccessSection({
       ) : sshKey.trim() === "" ? (
         <Hint id="ssh-key-help" tone="warn">
           {keysOnly
-            ? "No key yet — nobody can log in over SSH."
+            ? "No key yet — add one, or turn SSH off. Fight mode won't leave the password login on."
             : "No key yet — the default pi / raspberry login stays on."}
         </Hint>
       ) : (

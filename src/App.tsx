@@ -40,6 +40,7 @@ import {
   hasUrl,
   isCaptured,
   releaseSupportsEncryption,
+  releaseSupportsFight,
 } from "@/components/encryption";
 import { cardLabel, withCloudServer } from "@/components/cloud";
 import {
@@ -414,10 +415,20 @@ function App() {
     sourceKind === "local" ||
     (release !== null && releaseSupportsEncryption(release.version));
   const encrypting = encryptEnabled && encryptionAvailable;
+  const fightAvailable =
+    sourceKind === "local" ||
+    (release !== null && releaseSupportsFight(release.version));
+  const fighting = fightMode && fightAvailable;
   const requiredCardBytes =
     sourceKind === "aircast" && release !== null
       ? (release.image.uncompressed_size ?? releasesQuery.data?.min_card_bytes)
       : undefined;
+  const detectedKeys = sshKeysQuery.data ?? [];
+  const sshKey =
+    settings.authorizedKey ??
+    (detectedKeys.length === 1 ? detectedKeys[0].contents : "");
+  const fightKeyMissing =
+    fighting && sshMode === "key-only" && sshKey.trim() === "";
   const selectedDevice = devices.find((d) => d.path === selectedDisk);
   const cardTooSmall =
     requiredCardBytes !== undefined &&
@@ -446,11 +457,20 @@ function App() {
     ...(cardTooSmall
       ? [{ message: "This card is too small for the image — insert a bigger one" }]
       : []),
-    ...(fightModeUnreachable(fightMode, tailnetKey, tailnetServer)
+    ...(fightModeUnreachable(fighting, tailnetKey, tailnetServer)
       ? [
           {
             message:
               "Fight mode needs Remote access with a pre-auth key — the tailnet is the only way in",
+            fix: () => setStep(STEP.access),
+          },
+        ]
+      : []),
+    ...(fightKeyMissing
+      ? [
+          {
+            message:
+              "Fight mode needs an SSH key, or SSH turned off — the image's password login would stay on",
             fix: () => setStep(STEP.access),
           },
         ]
@@ -466,10 +486,6 @@ function App() {
   const canProceed = storageProblems.length === 0;
 
   const remoteEnrolled = tailnetKey.trim() !== "";
-  const detectedKeys = sshKeysQuery.data ?? [];
-  const sshKey =
-    settings.authorizedKey ??
-    (detectedKeys.length === 1 ? detectedKeys[0].contents : "");
 
   const imageLabel =
     sourceKind === "aircast"
@@ -492,7 +508,7 @@ function App() {
     encryption: encrypting
       ? { tang: tangServers.some(isCaptured), cloud: cloudOn }
       : null,
-    fightMode,
+    fightMode: fighting,
   });
 
   async function handlePickLocal() {
@@ -551,7 +567,7 @@ function App() {
       access,
       encryption,
       cloudKeyServer: encrypting && cloudOn,
-      fightMode,
+      fightMode: fighting,
     };
     setLastVars(vars);
     flashMutation.mutate(vars);
@@ -706,7 +722,11 @@ function App() {
                 wifiUplink: !noWifi && ssid.trim() !== "",
                 hostname,
               }}
-              fight={{ enabled: fightMode, onEnabled: enableFightMode }}
+              fight={{
+                enabled: fighting,
+                available: fightAvailable,
+                onEnabled: enableFightMode,
+              }}
               onBack={() => setStep(STEP.network)}
               onNext={() => setStep(STEP.storage)}
             />

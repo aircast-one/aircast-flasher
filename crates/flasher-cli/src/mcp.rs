@@ -185,7 +185,7 @@ impl Flasher {
                 request.disk
             ));
         }
-        let problems = request::problems(&request);
+        let problems = request::problems(&request, flasher_ops::sshkeys::detect_ssh_keys().len());
         if !problems.is_empty() {
             return Err(format!(
                 "Fix this to continue:\n- {}",
@@ -202,6 +202,7 @@ impl Flasher {
                 let release =
                     request::pick_release(request.release.as_deref(), request.channel.clone())
                         .await?;
+                request::check_image(&request, &release)?;
                 request::download(&release, &cancel, &mut |d| {
                     let _ =
                         progress.send(("Downloading".into(), d.downloaded_bytes, d.total_bytes));

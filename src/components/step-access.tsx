@@ -18,6 +18,7 @@ import {
 } from "@/components/disk-encryption-section";
 import {
   ENCRYPTION_MIN_IMAGE,
+  FIGHT_MIN_IMAGE,
   encryptionProblems,
 } from "@/components/encryption";
 import {
@@ -64,7 +65,7 @@ export function StepAccess({
   access: DeviceAccessInputs;
   encryption: DiskEncryptionProps;
   encryptionAvailable: boolean;
-  fight: { enabled: boolean; onEnabled: (v: boolean) => void };
+  fight: { enabled: boolean; available: boolean; onEnabled: (v: boolean) => void };
   onBack: () => void;
   onNext: () => void;
 }) {
@@ -103,6 +104,17 @@ export function StepAccess({
           {
             message: `Make the device password at least ${MIN_DEVICE_PASSWORD} characters`,
             fix: focusField("device-password"),
+          },
+        ]
+      : []),
+    ...(fight.enabled &&
+    access.sshMode === "key-only" &&
+    access.sshKey.trim() === ""
+      ? [
+          {
+            message:
+              "Add an SSH key, or turn SSH off — in fight mode the image's password login would stay on",
+            fix: focusField("ssh-key"),
           },
         ]
       : []),
@@ -208,11 +220,16 @@ export function StepAccess({
         <SettingCard
           icon={<Swords />}
           title="Fight mode"
-          description="No logs on the drone"
+          description={
+            fight.available
+              ? "No logs on the drone"
+              : `Needs Aircast OS v${FIGHT_MIN_IMAGE} or newer — pick it in Operating system`
+          }
           action={
             <Switch
               aria-label="Fight mode"
               checked={fight.enabled}
+              disabled={!fight.available}
               onCheckedChange={fight.onEnabled}
             />
           }

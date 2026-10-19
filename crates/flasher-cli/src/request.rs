@@ -136,7 +136,7 @@ fn wifi_password_valid(password: &str) -> bool {
         || (password.len() == 64 && password.chars().all(|c| c.is_ascii_hexdigit()))
 }
 
-pub fn problems(request: &FlashRequest) -> Vec<String> {
+pub fn problems(request: &FlashRequest, detected_keys: usize) -> Vec<String> {
     let ssh_password = request
         .ssh
         .as_ref()
@@ -196,6 +196,10 @@ pub fn problems(request: &FlashRequest) -> Vec<String> {
         }),
         (request.fight_mode && ssh_password)
             .then(|| "Fight mode takes SSH keys only — use a key or turn SSH off".to_string()),
+        (request.fight_mode && request.ssh.is_none() && detected_keys != 1).then(|| {
+            "Fight mode needs an SSH key — pass one, or turn SSH off; the image's password login would stay on"
+                .to_string()
+        }),
         request
             .encryption
             .as_ref()
@@ -228,6 +232,35 @@ pub fn problems(request: &FlashRequest) -> Vec<String> {
     .into_iter()
     .flatten()
     .collect()
+}
+
+pub const CARD_FLAGS_MIN_IMAGE: (u64, u64, u64) = (0, 3, 6);
+
+fn version_at_least(version: &str, min: (u64, u64, u64)) -> bool {
+    let core = version
+        .trim_start_matches('v')
+        .split(['-', '+'])
+        .next()
+        .unwrap_or("");
+    let parts: Vec<u64> = core.split('.').filter_map(|n| n.parse().ok()).collect();
+    match parts.as_slice() {
+        [major, minor, patch] => (*major, *minor, *patch) >= min,
+        _ => false,
+    }
+}
+
+pub fn check_image(request: &FlashRequest, release: &Release) -> Result<(), String> {
+    let needs_new_image = request.fight_mode || request.encryption.is_some();
+    match needs_new_image && !version_at_least(&release.version, CARD_FLAGS_MIN_IMAGE) {
+        true => {
+            let (major, minor, patch) = CARD_FLAGS_MIN_IMAGE;
+            Err(format!(
+                "Fight mode and disk encryption need Aircast OS v{major}.{minor}.{patch} or newer — {} would ignore them. Pick a newer release (see `releases`)",
+                release.version
+            ))
+        }
+        false => Ok(()),
+    }
 }
 
 pub async fn find_card(disk: &str) -> Result<BlockDevice, String> {
@@ -516,7 +549,7 @@ mod tests {
 
     #[test]
     fn a_plain_request_has_no_problems() {
-        assert!(problems(&request()).is_empty());
+        assert!(problems(&request(), 1).is_empty());
     }
 
     #[test]
@@ -532,12 +565,41 @@ mod tests {
             fight_mode: true,
             ..FlashRequest::default()
         };
-        let found = problems(&bad);
-        assert_eq!(found.len(), 4, "{found:?}");
+        let found = problems(&bad, 0);
+        assert_eq!(found.len(), 5, "{found:?}");
+        assert!(found.iter().any(|p| p.contains("needs an SSH key")));
         assert!(found.iter().any(|p| p.contains("card")));
         assert!(found.iter().any(|p| p == HOSTNAME_RULE));
         assert!(found.iter().any(|p| p.contains("8–63")));
         assert!(found.iter().any(|p| p.contains("Fight mode needs")));
+    }
+
+    #[test]
+    fn fight_mode_uses_the_only_key_or_asks_for_one() {
+        let fight = FlashRequest {
+            fight_mode: true,
+            tailscale: Some(TailnetRequest {
+                auth_key: "tskey-auth-x".into(),
+                control_server: None,
+            }),
+            ..request()
+        };
+        assert!(problems(&fight, 1).is_empty());
+        assert!(problems(&fight, 0)
+            .iter()
+            .any(|p| p.contains("needs an SSH key")));
+        assert!(problems(&fight, 2)
+            .iter()
+            .any(|p| p.contains("needs an SSH key")));
+    }
+
+    #[test]
+    fn card_flags_need_a_new_enough_image() {
+        assert!(version_at_least("v0.3.6", CARD_FLAGS_MIN_IMAGE));
+        assert!(version_at_least("v0.3.6-beta.1", CARD_FLAGS_MIN_IMAGE));
+        assert!(version_at_least("0.4.0", CARD_FLAGS_MIN_IMAGE));
+        assert!(!version_at_least("v0.3.5", CARD_FLAGS_MIN_IMAGE));
+        assert!(!version_at_least("nonsense", CARD_FLAGS_MIN_IMAGE));
     }
 
     #[test]
@@ -565,7 +627,7 @@ mod tests {
             }),
             ..request()
         };
-        let found = problems(&encrypted);
+        let found = problems(&encrypted, 1);
         assert!(
             found.iter().any(|p| p.contains("Tang key server")),
             "{found:?}"

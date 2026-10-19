@@ -10,7 +10,7 @@ export interface Problem {
 }
 
 export const focusField = (id: string) => () =>
-  requestAnimationFrame(() => {
+  setTimeout(() => {
     const field = document.getElementById(id);
     field?.scrollIntoView({ block: "center", behavior: "smooth" });
     field?.focus({ preventScroll: true });

@@ -16,7 +16,8 @@ pub struct Device {
 pub struct Fleet {
     pub tailnet: String,
     pub devices: Vec<Device>,
-    pub offline: usize,
+    pub offline: Vec<String>,
+    pub not_answering: Vec<String>,
 }
 
 pub async fn devices() -> Result<Fleet, String> {
@@ -31,32 +32,33 @@ pub async fn devices() -> Result<Fleet, String> {
             "Tailscale isn't signed in on this computer — sign in to see your devices".into(),
         );
     }
-    let linux: Vec<_> = local
+    let (online, offline): (Vec<_>, Vec<_>) = local
         .peers
         .into_iter()
         .filter(|peer| peer.os.eq_ignore_ascii_case("linux"))
-        .collect();
-    let offline = linux.iter().filter(|peer| !peer.online).count();
-    let candidates: Vec<_> = linux.into_iter().filter(|peer| peer.online).collect();
+        .partition(|peer| peer.online);
     let reachable = flasher_ops::tailnet::probe_devices(
-        candidates
+        online
             .iter()
             .map(|peer| format!("http://{}", peer.dns_name))
             .collect(),
     )
     .await;
+    let (answering, silent): (Vec<_>, Vec<_>) = online
+        .into_iter()
+        .partition(|peer| reachable.contains(&format!("http://{}", peer.dns_name)));
     Ok(Fleet {
         tailnet: local.tailnet,
-        offline,
-        devices: candidates
+        devices: answering
             .into_iter()
             .map(|peer| Device {
                 address: format!("http://{}", peer.dns_name),
                 name: peer.host_name,
                 ip: peer.ip,
             })
-            .filter(|device| reachable.contains(&device.address))
             .collect(),
+        offline: offline.into_iter().map(|peer| peer.host_name).collect(),
+        not_answering: silent.into_iter().map(|peer| peer.host_name).collect(),
     })
 }
 

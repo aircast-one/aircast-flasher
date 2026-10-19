@@ -119,45 +119,126 @@ crates/flasher-ops/     everything with I/O, shared by the app and the CLI:
   src/releases.rs · devices.rs · download.rs · flash.rs · helper.rs
   src/tang.rs · cloud.rs · tailnet.rs · sshkeys.rs · wifi.rs · paths.rs
 crates/flasher-cli/     aircast-flasher-cli: commands, plus `mcp` for agents
+skills/aircast-flasher/ Claude skill for the CLI and MCP tools
 src-tauri/
   src/flasher.rs          Tauri commands over flasher-ops, telemetry, save dialog
   src/main.rs             app builder, command registration
 src/                    React + TypeScript UI
 ```
 
-## CLI and MCP
+## CLI, MCP and Claude skill
 
-Every release attaches `aircast-flasher-cli` for macOS, Windows and Linux. It
-writes the same cards as the app — same image cache, same elevated helper — and
-`aircast-flasher-cli mcp` serves the same operations to agents over stdio.
+`aircast-flasher-cli` does everything the app does from a terminal, and
+`aircast-flasher-cli mcp` serves the same operations to agents. Both write the
+same cards as the app: same image cache, same elevated write helper, same rules.
 
-```sh
-aircast-flasher-cli releases
-aircast-flasher-cli cards
-aircast-flasher-cli flash --disk /dev/disk4 --hostname falcon-01 \
-  --wifi-ssid home --wifi-password '…' --tailscale-key tskey-auth-…
-aircast-flasher-cli find falcon-01
-aircast-flasher-cli devices
-aircast-flasher-cli cloud login
-```
+### Install
 
-`flash` asks you to type the disk path before erasing it; `--yes` skips that,
-and without a terminal it refuses unless `--yes` is given. Writing asks for an
-administrator password unless the CLI already runs as root. Secrets can come
-from `AIRCAST_WIFI_PASSWORD`, `AIRCAST_DEVICE_PASSWORD` and
-`AIRCAST_TAILSCALE_KEY` instead of the command line. Every command takes
-`--json`.
+Every release attaches the CLI next to the app:
 
-Register the MCP server with Claude Code:
+| Platform | Asset |
+|---|---|
+| macOS (universal, signed and notarized) | `aircast-flasher-cli_<version>_macos-universal.zip` |
+| Windows | `aircast-flasher-cli_<version>_windows-x86_64.zip` |
+| Linux | `aircast-flasher-cli_<version>_linux-x86_64.tar.gz` |
 
 ```sh
-claude mcp add aircast-flasher -- /path/to/aircast-flasher-cli mcp
+gh release download -R aircast-one/aircast-flasher -p 'aircast-flasher-cli_*_macos-*'
+unzip aircast-flasher-cli_*_macos-*.zip && mv aircast-flasher-cli /usr/local/bin/
 ```
 
-It offers `list_releases`, `list_cards`, `download_image`, `flash_card`
-(which must repeat the disk in `confirmErase`), `list_devices`, `find_device`,
-`device_status`, `device_tailscale_login` and the `cloud_*` tools. A Cloud
-sign-in is kept in the Flasher config directory and shared by the CLI and MCP.
+Or build it from this repo: `just cli` → `target/release/aircast-flasher-cli`.
+
+### Commands
+
+| Command | Does |
+|---|---|
+| `releases [--channel C]` | Aircast OS releases (stable, staging, development) |
+| `cards` | Removable SD cards this computer can write |
+| `download [--release V] [--channel C]` | Fetch an image into the shared cache, print its path |
+| `flash --disk D [options]` | Erase a card, write Aircast OS and configure it |
+| `devices` | Aircast devices answering on this computer's tailnet |
+| `find <hostname>` | Locate a freshly flashed device (`<hostname>.local`, or its hotspot) |
+| `device status <target>` | Whether a device is on a tailnet, and its name |
+| `device login <target> [--control-server URL]` | Start Tailscale sign-in on a device, print the approval URL |
+| `cloud login` / `logout` / `whoami` | Aircast Cloud session (browser sign-in, kept on this computer) |
+| `cloud cards` | Cards that unlock through Aircast Cloud |
+| `cloud lost <id> --yes` | Mark a card lost — it never unlocks again |
+| `mcp` | Serve all of this over MCP on stdio |
+
+Every command takes `--json`.
+
+### Flash options
+
+| Option | Effect |
+|---|---|
+| `--disk D` | Card to erase, exactly as `cards` lists it (required) |
+| `--image PATH` | Local `.img`, `.img.xz` or `.img.gz` instead of a download |
+| `--release V`, `--channel C` | Aircast OS version / channel (default: newest stable) |
+| `--hostname NAME` | Lowercase letters, numbers and hyphens |
+| `--wifi-ssid S`, `--wifi-country CC` | WiFi joined on first boot (country defaults to this computer's) |
+| `--ssh-key KEY_OR_FILE` | Key-only SSH (default: your only key in `~/.ssh`, else the image login) |
+| `--no-ssh` | SSH off |
+| `--control-server URL` | Headscale instead of Tailscale |
+| `--tang URL` (repeatable), `--threshold N` | Disk encryption with Tang key servers |
+| `--cloud-unlock` | Also unlock through Aircast Cloud (needs `cloud login`) |
+| `--recovery-file PATH` | Where the recovery key is saved; must not exist yet |
+| `--fight` | Fight mode: no logs on the drone, tailnet-only, SSH keys only |
+| `--yes` | Erase without the prompt |
+
+Fight mode and disk encryption need Aircast OS v0.3.6 or newer; with an older
+release `flash` refuses rather than write flags the image would ignore. Fight
+mode also needs an SSH key (or `--no-ssh`) — it never leaves a password login
+on.
+
+Secrets come from the environment so they stay out of shell history:
+`AIRCAST_WIFI_PASSWORD`, `AIRCAST_DEVICE_PASSWORD` (password SSH login) and
+`AIRCAST_TAILSCALE_KEY`.
+
+```sh
+AIRCAST_WIFI_PASSWORD='…' AIRCAST_TAILSCALE_KEY='hskey-auth-…' \
+aircast-flasher-cli flash --disk /dev/disk4 --hostname falcon-02 \
+  --wifi-ssid home --control-server https://headscale.example.com --fight
+aircast-flasher-cli find falcon-02
+```
+
+Safety rails: `flash` lists every problem at once before touching anything,
+refuses a disk that isn't a listed removable card, and asks you to type the
+disk path before erasing it. Without a terminal it refuses unless `--yes` is
+given. Writing asks for an administrator password (Touch ID, UAC, pkexec)
+unless the CLI already runs as root, so `sudo` and unattended runs need no
+dialog. The encryption recovery key is written to `--recovery-file` before the
+card, and it is the only copy.
+
+### MCP server
+
+```sh
+claude mcp add aircast-flasher -- /usr/local/bin/aircast-flasher-cli mcp
+```
+
+| Tool | Does |
+|---|---|
+| `list_releases`, `list_cards` | Same as `releases` / `cards` |
+| `download_image` | Fetch an image ahead of time (streams progress) |
+| `flash_card` | Same options as `flash`; must repeat the disk in `confirmErase`. Streams progress and stops when the call is cancelled |
+| `list_devices`, `find_device` | Same as `devices` / `find` |
+| `device_status`, `device_tailscale_login` | Same as `device status` / `device login` |
+| `cloud_account`, `cloud_sign_in`, `cloud_sign_in_finish` | Cloud session: start returns the approval URL, finish waits up to 5 minutes |
+| `cloud_list_cards`, `cloud_mark_lost` | Cloud cards; marking lost must repeat the card label in `confirmLabel` |
+
+The Cloud session lives in the Flasher config directory and is shared by the
+CLI and MCP.
+
+### Claude skill
+
+`skills/aircast-flasher/SKILL.md` teaches Claude to drive the CLI or the MCP
+tools: find the card, confirm the exact disk with you before erasing, map your
+request to flash options, keep secrets in environment variables, then find and
+sign in the drone after it boots. Install it for Claude Code:
+
+```sh
+ln -s "$PWD/skills/aircast-flasher" ~/.claude/skills/aircast-flasher
+```
 
 ## Develop
 

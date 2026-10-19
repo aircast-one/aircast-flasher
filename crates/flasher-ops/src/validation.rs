@@ -29,12 +29,19 @@ pub(crate) fn validate_disk_path(path: &str) -> Result<(), String> {
 }
 
 pub(crate) fn validate_fight_access(config: &ProvisionConfig) -> Result<(), String> {
-    let password = config
-        .access
-        .as_ref()
-        .is_some_and(|a| a.ssh == SshMode::Password);
-    if config.fight_mode && password {
-        return Err("Fight mode takes SSH keys only — pick a key or turn SSH off.".to_string());
+    let keys_only = config.access.as_ref().is_some_and(|a| match a.ssh {
+        SshMode::Disabled => true,
+        SshMode::KeyOnly => a
+            .authorized_key
+            .as_deref()
+            .is_some_and(|key| !key.trim().is_empty()),
+        SshMode::Password => false,
+    });
+    if config.fight_mode && !keys_only {
+        return Err(
+            "Fight mode takes SSH keys only — add a key or turn SSH off, or the image's password login stays on."
+                .to_string(),
+        );
     }
     Ok(())
 }
@@ -154,27 +161,41 @@ mod tests {
     use super::*;
     use flasher_core::{AccessConfig, InitFormat};
 
-    fn config(ssh: SshMode, fight_mode: bool) -> ProvisionConfig {
+    fn config(access: Option<AccessConfig>, fight_mode: bool) -> ProvisionConfig {
         ProvisionConfig {
             hostname: None,
             wifi: None,
             tailscale: None,
-            access: Some(AccessConfig {
-                ssh,
-                authorized_key: None,
-                password: Some("device-password".into()),
-            }),
+            access,
             encryption: None,
             fight_mode,
             init_format: InitFormat::CloudInit,
         }
     }
 
+    fn ssh(ssh: SshMode, key: Option<&str>) -> Option<AccessConfig> {
+        Some(AccessConfig {
+            ssh,
+            authorized_key: key.map(str::to_string),
+            password: Some("device-password".into()),
+        })
+    }
+
     #[test]
-    fn fight_mode_refuses_a_password_login() {
-        assert!(validate_fight_access(&config(SshMode::Password, true)).is_err());
-        assert!(validate_fight_access(&config(SshMode::KeyOnly, true)).is_ok());
-        assert!(validate_fight_access(&config(SshMode::Disabled, true)).is_ok());
-        assert!(validate_fight_access(&config(SshMode::Password, false)).is_ok());
+    fn fight_mode_takes_ssh_keys_only() {
+        let key = Some("ssh-ed25519 AAAA me");
+        assert!(validate_fight_access(&config(ssh(SshMode::KeyOnly, key), true)).is_ok());
+        assert!(validate_fight_access(&config(ssh(SshMode::Disabled, None), true)).is_ok());
+        assert!(validate_fight_access(&config(ssh(SshMode::Password, None), true)).is_err());
+        assert!(
+            validate_fight_access(&config(ssh(SshMode::KeyOnly, Some("  ")), true)).is_err(),
+            "a blank key would leave the image's password login on"
+        );
+        assert!(
+            validate_fight_access(&config(None, true)).is_err(),
+            "no access settings keep the image's password login"
+        );
+        assert!(validate_fight_access(&config(None, false)).is_ok());
+        assert!(validate_fight_access(&config(ssh(SshMode::Password, None), false)).is_ok());
     }
 }

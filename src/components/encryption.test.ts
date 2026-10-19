@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   encryptionProblems,
   isCaptured,
+  releaseSupportsFight,
   releaseSupportsEncryption,
 } from "./encryption.ts";
 
@@ -115,4 +116,11 @@ test("Aircast images before v0.3.6 can't encrypt, so the flasher must not offer 
   assert.equal(supports("v0.3.6"), true);
   assert.equal(supports("v0.4.0"), true);
   assert.equal(supports("not-a-version"), false);
+});
+
+test("fight mode needs an image whose aircastd reads the fight-mode flag", () => {
+  assert.equal(releaseSupportsFight("v0.3.5"), false);
+  assert.equal(releaseSupportsFight("v0.3.6-beta.1"), true);
+  assert.equal(releaseSupportsFight("v0.4.0"), true);
+  assert.equal(releaseSupportsFight("not-a-version"), false);
 });
