@@ -119,7 +119,7 @@ function App() {
   const [pickedDisk, setPickedDisk] = useState<string>("");
 
   const [fightMode, setFightMode] = useState(false);
-  const { settings, update } = useSettings(fightMode);
+  const { settings, update } = useSettings();
   const [showPassword, setShowPassword] = useState(false);
   const [authKey, setAuthKey] = useState("");
   const [sshMode, setSshMode] = useState<SshMode>("key-only");
@@ -369,7 +369,6 @@ function App() {
       return encryption;
     },
     onSuccess: (_result, vars) => {
-      if (vars.fightMode) return;
       if (vars.encryption) {
         update({
           tangUrls: vars.encryption.tangServers.map((s) => s.url),

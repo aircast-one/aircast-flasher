@@ -184,7 +184,7 @@ export function StepAccess({
         <SettingCard
           icon={<Swords />}
           title="Fight mode"
-          description="No logs on the drone or on this computer"
+          description="No logs on the drone"
           action={
             <Switch
               aria-label="Fight mode"
@@ -196,18 +196,9 @@ export function StepAccess({
           {fight.enabled ? (
             <div className="flex flex-col gap-2 text-sm text-muted-foreground">
               <p>
-                <span className="font-medium text-foreground">
-                  On the drone:
-                </span>{" "}
-                no video is recorded, and the flight log, journal and flight
+                No video is recorded, and the flight log, journal and flight
                 controller logs are wiped on every start. Only the tailnet gets
                 in, and only with an SSH key.
-              </p>
-              <p>
-                <span className="font-medium text-foreground">
-                  On this computer:
-                </span>{" "}
-                the WiFi password, SSH key and drone names aren't saved.
               </p>
               {unreachable ? (
                 <p id="fight-mode-help" className="text-destructive">

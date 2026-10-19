@@ -1,12 +1,11 @@
 use super::format_bytes;
 use super::BlockDevice;
 
-// ---------------------------------------------------------------------------
-// Command: list_block_devices
-// ---------------------------------------------------------------------------
-
 #[tauri::command]
 pub async fn list_block_devices() -> Result<Vec<BlockDevice>, String> {
+    if cfg!(feature = "wdio") {
+        return Ok(Vec::new());
+    }
     #[cfg(target_os = "macos")]
     {
         list_block_devices_macos().await
@@ -27,14 +26,12 @@ pub async fn list_block_devices() -> Result<Vec<BlockDevice>, String> {
 
 #[cfg(target_os = "windows")]
 async fn list_block_devices_windows() -> Result<Vec<BlockDevice>, String> {
-    // Enumeration touches the kernel; run it off the async runtime.
     let disks = tokio::task::spawn_blocking(flasher_core::win::list_disks)
         .await
         .map_err(|e| format!("Disk enumeration task failed: {e}"))??;
 
     let mut devices = Vec::new();
     for d in disks {
-        // Same guard as macOS/Linux: only removable, non-system, <=2TB targets.
         if !d.removable || d.is_system || d.size == 0 || d.size > 2_000_000_000_000 {
             continue;
         }
@@ -49,7 +46,6 @@ async fn list_block_devices_windows() -> Result<Vec<BlockDevice>, String> {
             size: d.size,
             size_human: format_bytes(d.size),
             removable: true,
-            // Windows auto-mounts volumes; we don't surface mount points here.
             mounted: false,
             mount_points: vec![],
         });
@@ -110,17 +106,13 @@ async fn list_block_devices_macos() -> Result<Vec<BlockDevice>, String> {
 
         let size = match info.get("TotalSize").and_then(|v| v.as_unsigned_integer()) {
             Some(s) if s > 0 && s <= 2_000_000_000_000 => s,
-            _ => continue, // unknown, zero, or >2TB (likely an external HDD/SSD)
+            _ => continue,
         };
         let name = info
             .get("MediaName")
             .and_then(|v| v.as_string())
             .unwrap_or("Unknown Device")
             .to_string();
-        // The removable flag — NOT `Internal` — is the system-disk guard: the
-        // built-in SD reader reports `Internal = true` but `Ejectable = true`,
-        // while the boot disk is `Ejectable = false`. Filtering on `Internal`
-        // would wrongly hide built-in card readers.
         let removable = info
             .get("Ejectable")
             .and_then(|v| v.as_boolean())

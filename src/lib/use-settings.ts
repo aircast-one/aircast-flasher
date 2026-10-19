@@ -20,7 +20,7 @@ const EMPTY: Settings = {
   tangCloud: false,
 };
 
-export function useSettings(ephemeral: boolean): {
+export function useSettings(): {
   settings: Settings;
   update: (patch: Partial<Settings>) => void;
 } {
@@ -38,7 +38,7 @@ export function useSettings(ephemeral: boolean): {
     update: (patch) => {
       if (query.data === undefined) return;
       queryClient.setQueryData<Settings>(KEY, { ...query.data, ...patch });
-      if (!ephemeral) persist.mutate(patch);
+      persist.mutate(patch);
     },
   };
 }
