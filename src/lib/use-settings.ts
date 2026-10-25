@@ -32,7 +32,7 @@ const EMPTY: Settings = {
 
 export function useSettings(): {
   settings: Settings;
-  update: (patch: Partial<Settings>) => void;
+  update: (patch: Partial<Settings>) => Promise<boolean>;
   loaded: boolean;
 } {
   const query = useQuery({
@@ -49,9 +49,12 @@ export function useSettings(): {
     settings: current ?? EMPTY,
     loaded: current !== undefined,
     update: (patch) => {
-      if (current === undefined) return;
+      if (current === undefined) return Promise.resolve(false);
       setEdited((prev) => ({ ...(prev ?? current), ...patch }));
-      persist.mutate(patch);
+      return persist.mutateAsync(patch).then(
+        () => true,
+        () => false,
+      );
     },
   };
 }

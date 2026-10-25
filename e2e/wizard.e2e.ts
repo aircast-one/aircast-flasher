@@ -164,16 +164,23 @@ async function openRemoteAccess() {
 describe("flasher wizard", () => {
   before(async () => {
     await attachToAppWindow();
-    await waitForHeading("Operating system");
   });
 
   it("asks before any diagnostics leave the machine, and only once", async () => {
-    const banner = $('[data-testid="consent-banner"]');
-    await expect(banner).toBeDisplayed();
+    await waitForHeading("Diagnostics");
+    const consent = $('[data-testid="consent-step"]');
+    await expect(consent).toHaveText(
+      expect.stringContaining("never includes your network name"),
+    );
+    await expect(
+      $('nav[aria-label="Setup steps"]').$("button*=Network"),
+    ).toBeDisabled();
 
-    await banner.$("button=No thanks").click();
+    await $("button=No thanks").click();
 
-    await expect(banner).not.toBeDisplayed();
+    await waitForHeading("Operating system");
+    await expect(consent).not.toBeDisplayed();
+    await expect($("button=Diagnostics off")).toBeDisplayed();
     await browser.waitUntil(
       () =>
         fs.existsSync(settingsFile()) &&

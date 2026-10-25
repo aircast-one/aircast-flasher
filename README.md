@@ -337,7 +337,7 @@ cannot tell "no card was ever detected" from "never tried":
 | Event | Answers |
 |---|---|
 | `app_start` | how many installs run each version |
-| `consent` | the opt-in itself, and whether a build's sink works at all |
+| `telemetry_enabled` | the opt-in itself, sent once the answer is saved — the first event a new install ships, and whether a build's sink works at all |
 | `step_view` | which step operators reach, and where the ones who never flash stop |
 | `devices_listed` | whether a card was detected at all, and how many |
 | `releases_failed` | the catalog is unreachable, before anyone reports it |
@@ -348,8 +348,9 @@ cannot tell "no card was ever detected" from "never tried":
 
 ### Shipping them
 
-Opt-in, off until the operator answers the consent prompt (and reversible from
-**Diagnostics on/off** in the sidebar). Turning it on mints a random per-install
+Opt-in, off until the operator answers the **Diagnostics** question that opens
+the wizard on first launch — Share or No thanks, before the image step (and
+reversible from **Diagnostics on/off** in the sidebar). Turning it on mints a random per-install
 id; turning it off drops it. Until then, and in any build without a
 `POSTHOG_KEY`, events only ever reach the local file.
 

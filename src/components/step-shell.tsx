@@ -76,7 +76,7 @@ export function StepShell({
   description?: string;
   headerAction?: ReactNode;
   children: ReactNode;
-  back?: { onClick: () => void; disabled?: boolean } | null;
+  back?: { label?: string; onClick: () => void; disabled?: boolean } | null;
   next?: {
     label: string;
     onClick: () => void;
@@ -120,7 +120,7 @@ export function StepShell({
                   onClick={back.onClick}
                   disabled={back.disabled}
                 >
-                  Back
+                  {back.label ?? "Back"}
                 </Button>
               ) : null}
             </div>

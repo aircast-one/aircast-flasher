@@ -49,11 +49,12 @@ import {
 } from "@/components/step-network.validation";
 import { useSettings } from "@/lib/use-settings";
 import { useLocalTailscale } from "@/lib/use-local-tailscale";
-import { ConsentBanner } from "@/components/consent-banner";
+import { answerConsent, asksConsent } from "@/components/consent";
 import { UpdateBanner } from "@/components/update-banner";
 import { WizardSidebar } from "@/components/wizard-sidebar";
 import { StepStorage } from "@/components/step-storage";
 import type { Problem } from "@/components/step-shell";
+import { StepConsent } from "@/components/step-consent";
 import { StepImage } from "@/components/step-image";
 import { StepNetwork } from "@/components/step-network";
 import { StepAccess } from "@/components/step-access";
@@ -574,8 +575,7 @@ function App() {
   }
 
   function answerTelemetry(share: boolean) {
-    update({ telemetry: share });
-    if (share) track("consent", { shared: true });
+    void answerConsent(share, update, track);
   }
 
   function handleCancel() {
@@ -618,10 +618,6 @@ function App() {
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-background text-foreground">
-      <ConsentBanner
-        asked={settings.telemetry !== null}
-        onAnswer={answerTelemetry}
-      />
       <UpdateBanner suspended={writing} />
 
       <div className="flex min-h-0 flex-1 overflow-hidden">
@@ -652,6 +648,8 @@ function App() {
             />
           ) : fleetView === "cloud" ? (
             <CloudCardsView />
+          ) : asksConsent(loaded, settings.telemetry) ? (
+            <StepConsent onAnswer={answerTelemetry} />
           ) : step === STEP.os ? (
             <StepImage
               sourceKind={sourceKind}
