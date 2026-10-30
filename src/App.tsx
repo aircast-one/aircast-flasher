@@ -21,6 +21,7 @@ import {
 } from "@/api";
 import type {
   AccessConfig,
+  Board,
   EncryptionConfig,
   TangServer,
   BlockDevice,
@@ -125,9 +126,10 @@ function App() {
   const sourceKind: SourceKind = settings.useLocalImage ? "local" : "aircast";
   const setSourceKind = (kind: SourceKind) =>
     update({ useLocalImage: kind === "local" });
-  const setBoard = (board: string) => {
+  const setBoard = (next: Board) => {
+    if (next.id === settings.board) return;
     setSelectedVersion(null);
-    update({ board });
+    update({ board: next.id, noWifi: !next.builtinWifi });
   };
   const localPath = settings.localImagePath;
   const fightMode = settings.fightMode;
@@ -230,10 +232,11 @@ function App() {
     staleTime: Infinity,
   });
   const boards = boardsQuery.data ?? [];
-  const board = settings.board ?? boards[0]?.id ?? "";
+  const board = boards.find((b) => b.id === settings.board) ?? null;
   const releasesQuery = useQuery({
     queryKey: ["releases", settings.board],
     queryFn: () => listReleases(settings.board),
+    enabled: settings.board !== null,
     refetchInterval: onOsStep ? RELEASES_POLL_INTERVAL_MS : false,
     refetchOnWindowFocus: onOsStep,
   });
@@ -503,7 +506,7 @@ function App() {
   const imageLabel =
     sourceKind === "aircast"
       ? release
-        ? `Aircast OS ${release.version} for ${boards.find((b) => b.id === board)?.name ?? board}`
+        ? `Aircast OS ${release.version} for ${board?.name ?? "this board"}`
         : "No release"
       : (localFileName ?? "No file");
 
@@ -512,6 +515,10 @@ function App() {
     hostname,
     ssid,
     noWifi,
+    wifilessBoard:
+      sourceKind === "aircast" && board !== null && !board.builtinWifi
+        ? board.name
+        : null,
     authKey: tailnetKey,
     controlServer: tailnetServer,
     sshMode,
@@ -681,6 +688,7 @@ function App() {
             />
           ) : step === STEP.network ? (
             <StepNetwork
+              board={board}
               ssid={ssid}
               onSsid={setSsid}
               knownNetworks={wifiQuery.data?.known ?? []}
@@ -758,7 +766,9 @@ function App() {
             />
           ) : (
             <JobView
-              hostname={hostname.trim()}
+              hostname={(lastVars?.hostname ?? hostname).trim()}
+              board={sourceKind === "aircast" ? board : null}
+              noWifi={noWifi}
               remoteEnrolled={remoteEnrolled}
               encryption={flashMutation.data ?? null}
               success={flashMutation.isSuccess}

@@ -53,7 +53,9 @@ the disk always comes from what the computer reports — never from a guess.
    Raspberry Pi (`releases` shows them; prereleases are marked). For another
    board pass `--board orangepi5` or `--board rock-5b` (same flag on
    `releases` and `download`; ask which board when the person hasn't said and
-   it isn't a Pi). Use `--release vX.Y.Z` for a specific
+   it isn't a Pi). Those two have no built-in WiFi: leave the WiFi flags out
+   unless the person has a USB WiFi adapter (the CLI prints a note if WiFi is
+   set anyway). Use `--release vX.Y.Z` for a specific
    version, `--channel staging|development` for other channels, or `--image`
    for a local `.img`, `.img.xz` or `.img.gz`. Fight mode and disk encryption
    need Aircast OS v0.3.6 or newer — older images ignore them, so the CLI

@@ -29,7 +29,7 @@ pub struct FlashRequest {
     #[schemars(description = "Release channel: stable, staging or development.")]
     pub channel: Option<String>,
     #[schemars(
-        description = "Board the card goes into: rpi, orangepi5 or rock-5b. Defaults to rpi."
+        description = "Board the card goes into: rpi, orangepi5 or rock-5b. Defaults to rpi. orangepi5 and rock-5b have no built-in WiFi: leave wifi out unless a USB WiFi adapter is plugged in."
     )]
     pub board: Option<String>,
     #[schemars(description = "Device hostname: lowercase letters, numbers and hyphens.")]
@@ -251,6 +251,17 @@ fn version_at_least(version: &str, min: (u64, u64, u64)) -> bool {
         [major, minor, patch] => (*major, *minor, *patch) >= min,
         _ => false,
     }
+}
+
+pub fn wifi_note(request: &FlashRequest) -> Option<String> {
+    let board = flasher_ops::releases::board(request.board.as_deref()).ok()?;
+    let wifi = request.wifi.as_ref()?;
+    (!board.builtin_wifi).then(|| {
+        format!(
+            "{} has no built-in WiFi — it joins {} only with a USB WiFi adapter plugged in",
+            board.name, wifi.ssid
+        )
+    })
 }
 
 pub fn check_image(request: &FlashRequest, release: &Release) -> Result<(), String> {
@@ -550,6 +561,27 @@ mod tests {
             hostname: Some("falcon-01".into()),
             ..FlashRequest::default()
         }
+    }
+
+    #[test]
+    fn wifi_on_a_board_without_it_gets_a_note_naming_the_adapter() {
+        let wifi = Some(WifiRequest {
+            ssid: "field-net".into(),
+            password: String::new(),
+            country: None,
+        });
+        let on = |board: &str, wifi: Option<WifiRequest>| FlashRequest {
+            board: Some(board.into()),
+            wifi,
+            ..request()
+        };
+        let note = wifi_note(&on("orangepi5", wifi.clone())).unwrap();
+        assert!(
+            note.contains("Orange Pi 5") && note.contains("USB WiFi adapter"),
+            "{note}"
+        );
+        assert_eq!(wifi_note(&on("rpi", wifi)), None);
+        assert_eq!(wifi_note(&on("rock-5b", None)), None);
     }
 
     #[test]

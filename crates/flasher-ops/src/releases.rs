@@ -7,9 +7,13 @@ use super::MIN_CARD_BYTES;
 const CHANNEL_FALLBACK: &[&str] = &["stable", "staging", "development"];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Board {
     pub id: &'static str,
     pub name: &'static str,
+    pub detail: &'static str,
+    pub builtin_wifi: bool,
+    pub beta: bool,
     #[serde(skip)]
     catalog: &'static str,
 }
@@ -18,16 +22,25 @@ pub const BOARDS: &[Board] = &[
     Board {
         id: "rpi",
         name: "Raspberry Pi",
+        detail: "Pi 3, 4, 5 and Zero 2 W",
+        builtin_wifi: true,
+        beta: false,
         catalog: "lite",
     },
     Board {
         id: "orangepi5",
         name: "Orange Pi 5",
+        detail: "Rockchip RK3588S",
+        builtin_wifi: false,
+        beta: true,
         catalog: "orangepi5",
     },
     Board {
         id: "rock-5b",
         name: "Radxa ROCK 5B",
+        detail: "Rockchip RK3588",
+        builtin_wifi: false,
+        beta: true,
         catalog: "rock-5b",
     },
 ];
@@ -131,6 +144,30 @@ mod tests {
         assert!(BOARDS[1..].iter().all(|b| b.catalog == b.id));
         let ids: std::collections::HashSet<_> = BOARDS.iter().map(|b| b.id).collect();
         assert_eq!(ids.len(), BOARDS.len());
+    }
+
+    #[test]
+    fn only_the_pi_has_builtin_wifi_and_only_the_rockchip_boards_are_beta() {
+        let flags: Vec<_> = BOARDS
+            .iter()
+            .map(|b| (b.id, b.builtin_wifi, b.beta))
+            .collect();
+        assert_eq!(
+            flags,
+            [
+                ("rpi", true, false),
+                ("orangepi5", false, true),
+                ("rock-5b", false, true)
+            ]
+        );
+    }
+
+    #[test]
+    fn a_board_reaches_the_app_in_camel_case_without_its_catalog() {
+        let json = serde_json::to_value(BOARDS[1]).unwrap();
+        assert_eq!(json["builtinWifi"], false);
+        assert_eq!(json["detail"], "Rockchip RK3588S");
+        assert!(json.get("catalog").is_none());
     }
 
     #[test]

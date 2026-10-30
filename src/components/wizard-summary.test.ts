@@ -9,6 +9,7 @@ const base: SummaryInput = {
   hostname: "falcon-01",
   ssid: "field-net",
   noWifi: false,
+  wifilessBoard: null,
   authKey: "",
   controlServer: "",
   sshMode: "key-only",
@@ -44,6 +45,19 @@ test("skipping WiFi on purpose is stated, not flagged", () => {
   const ethernet = { ...base, ssid: "", noWifi: true };
   assert.equal(valueOf(ethernet, "WiFi"), "Ethernet or cellular only");
   assert.equal(rowOf(ethernet, "WiFi")?.warn, undefined);
+});
+
+test("WiFi on a board without it is flagged with the adapter it needs", () => {
+  const opi = { ...base, wifilessBoard: "Orange Pi 5" };
+  assert.equal(
+    valueOf(opi, "WiFi"),
+    "field-net — Orange Pi 5 needs a USB WiFi adapter",
+  );
+  assert.equal(rowOf(opi, "WiFi")?.warn, true);
+  assert.equal(
+    valueOf({ ...opi, noWifi: true }, "WiFi"),
+    "Ethernet or cellular only",
+  );
 });
 
 test("the surviving image default login is flagged", () => {

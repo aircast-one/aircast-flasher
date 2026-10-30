@@ -206,17 +206,19 @@ describe("flasher wizard", () => {
     ]);
   });
 
-  it("lists each board's own images and remembers the board picked", async () => {
+  it("asks which board the card is for, and fits the defaults to it", async () => {
     if ((await heading()) !== "Operating system") {
       await backToStep("Operating system");
     }
-    const board = $('[aria-label="Board"]');
+    const boards = $('[aria-label="Board"]');
     const pick = async (name: string) => {
-      await board.click();
-      await $(`//*[@role="option"][contains(., "${name}")]`).click();
-      await expect(board).toHaveText(expect.stringContaining(name));
+      await boards.$(`button*=${name}`).click();
+      await expect(boards.$(`button*=${name}`)).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      );
     };
-    await expect(board).toHaveText(expect.stringContaining("Raspberry Pi"));
+    await expectBlocked("Next", "Choose the board this card is for");
 
     await pick("Radxa ROCK 5B");
     await browser.waitUntil(
@@ -228,7 +230,16 @@ describe("flasher wizard", () => {
         timeoutMsg: "the picked board never reached settings.json",
       },
     );
+    await expect($("button*=Aircast OS for Radxa ROCK 5B")).toHaveText(
+      expect.stringContaining(".img.xz"),
+    );
+    await expect($("p*=support is in beta")).toBeDisplayed();
 
+    await $("button=Next").click();
+    await waitForHeading("Network");
+    await expect($("p*=Radxa ROCK 5B has no built-in WiFi")).toBeDisplayed();
+
+    await backToStep("Operating system");
     await pick("Raspberry Pi");
     await expect($('[aria-label="Aircast OS version"]')).toBeDisplayed();
   });

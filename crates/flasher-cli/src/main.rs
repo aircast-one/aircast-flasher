@@ -329,6 +329,9 @@ async fn flash(args: &FlashArgs, json: bool) -> Result<(), String> {
         request::check_image(&request, release)?;
         eprintln!("Image: Aircast OS {}", release.version);
     }
+    if let Some(note) = request::wifi_note(&request) {
+        eprintln!("Note: {note}");
+    }
     confirm_erase(&card, args.yes)?;
 
     let cancel = cancel_on_ctrl_c();

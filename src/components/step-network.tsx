@@ -1,5 +1,12 @@
 import { useState } from "react";
-import { Cable, Eye, EyeOff, RefreshCw, Wifi } from "lucide-react";
+import {
+  Cable,
+  Eye,
+  EyeOff,
+  RefreshCw,
+  TriangleAlert,
+  Wifi,
+} from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -22,8 +29,22 @@ import {
 import { GENERATED_HOSTNAME } from "@/components/default-hostname";
 import { nextFreeHostname } from "@/components/next-hostname";
 import { useLocalTailscale } from "@/lib/use-local-tailscale";
+import type { Board } from "@/types";
+
+function AdapterNote({ name }: { name: string }) {
+  return (
+    <div className="flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2">
+      <TriangleAlert className="mt-0.5 size-4 shrink-0 text-amber-600 dark:text-amber-400" />
+      <p className="text-sm text-muted-foreground">
+        {name} has no built-in WiFi. It joins this network only with a USB WiFi
+        adapter plugged in.
+      </p>
+    </div>
+  );
+}
 
 export function StepNetwork({
+  board,
   ssid,
   onSsid,
   knownNetworks,
@@ -40,6 +61,7 @@ export function StepNetwork({
   onBack,
   onNext,
 }: {
+  board: Board | null;
   ssid: string;
   onSsid: (v: string) => void;
   knownNetworks: string[];
@@ -72,6 +94,7 @@ export function StepNetwork({
   const suggestion = nextFreeHostname(trimmedHostname, takenNames);
 
   const wifiPasswordInvalid = !noWifi && isInvalidWifiPassword(password);
+  const wifilessBoard = board !== null && !board.builtinWifi ? board : null;
 
   return (
     <StepShell
@@ -97,7 +120,9 @@ export function StepNetwork({
               No WiFi will be written to the card
             </p>
             <p className="text-sm text-muted-foreground">
-              This device gets its network from Ethernet or a cellular modem.
+              {wifilessBoard
+                ? `${wifilessBoard.name} has no built-in WiFi, so it gets its network from Ethernet or a cellular modem. Set up WiFi only if a USB WiFi adapter is plugged in.`
+                : "This device gets its network from Ethernet or a cellular modem."}
             </p>
             <Button
               type="button"
@@ -111,6 +136,7 @@ export function StepNetwork({
           </div>
         ) : (
           <>
+            {wifilessBoard ? <AdapterNote name={wifilessBoard.name} /> : null}
             <div className="flex flex-col gap-2">
               <Label htmlFor="ssid">WiFi network (SSID)</Label>
               <div className="flex items-start gap-2">

@@ -17,6 +17,7 @@ export interface SummaryInput {
   hostname: string;
   ssid: string;
   noWifi: boolean;
+  wifilessBoard: string | null;
   authKey: string;
   controlServer: string;
   sshMode: SshMode;
@@ -65,12 +66,22 @@ function deviceAccess(
   return devicePassword === "" ? IMAGE_DEFAULT_LOGIN : "Password for pi";
 }
 
-function wifi(noWifi: boolean, ssid: string): SummaryItem {
+function wifi(
+  noWifi: boolean,
+  ssid: string,
+  wifilessBoard: string | null,
+): SummaryItem {
   const row = { label: "WiFi", step: STEP.network };
   if (noWifi) return { ...row, value: "Ethernet or cellular only" };
   return ssid === ""
     ? { ...row, value: "Not configured", warn: true }
-    : { ...row, value: ssid };
+    : wifilessBoard !== null
+      ? {
+          ...row,
+          value: `${ssid} — ${wifilessBoard} needs a USB WiFi adapter`,
+          warn: true,
+        }
+      : { ...row, value: ssid };
 }
 
 function encryption(e: SummaryInput["encryption"]): SummaryItem {
@@ -106,7 +117,7 @@ export function buildSummary(input: SummaryInput): SummaryItem[] {
       value: hostname === "" ? "Image default" : `${hostname}.local`,
       step: STEP.network,
     },
-    wifi(input.noWifi, input.ssid.trim()),
+    wifi(input.noWifi, input.ssid.trim(), input.wifilessBoard),
     remoteAccess(input.authKey, input.controlServer),
     {
       label: "Device access",

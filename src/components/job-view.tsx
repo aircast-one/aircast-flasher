@@ -22,7 +22,7 @@ import { cn } from "@/lib/utils";
 import type { FlashProgressState } from "@/components/wizard-types";
 import { saveRecoveryKey } from "@/components/disk-encryption-section";
 import { CloudSignInButton } from "@/components/cloud-cards-view";
-import type { EncryptionConfig } from "@/types";
+import type { Board, EncryptionConfig } from "@/types";
 import { useState } from "react";
 
 function IndeterminateBar() {
@@ -203,8 +203,43 @@ function EncryptionReminder({
   );
 }
 
+const BOARDS_DOCS_URL = "https://aircast.one/docs/hardware/boards";
+
+function NotShowingUp({ board, noWifi }: { board: Board; noWifi: boolean }) {
+  return (
+    <div className="w-full text-left text-sm text-muted-foreground">
+      <h3 className="mb-1 font-medium text-foreground">
+        Not showing up after 10 minutes?
+      </h3>
+      <ul className="list-disc space-y-1 pl-5">
+        {!board.builtinWifi && !noWifi ? (
+          <li>
+            {board.name} has no built-in WiFi. Plug in a USB WiFi adapter or an
+            Ethernet cable, then power it on again.
+          </li>
+        ) : null}
+        <li>
+          This card holds the {board.name} image. It won't start on a
+          different board.
+        </li>
+        <li>
+          <button
+            type="button"
+            className="underline underline-offset-2 hover:text-foreground"
+            onClick={() => void openUrl(BOARDS_DOCS_URL)}
+          >
+            Setup notes for each board
+          </button>
+        </li>
+      </ul>
+    </div>
+  );
+}
+
 export function JobView({
   hostname,
+  board,
+  noWifi,
   remoteEnrolled,
   encryption,
   success,
@@ -220,6 +255,8 @@ export function JobView({
   onRevealLog,
 }: {
   hostname: string;
+  board: Board | null;
+  noWifi: boolean;
   remoteEnrolled: boolean;
   encryption: EncryptionConfig | null;
   success: boolean;
@@ -264,6 +301,7 @@ export function JobView({
           <EncryptionReminder hostname={hostname} encryption={encryption} />
         ) : null}
         <DeviceFinder hostname={hostname} remoteEnrolled={remoteEnrolled} />
+        {board ? <NotShowingUp board={board} noWifi={noWifi} /> : null}
         <div className="flex w-full items-center justify-between gap-3 rounded-xl border border-border px-4 py-3 text-left">
           <div className="flex min-w-0 flex-col gap-0.5">
             <span className="text-sm font-medium">
