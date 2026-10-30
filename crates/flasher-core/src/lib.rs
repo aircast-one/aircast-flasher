@@ -8,7 +8,7 @@ pub mod psk;
 pub mod win;
 
 pub use device::AlignedDevice;
-pub use engine::{flash, BlockDevice, FlashParams, FlashStage, BLOCK};
+pub use engine::{customize_image, flash, BlockDevice, FlashParams, FlashStage, BLOCK};
 
 pub use model::{
     AccessConfig, EncryptionConfig, InitFormat, ProvisionConfig, SshMode, TailscaleConfig,

@@ -13,8 +13,29 @@ const SECTOR: u64 = 512;
 
 const PROGRESS_INTERVAL: Duration = Duration::from_millis(100);
 
+const FAT_GPT_TYPES: [[u8; 16]; 3] = [
+    [
+        0x28, 0x73, 0x2a, 0xc1, 0x1f, 0xf8, 0xd2, 0x11, 0xba, 0x4b, 0x00, 0xa0, 0xc9, 0x3e, 0xc9,
+        0x3b,
+    ],
+    [
+        0xa2, 0xa0, 0xd0, 0xeb, 0xe5, 0xb9, 0x33, 0x44, 0x87, 0xc0, 0x68, 0xb6, 0xb7, 0x26, 0x99,
+        0xc7,
+    ],
+    [
+        0xff, 0xc2, 0x13, 0xbc, 0xe6, 0x59, 0x62, 0x42, 0xa3, 0x52, 0xb2, 0x75, 0xfd, 0x6f, 0x71,
+        0x72,
+    ],
+];
+
 pub trait BlockDevice: Read + Write + Seek {
     fn sync(&mut self) -> std::io::Result<()>;
+}
+
+impl BlockDevice for std::fs::File {
+    fn sync(&mut self) -> std::io::Result<()> {
+        self.sync_all()
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -144,6 +165,19 @@ fn zero_tail(device: &mut dyn BlockDevice) -> Result<(), String> {
         .map_err(|e| ioerr("wipe tail of device", e))
 }
 
+pub fn customize_image(
+    image: &mut dyn BlockDevice,
+    provision: &ProvisionConfig,
+) -> Result<(), String> {
+    image
+        .seek(SeekFrom::Start(0))
+        .map_err(|e| ioerr("seek to image start", e))?;
+    let mut first_block = vec![0u8; BLOCK];
+    let first_len = read_full(image, &mut first_block).map_err(|e| ioerr("read image", e))?;
+    first_block.truncate(first_len);
+    customize(image, &first_block, provision)
+}
+
 fn customize(
     device: &mut dyn BlockDevice,
     first_block: &[u8],
@@ -231,17 +265,41 @@ fn append_cmdline<T: fatfs::ReadWriteSeek>(
 }
 
 fn fat_partition_extent(first_block: &[u8]) -> Result<(u64, u64), String> {
-    let mut cursor = Cursor::new(first_block);
-    let mbr = MBR::read_from(&mut cursor, SECTOR as u32).map_err(|e| format!("parse MBR: {e}"))?;
-
-    for (_, part) in mbr.iter() {
-        if part.is_used() && is_fat(part.sys) {
-            let offset = u64::from(part.starting_lba) * SECTOR;
-            let length = u64::from(part.sectors) * SECTOR;
-            return Ok((offset, length));
-        }
+    let mbr = MBR::read_from(&mut Cursor::new(first_block), SECTOR as u32)
+        .map_err(|e| format!("parse MBR: {e}"))?;
+    if mbr
+        .iter()
+        .any(|(_, part)| part.is_used() && part.sys == 0xee)
+    {
+        return gpt_fat_partition_extent(first_block);
     }
-    Err("no FAT boot partition found in image MBR".to_string())
+    let extent = mbr
+        .iter()
+        .find(|(_, part)| part.is_used() && is_fat(part.sys))
+        .map(|(_, part)| {
+            (
+                u64::from(part.starting_lba) * SECTOR,
+                u64::from(part.sectors) * SECTOR,
+            )
+        })
+        .ok_or_else(|| "no FAT boot partition found in image MBR".to_string());
+    extent
+}
+
+fn gpt_fat_partition_extent(first_block: &[u8]) -> Result<(u64, u64), String> {
+    let gpt = gptman::GPT::read_from(&mut Cursor::new(first_block), SECTOR)
+        .map_err(|e| format!("parse GPT: {e}"))?;
+    let extent = gpt
+        .iter()
+        .find(|(_, part)| part.is_used() && FAT_GPT_TYPES.contains(&part.partition_type_guid))
+        .map(|(_, part)| {
+            (
+                part.starting_lba * SECTOR,
+                (part.ending_lba - part.starting_lba + 1) * SECTOR,
+            )
+        })
+        .ok_or_else(|| "no FAT boot partition found in image GPT".to_string());
+    extent
 }
 
 fn is_fat(sys: u8) -> bool {
@@ -363,11 +421,8 @@ mod tests {
     const FAT_SECTORS: u32 = 16 * 1024;
     const IMAGE_SECTORS: u32 = PART_START_SECTOR + FAT_SECTORS + 2048;
 
-    fn build_image() -> Vec<u8> {
-        let total_bytes = IMAGE_SECTORS as usize * SECTOR as usize;
-        let mut image = vec![0u8; total_bytes];
-
-        let mut cursor = Cursor::new(vec![0u8; total_bytes]);
+    fn mbr_table(image: &mut [u8]) {
+        let mut cursor = Cursor::new(vec![0u8; image.len()]);
         let mut mbr =
             MBR::new_from(&mut cursor, SECTOR as u32, [0x12, 0x34, 0x56, 0x78]).expect("new MBR");
         mbr[1] = mbrman::MBRPartitionEntry {
@@ -380,8 +435,32 @@ mod tests {
         };
         let mut mbr_cursor = Cursor::new(vec![0u8; SECTOR as usize]);
         mbr.write_into(&mut mbr_cursor).expect("write MBR");
-        let mbr_bytes = mbr_cursor.into_inner();
-        image[..SECTOR as usize].copy_from_slice(&mbr_bytes);
+        image[..SECTOR as usize].copy_from_slice(&mbr_cursor.into_inner());
+    }
+
+    fn gpt_table(image: &mut [u8]) {
+        let mut cursor = Cursor::new(image);
+        let mut gpt = gptman::GPT::new_from(&mut cursor, SECTOR, [0x11; 16]).expect("new GPT");
+        gpt[1] = gptman::GPTPartitionEntry {
+            partition_type_guid: FAT_GPT_TYPES[2],
+            unique_partition_guid: [0x22; 16],
+            starting_lba: u64::from(PART_START_SECTOR),
+            ending_lba: u64::from(PART_START_SECTOR + FAT_SECTORS - 1),
+            attribute_bits: 0,
+            partition_name: "bootfs".into(),
+        };
+        gptman::GPT::write_protective_mbr_into(&mut cursor, SECTOR).expect("protective MBR");
+        gpt.write_into(&mut cursor).expect("write GPT");
+    }
+
+    fn build_image() -> Vec<u8> {
+        build_image_with(mbr_table)
+    }
+
+    fn build_image_with(table: fn(&mut [u8])) -> Vec<u8> {
+        let total_bytes = IMAGE_SECTORS as usize * SECTOR as usize;
+        let mut image = vec![0u8; total_bytes];
+        table(&mut image);
 
         let part_off = PART_START_SECTOR as usize * SECTOR as usize;
         let part_len = FAT_SECTORS as usize * SECTOR as usize;
@@ -481,6 +560,47 @@ mod tests {
         assert!(user.contains("hostname: aircast"));
 
         assert!(read_fat_file(&written, "meta-data").is_some());
+    }
+
+    #[test]
+    fn a_gpt_image_gets_its_boot_partition_customized() {
+        let image = build_image_with(gpt_table);
+        let mut device = MemDevice::zeroed(image.len());
+        let params = FlashParams {
+            image_len: image.len() as u64,
+            verify: true,
+        };
+
+        flash(
+            &mut device,
+            &mut Cursor::new(image),
+            &params,
+            &cloud_init_config(),
+            &mut |_, _, _| {},
+        )
+        .expect("flash a GPT image");
+
+        let written = device.into_bytes();
+        let user = read_fat_file(&written, "user-data").expect("user-data exists");
+        assert!(user.contains("hostname: aircast"));
+    }
+
+    #[test]
+    fn an_image_file_is_customized_in_place() {
+        let path =
+            std::env::temp_dir().join(format!("aircast-customize-{}.img", std::process::id()));
+        std::fs::write(&path, build_image_with(gpt_table)).expect("write image");
+        let mut file = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&path)
+            .expect("open image");
+
+        customize_image(&mut file, &cloud_init_config()).expect("customize image");
+
+        let customized = std::fs::read(&path).expect("read image");
+        let _ = std::fs::remove_file(&path);
+        assert!(read_fat_file(&customized, "network-config").is_some_and(|n| n.contains(PSK)));
     }
 
     #[test]

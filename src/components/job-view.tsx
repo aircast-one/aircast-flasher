@@ -239,6 +239,7 @@ function NotShowingUp({ board, noWifi }: { board: Board; noWifi: boolean }) {
 export function JobView({
   hostname,
   board,
+  usb,
   noWifi,
   remoteEnrolled,
   encryption,
@@ -256,6 +257,7 @@ export function JobView({
 }: {
   hostname: string;
   board: Board | null;
+  usb: boolean;
   noWifi: boolean;
   remoteEnrolled: boolean;
   encryption: EncryptionConfig | null;
@@ -278,14 +280,19 @@ export function JobView({
         <div className="flex flex-col gap-1.5">
           <h2 className="text-xl font-semibold">Ready to go</h2>
           <p className="text-sm text-balance text-muted-foreground">
-            Your SD card has been flashed and verified. Remove it and boot your
-            device.
+            {usb
+              ? "Aircast OS is on the board's built-in storage, and the board is restarting into it."
+              : "Your SD card has been flashed and verified. Remove it and boot your device."}
           </p>
         </div>
         <div className="w-full text-left text-sm text-muted-foreground">
           <h3 className="mb-1 font-medium text-foreground">What happens next</h3>
           <ol className="list-decimal space-y-1 pl-5">
-            <li>Put the card in the device and power it on.</li>
+            <li>
+              {usb
+                ? "Leave the board powered — it starts Aircast OS on its own."
+                : "Put the card in the device and power it on."}
+            </li>
             <li>
               Wait a few minutes. It restarts once on its own — don't unplug
               it.
@@ -490,7 +497,9 @@ export function JobView({
           ? "Verifying…"
           : phase === "customizing"
             ? "Applying settings…"
-            : "Writing to SD card…";
+            : usb
+              ? "Writing to the board…"
+              : "Writing to SD card…";
     const subtitle =
       phase === "decompressing"
         ? "Decompressing the image before writing."
@@ -498,7 +507,9 @@ export function JobView({
           ? "Reading the card back to confirm a clean write."
           : phase === "customizing"
             ? "Writing your network and access settings to the card."
-            : "Don't remove the SD card while writing.";
+            : usb
+              ? "Keep the board plugged in while writing."
+              : "Don't remove the SD card while writing.";
     const stepLabel =
       phase === "decompressing"
         ? "Prepare"

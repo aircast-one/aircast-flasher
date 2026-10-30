@@ -371,8 +371,13 @@ async fn flash(args: &FlashArgs, json: bool) -> Result<(), String> {
         true => print_json(&outcome),
         false => {
             println!(
-                "Flashed {} — remove the card and boot the device.",
-                outcome.disk
+                "Flashed {} — {}.",
+                outcome.disk,
+                if flasher_ops::usbboard::is_target(&outcome.disk) {
+                    "the board is restarting into Aircast OS"
+                } else {
+                    "remove the card and boot the device"
+                }
             );
             println!("SSH: {}", outcome.ssh);
             if let Some(address) = &outcome.address {

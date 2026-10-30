@@ -18,6 +18,8 @@ const LOADER_BASE: &str =
     "https://raw.githubusercontent.com/radxa/rkbin/69de99907a4b51e4012c704502d234ea3c0f0423/bin/rk35";
 const LOADER_SWITCH_TIMEOUT: Duration = Duration::from_secs(20);
 const POLL: Duration = Duration::from_millis(250);
+const PROBE_TIMEOUT: Duration = Duration::from_secs(2);
+const UNRESPONSIVE: &str = "The board stopped responding over USB. Unplug it, hold its BOOT button while plugging it back in, and try again";
 const TARGET_PREFIX: &str = "usb:";
 const BOARD_MAKERS: &[&str] = &["radxa", "orange", "xunlong", "rockchip"];
 
@@ -58,10 +60,6 @@ pub fn family_of_target(path: &str) -> Option<&'static Family> {
 
 fn family_of_product(product_id: u16) -> Option<&'static Family> {
     FAMILIES.iter().find(|f| f.product_id == product_id)
-}
-
-fn in_loader_mode(info: &nusb::DeviceInfo) -> bool {
-    info.usb_version() & 1 == 1
 }
 
 fn as_target(family: &Family) -> BlockDevice {
@@ -193,11 +191,29 @@ fn loader_entries(file: &[u8]) -> Result<Vec<(u16, Vec<u8>, u32)>, String> {
         .collect()
 }
 
-async fn find(family: &Family, loader_mode: bool) -> Option<nusb::DeviceInfo> {
+async fn find(family: &Family) -> Option<nusb::DeviceInfo> {
     rockchip_devices()
         .await
         .into_iter()
-        .find(|d| d.product_id() == family.product_id && in_loader_mode(d) == loader_mode)
+        .find(|d| d.product_id() == family.product_id)
+}
+
+enum Mode {
+    Ready(Device),
+    NoStorage(Device),
+    Maskrom(nusb::DeviceInfo),
+}
+
+async fn mode(family: &Family) -> Option<Mode> {
+    let info = find(family).await?;
+    let mut device = Device::from_usb_device_info(info.clone()).await.ok()?;
+    Some(
+        match tokio::time::timeout(PROBE_TIMEOUT, device.flash_info()).await {
+            Ok(Ok(flash)) if flash.size() > 0 => Mode::Ready(device),
+            Ok(Ok(_)) => Mode::NoStorage(device),
+            _ => Mode::Maskrom(info),
+        },
+    )
 }
 
 async fn open_device(info: nusb::DeviceInfo) -> Result<Device, String> {
@@ -215,26 +231,35 @@ async fn start_loader(family: &Family, info: nusb::DeviceInfo) -> Result<(), Str
         device
             .write_maskrom_area(code, &data)
             .await
-            .map_err(|e| format!("The board didn't accept the USB loader: {e:?}"))?;
+            .map_err(|e| format!("{UNRESPONSIVE} ({e:?})"))?;
         tokio::time::sleep(Duration::from_millis(u64::from(delay_ms))).await;
     }
     Ok(())
 }
 
-async fn wait_for_loader(family: &Family) -> Result<nusb::DeviceInfo, String> {
-    let deadline = tokio::time::Instant::now() + LOADER_SWITCH_TIMEOUT;
-    loop {
-        if let Some(info) = find(family, true).await {
-            return Ok(info);
+async fn ready(
+    family: &Family,
+    deadline: tokio::time::Instant,
+    loader_sent: bool,
+    reset_sent: bool,
+) -> Result<Device, String> {
+    let (loader_sent, reset_sent) = match mode(family).await {
+        Some(Mode::Ready(device)) => return Ok(device),
+        Some(Mode::NoStorage(mut device)) if !reset_sent => {
+            let _ = device.reset_device(ResetOpcode::Maskrom).await;
+            (false, true)
         }
-        if tokio::time::Instant::now() >= deadline {
-            return Err(
-                "The board didn't come back after the USB loader started. Unplug it, put it into flashing mode again and retry"
-                    .to_string(),
-            );
+        Some(Mode::Maskrom(info)) if !loader_sent => {
+            start_loader(family, info).await?;
+            (true, reset_sent)
         }
-        tokio::time::sleep(POLL).await;
+        _ => (loader_sent, reset_sent),
+    };
+    if tokio::time::Instant::now() >= deadline {
+        return Err(UNRESPONSIVE.to_string());
     }
+    tokio::time::sleep(POLL).await;
+    Box::pin(ready(family, deadline, loader_sent, reset_sent)).await
 }
 
 pub struct UsbDisk {
@@ -253,20 +278,14 @@ impl UsbDisk {
 }
 
 pub async fn open(family: &Family, cancel: Arc<AtomicBool>) -> Result<UsbDisk, String> {
-    let info = match find(family, true).await {
-        Some(info) => info,
-        None => {
-            let maskrom = find(family, false).await.ok_or_else(|| {
-                format!(
-                    "No {} board in USB flashing mode is connected",
-                    family.chips
-                )
-            })?;
-            start_loader(family, maskrom).await?;
-            wait_for_loader(family).await?
-        }
-    };
-    let device = open_device(info).await?;
+    find(family).await.ok_or_else(|| {
+        format!(
+            "No {} board in USB flashing mode is connected",
+            family.chips
+        )
+    })?;
+    let deadline = tokio::time::Instant::now() + LOADER_SWITCH_TIMEOUT;
+    let device = ready(family, deadline, false, false).await?;
     let io = DeviceIOAsync::new(device)
         .await
         .map_err(|e| format!("Could not read the board's storage size: {e:?}"))?;
@@ -274,7 +293,7 @@ pub async fn open(family: &Family, cancel: Arc<AtomicBool>) -> Result<UsbDisk, S
 }
 
 pub async fn restart(family: &Family) -> Result<(), String> {
-    let info = find(family, true)
+    let info = find(family)
         .await
         .ok_or("The board disconnected before it could restart")?;
     open_device(info)

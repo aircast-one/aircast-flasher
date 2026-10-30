@@ -20,6 +20,7 @@ use super::Read;
 use super::HELPER_ABORT_GRACE;
 use super::MIN_TEMP_SPACE_BYTES;
 use super::PROGRESS_THROTTLE_MS;
+use flasher_core::InitFormat;
 use std::io::Write as _;
 
 #[derive(Debug, Clone)]
@@ -179,27 +180,47 @@ async fn flash_usb(
     let src_path = validate_image_file(std::path::Path::new(image_path))?;
     let lower = src_path.to_string_lossy().to_ascii_lowercase();
     trace.compressed = lower.ends_with(".xz") || lower.ends_with(".gz");
-    let write_path = if trace.compressed {
-        let temp_dir = private_temp_dir()?;
-        check_available_space(&temp_dir, MIN_TEMP_SPACE_BYTES)?;
-        let dst = temp_dir.join("aircast-image.img");
-        let _ = std::fs::remove_file(&dst);
-        let started = std::time::Instant::now();
-        decompress(&events, &src_path, &dst, &lower, cancel.clone()).await?;
-        trace.decompress_ms = Some(started.elapsed().as_millis() as u64);
-        dst
-    } else {
-        src_path.clone()
-    };
-    let result = write_usb(config, family, &write_path, cancel, events, trace).await;
-    if trace.compressed {
-        let _ = std::fs::remove_file(&write_path);
+    let temp_dir = private_temp_dir()?;
+    check_available_space(&temp_dir, MIN_TEMP_SPACE_BYTES)?;
+    let write_path = temp_dir.join("aircast-image.img");
+    let _ = std::fs::remove_file(&write_path);
+    let result = async {
+        if trace.compressed {
+            let started = std::time::Instant::now();
+            decompress(&events, &src_path, &write_path, &lower, cancel.clone()).await?;
+            trace.decompress_ms = Some(started.elapsed().as_millis() as u64);
+        } else {
+            std::fs::copy(&src_path, &write_path)
+                .map_err(|e| format!("Failed to copy the image: {e}"))?;
+        }
+        events(FlashEvent::Stage {
+            stage: "customize",
+            bytes: 0,
+        });
+        customize_file(&write_path, config).await?;
+        write_usb(family, &write_path, cancel, events, trace).await
     }
+    .await;
+    let _ = std::fs::remove_file(&write_path);
     result
 }
 
+async fn customize_file(image: &std::path::Path, config: &ProvisionConfig) -> Result<(), String> {
+    let image = image.to_path_buf();
+    let config = config.clone();
+    tokio::task::spawn_blocking(move || {
+        let mut file = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&image)
+            .map_err(|e| format!("Failed to open the image: {e}"))?;
+        flasher_core::customize_image(&mut file, &config)
+    })
+    .await
+    .map_err(|e| format!("The customize task failed: {e}"))?
+}
+
 async fn write_usb(
-    config: &ProvisionConfig,
     family: &'static usbboard::Family,
     image: &std::path::Path,
     cancel: Arc<AtomicBool>,
@@ -220,11 +241,19 @@ async fn write_usb(
         disk.size(),
         &format!("the board's built-in storage ({})", disk.size_human()),
     )?;
-    let config = config.clone();
     let image = image.to_path_buf();
     let task_events = events.clone();
     let written = tokio::task::spawn_blocking(move || {
         let mut disk = disk;
+        let customized = ProvisionConfig {
+            hostname: None,
+            wifi: None,
+            tailscale: None,
+            access: None,
+            encryption: None,
+            fight_mode: false,
+            init_format: InitFormat::CloudInit,
+        };
         let mut file =
             std::fs::File::open(&image).map_err(|e| format!("Failed to open the image: {e}"))?;
         let mut speed = FlashSpeed::default();
@@ -233,9 +262,9 @@ async fn write_usb(
             &mut file,
             &flasher_core::FlashParams {
                 image_len,
-                verify: true,
+                verify: false,
             },
-            &config,
+            &customized,
             &mut |stage, done, total| {
                 let phase = match stage {
                     flasher_core::FlashStage::Write => FlashPhase::Writing,

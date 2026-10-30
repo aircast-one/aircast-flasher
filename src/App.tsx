@@ -36,7 +36,7 @@ import type {
 import { errorMessage } from "@/lib/format";
 import { defaultHostname } from "@/components/default-hostname";
 import { nextFreeHostname } from "@/components/next-hostname";
-import { fitsBoard, usbFamily } from "@/components/usb-target";
+import { fitsBoard, isUsbTarget, usbFamily } from "@/components/usb-target";
 import { randomHex } from "@/lib/random-id";
 import { buildSummary } from "@/components/wizard-summary";
 import {
@@ -781,6 +781,7 @@ function App() {
             <JobView
               hostname={(lastVars?.hostname ?? hostname).trim()}
               board={sourceKind === "aircast" ? board : null}
+              usb={isUsbTarget(lastVars?.targetDisk ?? "")}
               noWifi={noWifi}
               remoteEnrolled={remoteEnrolled}
               encryption={flashMutation.data ?? null}
