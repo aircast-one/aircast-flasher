@@ -305,7 +305,7 @@ fn install_key_runcmd() -> String {
     format!("  - [ sh, {INSTALL_KEY_PATH} ]\n")
 }
 
-const SCRUB_SEED_ITEM: &str = "  - [ sh, -c, \"rm -f /boot/firmware/user-data /boot/firmware/network-config /var/lib/cloud/instance/user-data.txt /var/lib/cloud/instances/*/user-data.txt 2>/dev/null; true\" ]\n";
+const SCRUB_SEED_ITEM: &str = "  - [ sh, -c, \"rm -f /boot/firmware/network-config /var/lib/cloud/instance/user-data.txt /var/lib/cloud/instances/*/user-data.txt 2>/dev/null; printf '#cloud-config\\\\n' > /boot/firmware/user-data; true\" ]\n";
 
 fn tailscale_write_files_entry(control_server: &str, auth_key: &str) -> String {
     let json = tailscale_state_json(control_server);
@@ -641,7 +641,7 @@ mod tests {
         assert!(ud.contains(&format!("  - path: {KEY_STAGE_PATH}")));
         assert!(ud.contains("      ssh-ed25519 AAAAkey operator@base\n"));
         assert!(ud.contains(&format!("  - [ sh, {INSTALL_KEY_PATH} ]")));
-        assert!(!ud.contains("rm -f /boot/firmware/user-data"));
+        assert!(!ud.contains("> /boot/firmware/user-data"));
     }
 
     #[test]
@@ -786,7 +786,7 @@ mod tests {
         assert!(ud.contains("ssh_pwauth: true"));
         assert!(ud.contains("chpasswd:"));
         assert!(ud.contains("{name: pi, password: \"s3cret-pass\", type: text}"));
-        assert!(ud.contains("rm -f /boot/firmware/user-data"));
+        assert!(ud.contains("> /boot/firmware/user-data"));
     }
 
     #[test]
@@ -811,7 +811,7 @@ mod tests {
         let ud = cloud_user_data(&config);
         assert_eq!(ud.matches("runcmd:").count(), 1);
         assert!(ud.contains("systemctl disable --now ssh.socket ssh.service"));
-        assert!(ud.contains("rm -f /boot/firmware/user-data"));
+        assert!(ud.contains("> /boot/firmware/user-data"));
     }
 
     #[test]
@@ -996,7 +996,22 @@ mod tests {
     #[test]
     fn the_wifi_key_does_not_outlive_first_boot_on_the_boot_partition() {
         let ud = cloud_user_data(&cfg(InitFormat::CloudInit, true, None));
-        assert!(ud.contains("rm -f /boot/firmware/user-data /boot/firmware/network-config"));
+        assert!(ud.contains("rm -f /boot/firmware/network-config"));
+    }
+
+    #[test]
+    fn the_scrubbed_seed_stays_a_valid_cloud_init_seed() {
+        let ud = cloud_user_data(&cfg(InitFormat::CloudInit, true, None));
+        let doc: serde_norway::Value = serde_norway::from_str(&ud).expect("valid YAML");
+        let scrub = doc["runcmd"]
+            .as_sequence()
+            .expect("runcmd is a list")
+            .iter()
+            .filter_map(|item| item.as_sequence()?.get(2)?.as_str())
+            .find(|cmd| cmd.contains("/boot/firmware/user-data"))
+            .expect("a scrub command");
+        assert!(scrub.contains("printf '#cloud-config\\n' > /boot/firmware/user-data"));
+        assert!(!scrub.contains("rm -f /boot/firmware/user-data"));
     }
 
     #[test]
