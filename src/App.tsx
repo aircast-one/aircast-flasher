@@ -9,6 +9,7 @@ import {
   fetchTangAdv,
   flashImage,
   listBlockDevices,
+  listBoards,
   listReleases,
   listWifiNetworks,
   onDownloadProgress,
@@ -124,6 +125,10 @@ function App() {
   const sourceKind: SourceKind = settings.useLocalImage ? "local" : "aircast";
   const setSourceKind = (kind: SourceKind) =>
     update({ useLocalImage: kind === "local" });
+  const setBoard = (board: string) => {
+    setSelectedVersion(null);
+    update({ board });
+  };
   const localPath = settings.localImagePath;
   const fightMode = settings.fightMode;
   const [showPassword, setShowPassword] = useState(false);
@@ -219,9 +224,16 @@ function App() {
   });
 
   const onOsStep = step === STEP.os;
+  const boardsQuery = useQuery({
+    queryKey: ["boards"],
+    queryFn: listBoards,
+    staleTime: Infinity,
+  });
+  const boards = boardsQuery.data ?? [];
+  const board = settings.board ?? boards[0]?.id ?? "";
   const releasesQuery = useQuery({
-    queryKey: ["releases"],
-    queryFn: () => listReleases(),
+    queryKey: ["releases", settings.board],
+    queryFn: () => listReleases(settings.board),
     refetchInterval: onOsStep ? RELEASES_POLL_INTERVAL_MS : false,
     refetchOnWindowFocus: onOsStep,
   });
@@ -491,7 +503,7 @@ function App() {
   const imageLabel =
     sourceKind === "aircast"
       ? release
-        ? `Aircast OS ${release.version}`
+        ? `Aircast OS ${release.version} for ${boards.find((b) => b.id === board)?.name ?? board}`
         : "No release"
       : (localFileName ?? "No file");
 
@@ -652,6 +664,9 @@ function App() {
             <StepConsent onAnswer={answerTelemetry} />
           ) : step === STEP.os ? (
             <StepImage
+              boards={boards}
+              board={board}
+              onBoard={setBoard}
               sourceKind={sourceKind}
               onSourceKind={setSourceKind}
               release={release}

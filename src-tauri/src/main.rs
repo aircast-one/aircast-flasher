@@ -37,6 +37,7 @@ async fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             flasher::list_releases,
+            flasher::list_boards,
             flasher::list_block_devices,
             flasher::download_image,
             flasher::flash_image,

@@ -206,6 +206,33 @@ describe("flasher wizard", () => {
     ]);
   });
 
+  it("lists each board's own images and remembers the board picked", async () => {
+    if ((await heading()) !== "Operating system") {
+      await backToStep("Operating system");
+    }
+    const board = $('[aria-label="Board"]');
+    const pick = async (name: string) => {
+      await board.click();
+      await $(`//*[@role="option"][contains(., "${name}")]`).click();
+      await expect(board).toHaveText(expect.stringContaining(name));
+    };
+    await expect(board).toHaveText(expect.stringContaining("Raspberry Pi"));
+
+    await pick("Radxa ROCK 5B");
+    await browser.waitUntil(
+      () =>
+        fs.existsSync(settingsFile()) &&
+        JSON.parse(fs.readFileSync(settingsFile(), "utf8")).board === "rock-5b",
+      {
+        timeout: 10_000,
+        timeoutMsg: "the picked board never reached settings.json",
+      },
+    );
+
+    await pick("Raspberry Pi");
+    await expect($('[aria-label="Aircast OS version"]')).toBeDisplayed();
+  });
+
   it("arrives with a hostname already filled in", async () => {
     await onNetworkStep();
     await expect($("#hostname")).not.toHaveValue("");

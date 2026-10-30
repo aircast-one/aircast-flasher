@@ -28,6 +28,10 @@ pub struct FlashRequest {
     pub release: Option<String>,
     #[schemars(description = "Release channel: stable, staging or development.")]
     pub channel: Option<String>,
+    #[schemars(
+        description = "Board the card goes into: rpi, orangepi5 or rock-5b. Defaults to rpi."
+    )]
+    pub board: Option<String>,
     #[schemars(description = "Device hostname: lowercase letters, numbers and hyphens.")]
     pub hostname: Option<String>,
     #[schemars(
@@ -274,8 +278,9 @@ pub async fn find_card(disk: &str) -> Result<BlockDevice, String> {
 pub async fn pick_release(
     release: Option<&str>,
     channel: Option<String>,
+    board: Option<String>,
 ) -> Result<Release, String> {
-    let releases = flasher_ops::releases::list_releases(channel)
+    let releases = flasher_ops::releases::list_releases(channel, board)
         .await?
         .releases;
     match release {

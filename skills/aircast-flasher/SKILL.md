@@ -49,8 +49,11 @@ the disk always comes from what the computer reports — never from a guess.
 1. **Find the card.** `aircast-flasher-cli cards --json` (MCP `list_cards`).
    Only removable SD cards are listed. If none, ask the person to insert one;
    if several, ask which, showing each `path`, `name` and `size_human`.
-2. **Pick the image.** Default is the newest stable Aircast OS (`releases`
-   shows them; prereleases are marked). Use `--release vX.Y.Z` for a specific
+2. **Pick the image.** Default is the newest stable Aircast OS for a
+   Raspberry Pi (`releases` shows them; prereleases are marked). For another
+   board pass `--board orangepi5` or `--board rock-5b` (same flag on
+   `releases` and `download`; ask which board when the person hasn't said and
+   it isn't a Pi). Use `--release vX.Y.Z` for a specific
    version, `--channel staging|development` for other channels, or `--image`
    for a local `.img`, `.img.xz` or `.img.gz`. Fight mode and disk encryption
    need Aircast OS v0.3.6 or newer — older images ignore them, so the CLI

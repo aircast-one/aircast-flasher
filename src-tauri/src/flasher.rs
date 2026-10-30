@@ -40,8 +40,16 @@ fn outcome<T>(result: &Result<T, String>, cancelled: &AtomicBool) -> &'static st
 }
 
 #[tauri::command]
-pub async fn list_releases(channel: Option<String>) -> Result<ReleasesResponse, String> {
-    flasher_ops::releases::list_releases(channel).await
+pub async fn list_releases(
+    channel: Option<String>,
+    board: Option<String>,
+) -> Result<ReleasesResponse, String> {
+    flasher_ops::releases::list_releases(channel, board).await
+}
+
+#[tauri::command]
+pub fn list_boards() -> Vec<flasher_ops::releases::Board> {
+    flasher_ops::releases::BOARDS.to_vec()
 }
 
 #[tauri::command]

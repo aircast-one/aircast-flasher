@@ -30,6 +30,7 @@ pub struct Settings {
     pub encryption: bool,
     pub use_local_image: bool,
     pub local_image_path: Option<String>,
+    pub board: Option<String>,
 }
 
 const E2E_CONFIG_DIR: &str = "FLASHER_E2E_CONFIG_DIR";
@@ -196,6 +197,7 @@ mod tests {
             encryption: true,
             use_local_image: true,
             local_image_path: Some("/tmp/aircast.img".into()),
+            board: Some("orangepi5".into()),
         }
     }
 

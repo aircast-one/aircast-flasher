@@ -37,6 +37,8 @@ enum Command {
     Releases {
         #[arg(long, help = "stable, staging or development")]
         channel: Option<String>,
+        #[arg(long, help = "rpi, orangepi5 or rock-5b (default: rpi)")]
+        board: Option<String>,
     },
     #[command(about = "List the SD cards this computer can write")]
     Cards,
@@ -49,6 +51,8 @@ enum Command {
         release: Option<String>,
         #[arg(long, help = "stable, staging or development")]
         channel: Option<String>,
+        #[arg(long, help = "rpi, orangepi5 or rock-5b (default: rpi)")]
+        board: Option<String>,
     },
     #[command(about = "Erase an SD card, write Aircast OS and configure it")]
     Flash(Box<FlashArgs>),
@@ -79,6 +83,8 @@ struct FlashArgs {
     release: Option<String>,
     #[arg(long, help = "stable, staging or development")]
     channel: Option<String>,
+    #[arg(long, help = "rpi, orangepi5 or rock-5b (default: rpi)")]
+    board: Option<String>,
     #[arg(long, help = "Device name: lowercase letters, numbers and hyphens")]
     hostname: Option<String>,
     #[arg(long, help = "WiFi network the device joins on first boot")]
@@ -172,6 +178,7 @@ impl FlashArgs {
             image: self.image.clone(),
             release: self.release.clone(),
             channel: self.channel.clone(),
+            board: self.board.clone(),
             hostname: self.hostname.clone(),
             wifi: self.wifi_ssid.as_ref().map(|ssid| WifiRequest {
                 ssid: ssid.clone(),
@@ -309,9 +316,14 @@ async fn flash(args: &FlashArgs, json: bool) -> Result<(), String> {
     let card = request::find_card(&request.disk).await?;
     let release = match &request.image {
         Some(_) => None,
-        None => {
-            Some(request::pick_release(request.release.as_deref(), request.channel.clone()).await?)
-        }
+        None => Some(
+            request::pick_release(
+                request.release.as_deref(),
+                request.channel.clone(),
+                request.board.clone(),
+            )
+            .await?,
+        ),
     };
     if let Some(release) = &release {
         request::check_image(&request, release)?;
@@ -424,8 +436,9 @@ async fn cloud(command: &CloudCommand, json: bool) -> Result<(), String> {
 async fn run(cli: Cli) -> Result<(), String> {
     let json = cli.json;
     match &cli.command {
-        Command::Releases { channel } => {
-            let releases = flasher_ops::releases::list_releases(channel.clone()).await?;
+        Command::Releases { channel, board } => {
+            let releases =
+                flasher_ops::releases::list_releases(channel.clone(), board.clone()).await?;
             match json {
                 true => print_json(&releases),
                 false => {
@@ -450,8 +463,13 @@ async fn run(cli: Cli) -> Result<(), String> {
                 (false, false) => say(cards.iter().map(card_line).collect::<Vec<_>>().join("\n")),
             }
         }
-        Command::Download { release, channel } => {
-            let release = request::pick_release(release.as_deref(), channel.clone()).await?;
+        Command::Download {
+            release,
+            channel,
+            board,
+        } => {
+            let release =
+                request::pick_release(release.as_deref(), channel.clone(), board.clone()).await?;
             let bar = byte_bar("Downloading");
             let cancel = cancel_on_ctrl_c();
             let path = request::download(&release, &cancel, &mut |p| {

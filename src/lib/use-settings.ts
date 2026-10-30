@@ -28,6 +28,7 @@ const EMPTY: Settings = {
   encryption: false,
   useLocalImage: false,
   localImagePath: null,
+  board: null,
 };
 
 export function useSettings(): {

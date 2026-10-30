@@ -32,6 +32,10 @@ pub struct ChannelParams {
         description = "stable, staging or development. Defaults to the first with releases."
     )]
     pub channel: Option<String>,
+    #[schemars(
+        description = "Board the card goes into: rpi, orangepi5 or rock-5b. Defaults to rpi."
+    )]
+    pub board: Option<String>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -40,6 +44,10 @@ pub struct DownloadParams {
     #[schemars(description = "Version, e.g. v0.3.6. Defaults to the newest stable release.")]
     pub release: Option<String>,
     pub channel: Option<String>,
+    #[schemars(
+        description = "Board the card goes into: rpi, orangepi5 or rock-5b. Defaults to rpi."
+    )]
+    pub board: Option<String>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -139,7 +147,7 @@ impl Flasher {
         &self,
         Parameters(p): Parameters<ChannelParams>,
     ) -> Result<String, String> {
-        json(&flasher_ops::releases::list_releases(p.channel).await?)
+        json(&flasher_ops::releases::list_releases(p.channel, p.board).await?)
     }
 
     #[tool(
@@ -159,7 +167,7 @@ impl Flasher {
         peer: Peer<RoleServer>,
         cancel: CancellationToken,
     ) -> Result<String, String> {
-        let release = request::pick_release(p.release.as_deref(), p.channel).await?;
+        let release = request::pick_release(p.release.as_deref(), p.channel, p.board).await?;
         let progress = progress_sender(&meta, peer);
         let path = request::download(&release, &cancel_flag(cancel), &mut |d| {
             let _ = progress.send(("Downloading".into(), d.downloaded_bytes, d.total_bytes));
@@ -199,9 +207,12 @@ impl Flasher {
         let image = match &request.image {
             Some(path) => path.clone(),
             None => {
-                let release =
-                    request::pick_release(request.release.as_deref(), request.channel.clone())
-                        .await?;
+                let release = request::pick_release(
+                    request.release.as_deref(),
+                    request.channel.clone(),
+                    request.board.clone(),
+                )
+                .await?;
                 request::check_image(&request, &release)?;
                 request::download(&release, &cancel, &mut |d| {
                     let _ =

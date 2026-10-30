@@ -14,6 +14,7 @@ import type {
   CloudSignIn,
   CloudSignInStatus,
   BlockDevice,
+  Board,
   Channel,
   DownloadProgress,
   DownloadResult,
@@ -34,10 +35,18 @@ import type {
 const DOWNLOAD_PROGRESS_EVENT = "flasher:download-progress";
 const FLASH_PROGRESS_EVENT = "flasher:flash-progress";
 
-export function listReleases(channel?: Channel): Promise<ListReleasesResponse> {
+export function listReleases(
+  board: string | null,
+  channel?: Channel,
+): Promise<ListReleasesResponse> {
   return invoke<ListReleasesResponse>("list_releases", {
     channel: channel ?? null,
+    board,
   });
+}
+
+export function listBoards(): Promise<Board[]> {
+  return invoke<Board[]>("list_boards");
 }
 
 export function listBlockDevices(): Promise<BlockDevice[]> {

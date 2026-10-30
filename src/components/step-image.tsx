@@ -11,10 +11,13 @@ import {
 } from "@/components/ui/select";
 import { formatBytes, formatDate } from "@/lib/format";
 import type { SourceKind } from "@/components/wizard-types";
-import type { Release } from "@/types";
+import type { Board, Release } from "@/types";
 import { releaseLabel } from "./release-label";
 
 export function StepImage({
+  boards,
+  board,
+  onBoard,
   sourceKind,
   onSourceKind,
   release,
@@ -27,6 +30,9 @@ export function StepImage({
   cacheStatus,
   onNext,
 }: {
+  boards: Board[];
+  board: string;
+  onBoard: (board: string) => void;
   sourceKind: SourceKind;
   onSourceKind: (kind: SourceKind) => void;
   release: Release | null;
@@ -59,10 +65,34 @@ export function StepImage({
   return (
     <StepShell
       heading="Operating system"
-      description="Pick the image to write to the card."
+      description="Pick the board, then the image to write to the card."
       next={{ label: "Next", onClick: onNext, problems }}
     >
       <div className="flex flex-col gap-3">
+        <div className="flex items-center gap-2">
+          <span className="text-sm text-muted-foreground">Board</span>
+          <Select
+            value={board}
+            onValueChange={(value) => onBoard(String(value))}
+          >
+            <SelectTrigger size="sm" aria-label="Board">
+              <SelectValue>
+                {(value) =>
+                  boards.find((option) => option.id === value)?.name ??
+                  String(value)
+                }
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent className="min-w-48">
+              {boards.map((option) => (
+                <SelectItem key={option.id} value={option.id}>
+                  {option.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
         <SelectableCard
           icon={<Package />}
           title="Aircast OS (recommended)"

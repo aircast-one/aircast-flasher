@@ -18,6 +18,11 @@ export interface Release {
   image: ImageInfo;
 }
 
+export interface Board {
+  id: string;
+  name: string;
+}
+
 export interface ListReleasesResponse {
   releases: Release[];
   min_card_bytes: number;
@@ -166,6 +171,7 @@ export interface Settings {
   encryption: boolean;
   useLocalImage: boolean;
   localImagePath: string | null;
+  board: string | null;
 }
 
 export interface SshKeyIdentity {
