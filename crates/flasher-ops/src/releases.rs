@@ -11,6 +11,7 @@ const CHANNEL_FALLBACK: &[&str] = &["stable", "staging", "development"];
 pub struct Board {
     pub id: &'static str,
     pub name: &'static str,
+    pub maker: &'static str,
     pub detail: &'static str,
     pub builtin_wifi: bool,
     pub beta: bool,
@@ -18,31 +19,179 @@ pub struct Board {
     catalog: &'static str,
 }
 
+const fn rockchip(
+    id: &'static str,
+    name: &'static str,
+    maker: &'static str,
+    detail: &'static str,
+    builtin_wifi: bool,
+    catalog: &'static str,
+) -> Board {
+    Board {
+        id,
+        name,
+        maker,
+        detail,
+        builtin_wifi,
+        beta: true,
+        catalog,
+    }
+}
+
 pub const BOARDS: &[Board] = &[
     Board {
         id: "rpi",
         name: "Raspberry Pi",
+        maker: "Raspberry Pi",
         detail: "Pi 3, 4, 5 and Zero 2 W",
         builtin_wifi: true,
         beta: false,
         catalog: "lite",
     },
-    Board {
-        id: "orangepi5",
-        name: "Orange Pi 5",
-        detail: "Rockchip RK3588S",
-        builtin_wifi: false,
-        beta: true,
-        catalog: "orangepi5",
-    },
-    Board {
-        id: "rock-5b",
-        name: "Radxa ROCK 5B",
-        detail: "Rockchip RK3588",
-        builtin_wifi: false,
-        beta: true,
-        catalog: "rock-5b",
-    },
+    rockchip(
+        "orangepi5",
+        "Orange Pi 5",
+        "Orange Pi",
+        "Rockchip RK3588S",
+        false,
+        "orangepi5",
+    ),
+    rockchip(
+        "orangepi5-plus",
+        "Orange Pi 5 Plus",
+        "Orange Pi",
+        "Rockchip RK3588",
+        false,
+        "orangepi5-plus",
+    ),
+    rockchip(
+        "orangepi5pro",
+        "Orange Pi 5 Pro",
+        "Orange Pi",
+        "Rockchip RK3588S",
+        true,
+        "orangepi5pro",
+    ),
+    rockchip(
+        "orangepi5-max",
+        "Orange Pi 5 Max",
+        "Orange Pi",
+        "Rockchip RK3588",
+        true,
+        "orangepi5-max",
+    ),
+    rockchip(
+        "orangepi5-ultra",
+        "Orange Pi 5 Ultra",
+        "Orange Pi",
+        "Rockchip RK3588",
+        true,
+        "orangepi5-ultra",
+    ),
+    rockchip(
+        "orangepi3b",
+        "Orange Pi 3B",
+        "Orange Pi",
+        "Rockchip RK3566",
+        true,
+        "orangepi3b",
+    ),
+    rockchip(
+        "rock-5a",
+        "Radxa ROCK 5A",
+        "Radxa",
+        "Rockchip RK3588S",
+        false,
+        "rock-5a",
+    ),
+    rockchip(
+        "rock-5b",
+        "Radxa ROCK 5B",
+        "Radxa",
+        "Rockchip RK3588",
+        false,
+        "rock-5b",
+    ),
+    rockchip(
+        "rock-5b-plus",
+        "Radxa ROCK 5B+",
+        "Radxa",
+        "Rockchip RK3588",
+        true,
+        "rock-5b-plus",
+    ),
+    rockchip(
+        "rock-5c",
+        "Radxa ROCK 5C",
+        "Radxa",
+        "Rockchip RK3588S",
+        true,
+        "rock-5c",
+    ),
+    rockchip(
+        "rock-5t",
+        "Radxa ROCK 5T",
+        "Radxa",
+        "Rockchip RK3588",
+        false,
+        "rock-5t",
+    ),
+    rockchip(
+        "rock-5-itx",
+        "Radxa ROCK 5 ITX",
+        "Radxa",
+        "Rockchip RK3588",
+        false,
+        "rock-5-itx",
+    ),
+    rockchip(
+        "rock-3a",
+        "Radxa ROCK 3A",
+        "Radxa",
+        "Rockchip RK3568",
+        false,
+        "rock-3a",
+    ),
+    rockchip(
+        "rock-3c",
+        "Radxa ROCK 3C",
+        "Radxa",
+        "Rockchip RK3566",
+        true,
+        "rock-3c",
+    ),
+    rockchip(
+        "radxa-zero3w",
+        "Radxa ZERO 3W",
+        "Radxa",
+        "Rockchip RK3566",
+        true,
+        "radxa-zero3",
+    ),
+    rockchip(
+        "radxa-zero3e",
+        "Radxa ZERO 3E",
+        "Radxa",
+        "Rockchip RK3566",
+        false,
+        "radxa-zero3",
+    ),
+    rockchip(
+        "radxa-e52c",
+        "Radxa E52C",
+        "Radxa",
+        "Rockchip RK3582",
+        false,
+        "radxa-e52c",
+    ),
+    rockchip(
+        "radxa-e25",
+        "Radxa E25",
+        "Radxa",
+        "Rockchip RK3568",
+        false,
+        "radxa-e25",
+    ),
 ];
 
 pub fn board(id: Option<&str>) -> Result<&'static Board, String> {
@@ -140,32 +289,36 @@ mod tests {
     }
 
     #[test]
-    fn every_other_board_is_served_from_its_own_catalog() {
-        assert!(BOARDS[1..].iter().all(|b| b.catalog == b.id));
+    fn board_ids_are_unique_and_only_the_zero_3_variants_share_a_catalog() {
         let ids: std::collections::HashSet<_> = BOARDS.iter().map(|b| b.id).collect();
         assert_eq!(ids.len(), BOARDS.len());
+        let shared: Vec<_> = BOARDS[1..]
+            .iter()
+            .filter(|b| b.catalog != b.id)
+            .map(|b| (b.id, b.catalog))
+            .collect();
+        assert_eq!(
+            shared,
+            [
+                ("radxa-zero3w", "radxa-zero3"),
+                ("radxa-zero3e", "radxa-zero3")
+            ]
+        );
     }
 
     #[test]
-    fn only_the_pi_has_builtin_wifi_and_only_the_rockchip_boards_are_beta() {
-        let flags: Vec<_> = BOARDS
-            .iter()
-            .map(|b| (b.id, b.builtin_wifi, b.beta))
-            .collect();
-        assert_eq!(
-            flags,
-            [
-                ("rpi", true, false),
-                ("orangepi5", false, true),
-                ("rock-5b", false, true)
-            ]
-        );
+    fn every_board_but_the_pi_is_beta_and_wifi_follows_the_hardware() {
+        assert!(BOARDS[1..].iter().all(|b| b.beta) && !BOARDS[0].beta);
+        let wifi = |id: &str| board(Some(id)).unwrap().builtin_wifi;
+        assert!(wifi("rpi") && wifi("orangepi5pro") && wifi("radxa-zero3w"));
+        assert!(!wifi("orangepi5") && !wifi("rock-5b") && !wifi("radxa-zero3e"));
     }
 
     #[test]
     fn a_board_reaches_the_app_in_camel_case_without_its_catalog() {
         let json = serde_json::to_value(BOARDS[1]).unwrap();
         assert_eq!(json["builtinWifi"], false);
+        assert_eq!(json["maker"], "Orange Pi");
         assert_eq!(json["detail"], "Rockchip RK3588S");
         assert!(json.get("catalog").is_none());
     }
@@ -174,7 +327,7 @@ mod tests {
     fn rejects_an_unknown_board_and_names_the_valid_ones() {
         let err = board(Some("jetson")).unwrap_err();
         assert!(
-            err.contains("jetson") && err.contains("rpi|orangepi5|rock-5b"),
+            err.contains("jetson") && err.contains("(expected rpi|") && err.contains("|rock-5b|"),
             "{err}"
         );
     }

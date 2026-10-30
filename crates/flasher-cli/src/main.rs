@@ -37,9 +37,11 @@ enum Command {
     Releases {
         #[arg(long, help = "stable, staging or development")]
         channel: Option<String>,
-        #[arg(long, help = "rpi, orangepi5 or rock-5b (default: rpi)")]
+        #[arg(long, help = "Board id from `boards`, e.g. orangepi5 (default: rpi)")]
         board: Option<String>,
     },
+    #[command(about = "List the boards Aircast OS ships for, with their --board ids")]
+    Boards,
     #[command(about = "List the SD cards this computer can write")]
     Cards,
     #[command(about = "Download an Aircast OS image into the shared cache")]
@@ -51,7 +53,7 @@ enum Command {
         release: Option<String>,
         #[arg(long, help = "stable, staging or development")]
         channel: Option<String>,
-        #[arg(long, help = "rpi, orangepi5 or rock-5b (default: rpi)")]
+        #[arg(long, help = "Board id from `boards`, e.g. orangepi5 (default: rpi)")]
         board: Option<String>,
     },
     #[command(about = "Erase an SD card, write Aircast OS and configure it")]
@@ -83,7 +85,7 @@ struct FlashArgs {
     release: Option<String>,
     #[arg(long, help = "stable, staging or development")]
     channel: Option<String>,
-    #[arg(long, help = "rpi, orangepi5 or rock-5b (default: rpi)")]
+    #[arg(long, help = "Board id from `boards`, e.g. orangepi5 (default: rpi)")]
     board: Option<String>,
     #[arg(long, help = "Device name: lowercase letters, numbers and hyphens")]
     hostname: Option<String>,
@@ -458,6 +460,22 @@ async fn run(cli: Cli) -> Result<(), String> {
                 }
             }
         }
+        Command::Boards => match json {
+            true => print_json(&flasher_ops::releases::BOARDS),
+            false => say(flasher_ops::releases::BOARDS
+                .iter()
+                .map(|b| {
+                    format!(
+                        "{:16} {:20} {}{}",
+                        b.id,
+                        b.name,
+                        if b.builtin_wifi { "WiFi" } else { "no WiFi" },
+                        if b.beta { "  beta" } else { "" }
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("\n")),
+        },
         Command::Cards => {
             let cards = flasher_ops::devices::list_block_devices().await?;
             match (json, cards.is_empty()) {

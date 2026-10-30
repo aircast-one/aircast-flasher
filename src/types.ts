@@ -21,6 +21,7 @@ export interface Release {
 export interface Board {
   id: string;
   name: string;
+  maker: string;
   detail: string;
   builtinWifi: boolean;
   beta: boolean;

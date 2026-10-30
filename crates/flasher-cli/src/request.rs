@@ -29,7 +29,7 @@ pub struct FlashRequest {
     #[schemars(description = "Release channel: stable, staging or development.")]
     pub channel: Option<String>,
     #[schemars(
-        description = "Board the card goes into: rpi, orangepi5 or rock-5b. Defaults to rpi. orangepi5 and rock-5b have no built-in WiFi: leave wifi out unless a USB WiFi adapter is plugged in."
+        description = "Board id from list_boards, e.g. orangepi5. Defaults to rpi. Boards without built-in WiFi (see list_boards) need wifi left out unless a USB WiFi adapter is plugged in."
     )]
     pub board: Option<String>,
     #[schemars(description = "Device hostname: lowercase letters, numbers and hyphens.")]

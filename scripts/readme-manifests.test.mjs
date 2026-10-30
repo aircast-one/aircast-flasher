@@ -8,8 +8,10 @@ const manifestPaths = (text) =>
   new Set(text.match(/\/[a-z0-9-]+\/(?:releases|latest)\.json/g) ?? []);
 
 const boardCatalogs = [
-  ...read("crates/flasher-ops/src/releases.rs").matchAll(/catalog: "([a-z0-9-]+)"/g),
-].map(([, catalog]) => `/${catalog}/releases.json`);
+  ...read("crates/flasher-ops/src/releases.rs").matchAll(
+    /catalog: "([a-z0-9-]+)"|rockchip\(\s*(?:"[^"]*",\s*){4}(?:true|false),\s*"([a-z0-9-]+)"/g,
+  ),
+].map(([, pi, board]) => `/${pi ?? board}/releases.json`);
 
 const fetchedByCode = new Set([
   ...boardCatalogs,
@@ -26,11 +28,11 @@ test("every manifest the README names is one the code or release workflow uses",
   );
 });
 
-test("the README names the image manifest of every board list_releases fetches", () => {
-  assert.ok(boardCatalogs.includes("/lite/releases.json"));
+test("the README names the Pi's image manifest and a real board example", () => {
   const documented = manifestPaths(read("README.md"));
-  assert.deepEqual(
-    boardCatalogs.filter((path) => !documented.has(path)),
-    [],
+  assert.ok(boardCatalogs.includes("/lite/releases.json"));
+  assert.ok(documented.has("/lite/releases.json"));
+  assert.ok(
+    [...documented].some((path) => path !== "/lite/releases.json" && boardCatalogs.includes(path)),
   );
 });

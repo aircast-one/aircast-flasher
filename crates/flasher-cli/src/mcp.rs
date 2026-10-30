@@ -32,9 +32,7 @@ pub struct ChannelParams {
         description = "stable, staging or development. Defaults to the first with releases."
     )]
     pub channel: Option<String>,
-    #[schemars(
-        description = "Board the card goes into: rpi, orangepi5 or rock-5b. Defaults to rpi."
-    )]
+    #[schemars(description = "Board id from list_boards, e.g. orangepi5. Defaults to rpi.")]
     pub board: Option<String>,
 }
 
@@ -44,9 +42,7 @@ pub struct DownloadParams {
     #[schemars(description = "Version, e.g. v0.3.6. Defaults to the newest stable release.")]
     pub release: Option<String>,
     pub channel: Option<String>,
-    #[schemars(
-        description = "Board the card goes into: rpi, orangepi5 or rock-5b. Defaults to rpi."
-    )]
+    #[schemars(description = "Board id from list_boards, e.g. orangepi5. Defaults to rpi.")]
     pub board: Option<String>,
 }
 
@@ -140,6 +136,13 @@ impl Flasher {
         Self {
             tool_router: Self::tool_router(),
         }
+    }
+
+    #[tool(
+        description = "List the boards Aircast OS ships for: the board id to pass as board, its name, maker, whether it has built-in WiFi, and whether its support is beta."
+    )]
+    async fn list_boards(&self) -> Result<String, String> {
+        json(&flasher_ops::releases::BOARDS)
     }
 
     #[tool(description = "List Aircast OS releases that can be written to a card.")]

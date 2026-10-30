@@ -211,7 +211,7 @@ describe("flasher wizard", () => {
       await backToStep("Operating system");
     }
     const boards = $('[aria-label="Board"]');
-    const pick = async (name: string) => {
+    const pickMaker = async (name: string) => {
       await boards.$(`button*=${name}`).click();
       await expect(boards.$(`button*=${name}`)).toHaveAttribute(
         "aria-pressed",
@@ -220,7 +220,12 @@ describe("flasher wizard", () => {
     };
     await expectBlocked("Next", "Choose the board this card is for");
 
-    await pick("Radxa ROCK 5B");
+    await pickMaker("Radxa");
+    await expectBlocked("Next", "Choose the Radxa model");
+    await $('[aria-label="Model"]').click();
+    await $(
+      '//*[@role="option"][.//span[normalize-space()="Radxa ROCK 5B"]]',
+    ).click();
     await browser.waitUntil(
       () =>
         fs.existsSync(settingsFile()) &&
@@ -240,7 +245,7 @@ describe("flasher wizard", () => {
     await expect($("p*=Radxa ROCK 5B has no built-in WiFi")).toBeDisplayed();
 
     await backToStep("Operating system");
-    await pick("Raspberry Pi");
+    await pickMaker("Raspberry Pi");
     await expect($('[aria-label="Aircast OS version"]')).toBeDisplayed();
   });
 
