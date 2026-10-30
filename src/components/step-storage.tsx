@@ -1,4 +1,4 @@
-import { AlertTriangle, HardDrive } from "lucide-react";
+import { AlertTriangle, Cpu, HardDrive, LoaderCircle } from "lucide-react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { SelectableCard } from "@/components/selectable-card";
@@ -6,11 +6,46 @@ import { StepShell, type Problem } from "@/components/step-shell";
 import { cn } from "@/lib/utils";
 import type { SummaryItem } from "@/components/wizard-summary";
 import { STEP, type WizardStep } from "@/components/wizard-types";
-import type { BlockDevice } from "@/types";
+import { fitsBoard, isUsbTarget, usbFamily } from "@/components/usb-target";
+import type { BlockDevice, Board } from "@/types";
 
 export type { SummaryItem };
 
+function FlashingModeSteps({
+  board,
+  running,
+}: {
+  board: Board;
+  running: boolean;
+}) {
+  return (
+    <div className="flex flex-col gap-3 rounded-xl border border-border p-4">
+      <h2 className="text-sm font-medium">
+        {running
+          ? `Your ${board.maker} board is connected, but it's running its own system`
+          : "No SD card? Write straight to the board over USB"}
+      </h2>
+      <ol className="list-decimal space-y-1 pl-5 text-sm text-muted-foreground">
+        <li>Unplug the {board.name} from this computer.</li>
+        <li>
+          Hold its BOOT button (some boards label it MASKROM or RECOVERY).
+        </li>
+        <li>
+          While holding it, plug the board&apos;s USB OTG port (USB-C on most
+          boards) into this computer, then let go after 2 seconds.
+        </li>
+      </ol>
+      <p className="flex items-center gap-2 text-sm text-muted-foreground">
+        <LoaderCircle className="size-4 animate-spin" />
+        Waiting for the {board.name} in flashing mode…
+      </p>
+    </div>
+  );
+}
+
 export function StepStorage({
+  board,
+  runningBoards,
   devices,
   devicesLoading,
   selectedDisk,
@@ -22,6 +57,8 @@ export function StepStorage({
   onEditStep,
   onFlash,
 }: {
+  board: Board | null;
+  runningBoards: string[];
   devices: BlockDevice[];
   devicesLoading: boolean;
   selectedDisk: string;
@@ -36,14 +73,26 @@ export function StepStorage({
   const selected = devices.find((d) => d.path === selectedDisk) ?? null;
   const tooSmall = (d: BlockDevice) =>
     requiredCardBytes !== undefined && d.size > 0 && d.size < requiredCardBytes;
+  const writesBoard = selected !== null && isUsbTarget(selected.path);
+  const boardName = board?.name ?? "board";
+  const usbCapable = usbFamily(board) !== null;
+  const boardOnUsb = devices.some(
+    (d) => isUsbTarget(d.path) && fitsBoard(d, board),
+  );
+  const titleOf = (d: BlockDevice) =>
+    isUsbTarget(d.path) && fitsBoard(d, board) && board
+      ? `${board.name}, built-in storage`
+      : d.name;
 
   const rows: SummaryItem[] = [
     ...summary,
     {
-      label: "Target card",
+      label: "Target",
       value: selected
-        ? `${selected.name} · ${selected.size_human}`
-        : "No card selected yet",
+        ? writesBoard
+          ? `${boardName}, built-in storage (USB)`
+          : `${selected.name} · ${selected.size_human}`
+        : "Nothing selected yet",
       step: STEP.storage,
     },
   ];
@@ -51,9 +100,17 @@ export function StepStorage({
   return (
     <StepShell
       heading="Storage"
-      description="Insert your SD card and it'll show up here on its own. Check the settings below, then write."
+      description={
+        usbCapable
+          ? "Insert an SD card, or connect the board in flashing mode. It shows up here on its own. Check the settings below, then write."
+          : "Insert your SD card and it'll show up here on its own. Check the settings below, then write."
+      }
       back={{ onClick: onBack }}
-      next={{ label: "Flash SD Card", onClick: onFlash, problems }}
+      next={{
+        label: writesBoard ? `Write to ${boardName}` : "Flash SD Card",
+        onClick: onFlash,
+        problems,
+      }}
     >
       <div className="flex flex-col gap-4">
         {devices.length === 0 ? (
@@ -62,7 +119,9 @@ export function StepStorage({
             <p className="text-sm text-muted-foreground">
               {devicesLoading
                 ? "Scanning for storage devices…"
-                : "Insert an SD card and it'll show up here."}
+                : usbCapable
+                  ? "Insert an SD card, or connect the board in flashing mode, and it'll show up here."
+                  : "Insert an SD card and it'll show up here."}
             </p>
           </div>
         ) : (
@@ -70,15 +129,21 @@ export function StepStorage({
             {devices.map((d) => (
               <SelectableCard
                 key={d.path}
-                icon={<HardDrive />}
-                title={d.name}
+                icon={isUsbTarget(d.path) ? <Cpu /> : <HardDrive />}
+                title={titleOf(d)}
                 selected={selectedDisk === d.path}
-                disabled={tooSmall(d)}
+                disabled={tooSmall(d) || !fitsBoard(d, board)}
                 onClick={() => onSelectDisk(d.path)}
               >
                 <span className="text-sm text-muted-foreground">
                   {d.size_human}
                 </span>
+                {isUsbTarget(d.path) && !fitsBoard(d, board) ? (
+                  <span className="text-xs text-destructive">
+                    This is a {d.name.split(" ")[0]} board; the image is for the{" "}
+                    {boardName}
+                  </span>
+                ) : null}
                 {tooSmall(d) ? (
                   <span className="text-xs text-destructive">
                     Too small for this image
@@ -93,11 +158,15 @@ export function StepStorage({
             ))}
             {selected === null ? (
               <p className="text-sm text-muted-foreground">
-                Pick the card to write to.
+                Pick where to write.
               </p>
             ) : null}
           </div>
         )}
+
+        {board !== null && usbCapable && !boardOnUsb ? (
+          <FlashingModeSteps board={board} running={runningBoards.length > 0} />
+        ) : null}
 
         <div className="flex flex-col gap-3 rounded-xl border border-border p-4">
           <h2 className="text-sm font-medium">What will be written</h2>
@@ -133,7 +202,18 @@ export function StepStorage({
           </dl>
         </div>
 
-        {selected ? (
+        {selected && writesBoard ? (
+          <Alert variant="destructive">
+            <AlertTriangle />
+            <AlertTitle>
+              Replace everything on the {boardName}&apos;s built-in storage?
+            </AlertTitle>
+            <AlertDescription>
+              Whatever system is on it now is erased. This cannot be undone.
+              Keep the board plugged in until the write finishes.
+            </AlertDescription>
+          </Alert>
+        ) : selected ? (
           <Alert variant="destructive">
             <AlertTriangle />
             <AlertTitle>

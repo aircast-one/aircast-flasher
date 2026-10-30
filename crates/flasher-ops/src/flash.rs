@@ -5,6 +5,7 @@ use super::fits_on_card;
 use super::hidden_command;
 use super::private_temp_dir;
 use super::randbits;
+use super::usbboard;
 use super::validate_disk_path;
 use super::validate_fight_access;
 use super::validate_image_file;
@@ -62,6 +63,9 @@ pub async fn flash_image(
     events: FlashEvents,
     trace: &mut FlashTrace,
 ) -> Result<(), String> {
+    if usbboard::is_target(target_disk) {
+        return flash_usb(config, image_path, target_disk, cancel, events, trace).await;
+    }
     validate_disk_path(target_disk)?;
     validate_fight_access(config)?;
     let src_path = validate_image_file(std::path::Path::new(image_path))?;
@@ -159,6 +163,108 @@ pub async fn flash_image(
         let _ = std::fs::remove_file(&write_path);
     }
     result
+}
+
+async fn flash_usb(
+    config: &ProvisionConfig,
+    image_path: &str,
+    target: &str,
+    cancel: Arc<AtomicBool>,
+    events: FlashEvents,
+    trace: &mut FlashTrace,
+) -> Result<(), String> {
+    validate_fight_access(config)?;
+    let family = usbboard::family_of_target(target)
+        .ok_or_else(|| format!("{target} is not a board this Flasher can write over USB"))?;
+    let src_path = validate_image_file(std::path::Path::new(image_path))?;
+    let lower = src_path.to_string_lossy().to_ascii_lowercase();
+    trace.compressed = lower.ends_with(".xz") || lower.ends_with(".gz");
+    let write_path = if trace.compressed {
+        let temp_dir = private_temp_dir()?;
+        check_available_space(&temp_dir, MIN_TEMP_SPACE_BYTES)?;
+        let dst = temp_dir.join("aircast-image.img");
+        let _ = std::fs::remove_file(&dst);
+        let started = std::time::Instant::now();
+        decompress(&events, &src_path, &dst, &lower, cancel.clone()).await?;
+        trace.decompress_ms = Some(started.elapsed().as_millis() as u64);
+        dst
+    } else {
+        src_path.clone()
+    };
+    let result = write_usb(config, family, &write_path, cancel, events, trace).await;
+    if trace.compressed {
+        let _ = std::fs::remove_file(&write_path);
+    }
+    result
+}
+
+async fn write_usb(
+    config: &ProvisionConfig,
+    family: &'static usbboard::Family,
+    image: &std::path::Path,
+    cancel: Arc<AtomicBool>,
+    events: FlashEvents,
+    trace: &mut FlashTrace,
+) -> Result<(), String> {
+    let image_len = std::fs::metadata(image)
+        .map(|m| m.len())
+        .map_err(|e| format!("Failed to read the image: {e}"))?;
+    trace.image_bytes = image_len;
+    events(FlashEvent::Stage {
+        stage: "device",
+        bytes: 0,
+    });
+    let disk = usbboard::open(family, cancel.clone()).await?;
+    fits_on_card(
+        image_len,
+        disk.size(),
+        &format!("the board's built-in storage ({})", disk.size_human()),
+    )?;
+    let config = config.clone();
+    let image = image.to_path_buf();
+    let task_events = events.clone();
+    let written = tokio::task::spawn_blocking(move || {
+        let mut disk = disk;
+        let mut file =
+            std::fs::File::open(&image).map_err(|e| format!("Failed to open the image: {e}"))?;
+        let mut speed = FlashSpeed::default();
+        flasher_core::flash(
+            &mut disk,
+            &mut file,
+            &flasher_core::FlashParams {
+                image_len,
+                verify: true,
+            },
+            &config,
+            &mut |stage, done, total| {
+                let phase = match stage {
+                    flasher_core::FlashStage::Write => FlashPhase::Writing,
+                    flasher_core::FlashStage::Verify => FlashPhase::Verifying,
+                    flasher_core::FlashStage::Customize => FlashPhase::Customizing,
+                };
+                let percent = if total > 0 {
+                    done as f64 / total as f64 * 100.0
+                } else {
+                    0.0
+                };
+                progress(
+                    &task_events,
+                    phase,
+                    done,
+                    total,
+                    percent,
+                    speed.sample(phase, done),
+                );
+            },
+        )
+    })
+    .await
+    .map_err(|e| format!("The USB write task failed: {e}"))?;
+    match written {
+        Err(_) if cancel.load(Ordering::SeqCst) => Err("Cancelled".to_string()),
+        Err(e) => Err(e),
+        Ok(()) => usbboard::restart(family).await,
+    }
 }
 
 fn stage_label(stage: &str) -> Option<&'static str> {

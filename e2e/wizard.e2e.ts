@@ -500,8 +500,38 @@ describe("flasher wizard", () => {
     const rows = $("dl");
     await expect(rows).toHaveText(expect.stringContaining("falcon-01.local"));
     await expect(rows).toHaveText(expect.stringContaining("test-net"));
-    await expect(rows).toHaveText(expect.stringContaining("Target card"));
+    await expect(rows).toHaveText(expect.stringContaining("Target"));
     await expectBlocked("Flash SD Card", "Insert an SD card");
+  });
+
+  it("offers writing straight to a Rockchip board over USB", async () => {
+    await backToStep("Operating system");
+    const boards = $('[aria-label="Board"]');
+    await boards.$("button*=Radxa").click();
+    await $('[aria-label="Model"]').click();
+    await $(
+      '//*[@role="option"][.//span[normalize-space()="Radxa ROCK 5B"]]',
+    ).click();
+    await expect($("button*=Aircast OS for Radxa ROCK 5B")).toHaveText(
+      expect.stringContaining(".img.xz"),
+    );
+    await $("button=Next").click();
+    await waitForHeading("Network");
+    await $("button=Next").click();
+    await waitForHeading("Access");
+    await $("button=Next").click();
+    await waitForHeading("Storage");
+
+    await expect($("h2*=Write straight to the board over USB")).toBeDisplayed();
+    await expect($("p*=Waiting for the Radxa ROCK 5B in flashing mode")).toBeDisplayed();
+    await expectBlocked(
+      "Flash SD Card",
+      "Insert an SD card or connect the board in flashing mode",
+    );
+
+    await backToStep("Operating system");
+    await boards.$("button*=Raspberry Pi").click();
+    await expect($('[aria-label="Aircast OS version"]')).toBeDisplayed();
   });
 
   it("sends you back to the step that owns a setting you want to change", async () => {

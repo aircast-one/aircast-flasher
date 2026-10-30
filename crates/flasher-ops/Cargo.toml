@@ -25,6 +25,10 @@ url = "2.5"
 base64 = "0.22"
 getrandom = "0.3"
 dirs = "6"
+rockusb = { version = "0.4", features = ["nusb"] }
+rockfile = "0.1"
+nusb = "0.2"
+futures = "0.3"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

@@ -10,6 +10,7 @@ pub mod releases;
 pub mod sshkeys;
 pub mod tailnet;
 pub mod tang;
+pub mod usbboard;
 pub mod wifi;
 
 mod types;

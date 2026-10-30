@@ -4,6 +4,12 @@ pub async fn list_block_devices() -> Result<Vec<BlockDevice>, String> {
     if cfg!(feature = "no-real-devices") {
         return Ok(Vec::new());
     }
+    let cards = list_cards().await?;
+    let boards = super::usbboard::flashing_boards().await;
+    Ok(cards.into_iter().chain(boards).collect())
+}
+
+async fn list_cards() -> Result<Vec<BlockDevice>, String> {
     #[cfg(target_os = "macos")]
     {
         list_block_devices_macos().await

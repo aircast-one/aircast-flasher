@@ -53,6 +53,11 @@ pub fn list_boards() -> Vec<flasher_ops::releases::Board> {
 }
 
 #[tauri::command]
+pub async fn list_running_boards() -> Vec<String> {
+    flasher_ops::usbboard::running_boards().await
+}
+
+#[tauri::command]
 pub async fn list_block_devices() -> Result<Vec<BlockDevice>, String> {
     flasher_ops::devices::list_block_devices().await
 }

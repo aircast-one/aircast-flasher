@@ -11,6 +11,7 @@ import {
   listBlockDevices,
   listBoards,
   listReleases,
+  listRunningBoards,
   listWifiNetworks,
   onDownloadProgress,
   onFlashProgress,
@@ -35,6 +36,7 @@ import type {
 import { errorMessage } from "@/lib/format";
 import { defaultHostname } from "@/components/default-hostname";
 import { nextFreeHostname } from "@/components/next-hostname";
+import { fitsBoard, usbFamily } from "@/components/usb-target";
 import { randomHex } from "@/lib/random-id";
 import { buildSummary } from "@/components/wizard-summary";
 import {
@@ -224,6 +226,12 @@ function App() {
     refetchInterval: onStorageStep ? DEVICE_POLL_INTERVAL_MS : false,
     refetchOnWindowFocus: onStorageStep,
   });
+  const runningBoardsQuery = useQuery({
+    queryKey: ["running-boards"],
+    queryFn: listRunningBoards,
+    enabled: onStorageStep,
+    refetchInterval: onStorageStep ? DEVICE_POLL_INTERVAL_MS : false,
+  });
 
   const onOsStep = step === STEP.os;
   const boardsQuery = useQuery({
@@ -262,10 +270,11 @@ function App() {
   const hostname = settings.hostname ?? suggested;
 
   const devices: BlockDevice[] = devicesQuery.data ?? [];
-  const selectedDisk = devices.some((d) => d.path === pickedDisk)
+  const targets = devices.filter((d) => fitsBoard(d, board));
+  const selectedDisk = targets.some((d) => d.path === pickedDisk)
     ? pickedDisk
-    : devices.length === 1
-      ? devices[0].path
+    : targets.length === 1
+      ? targets[0].path
       : "";
   const releases: Release[] = releasesQuery.data?.releases ?? [];
   const release = useMemo(() => {
@@ -464,9 +473,11 @@ function App() {
       ? [
           {
             message:
-              devices.length === 0
-                ? "Insert an SD card"
-                : "Pick the card to write to",
+              targets.length > 0
+                ? "Pick where to write"
+                : usbFamily(board) !== null
+                  ? "Insert an SD card or connect the board in flashing mode"
+                  : "Insert an SD card",
           },
         ]
       : []),
@@ -753,6 +764,8 @@ function App() {
             />
           ) : step === STEP.storage ? (
             <StepStorage
+              board={board}
+              runningBoards={runningBoardsQuery.data ?? []}
               devices={devices}
               devicesLoading={devicesQuery.isLoading}
               selectedDisk={selectedDisk}

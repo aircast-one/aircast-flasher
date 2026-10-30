@@ -49,6 +49,10 @@ export function listBoards(): Promise<Board[]> {
   return invoke<Board[]>("list_boards");
 }
 
+export function listRunningBoards(): Promise<string[]> {
+  return invoke<string[]>("list_running_boards");
+}
+
 export function listBlockDevices(): Promise<BlockDevice[]> {
   return invoke<BlockDevice[]>("list_block_devices");
 }
