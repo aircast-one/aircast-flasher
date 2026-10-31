@@ -6,6 +6,8 @@ pub struct ImageInfo {
     pub filename: String,
     pub extension: String,
     pub size: u64,
+    #[serde(default)]
+    pub uncompressed_size: Option<u64>,
     pub download_url: String,
     pub checksum_url: String,
 }

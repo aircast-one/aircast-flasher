@@ -11,21 +11,20 @@ Built on the proven flasher in `aircast-web` (Authorization Services + `dd`,
 
 ```
 list_releases ─► download_image ─► flash_image ─► provision_device
- (GitHub Releases) (stream+sha256)   (decompress     (mount boot part,
+ (releases.json)  (stream+sha256)   (decompress     (mount boot part,
                                      + dd as root)    write cloud-init/firstrun,
                                                       eject)
 ```
 
-- **Image source** — GitHub Releases on two public repositories: Raspberry Pi
-  images from `aircast-one/aircast-pi-gen`, Orange Pi and Radxa images from
-  `aircast-one/aircast-armbian`. A board's image is the release asset
-  `aircast-<board>-<tag>.img.xz` with its `.sha256` beside it (the Pi's is
-  `aircast-lite-arm64-<tag>.img.xz`; the full list is `BOARDS` in
-  `crates/flasher-ops/src/releases.rs`). The tag picks the channel: `-dev.N` is
-  `development`, `-stage.N` is `staging`, every other tag is `stable`. Or a
-  local `.img`/`.img.xz`/`.img.gz`. The Flasher's own installers are listed in
-  `/flasher/releases.json` on `downloads.aircast.one`, and the updater reads
-  `/flasher/latest.json`.
+- **Image source** — one catalog per board on the channel's downloads host:
+  `/lite/releases.json` for Raspberry Pi, and one named after each Orange Pi
+  and Radxa board, e.g. `/orangepi5/releases.json` (the full list is `BOARDS`
+  in `crates/flasher-ops/src/releases.rs`; the Pi images come from
+  aircast-pi-gen, the others from aircast-armbian). Hosts: `stable` →
+  `downloads.aircast.one`, `staging` → `downloads-stage.aircast.one`,
+  `development` → `downloads-dev.aircast.one`. Or a local
+  `.img`/`.img.xz`/`.img.gz`. The Flasher's own installers are listed in
+  `/flasher/releases.json`, and the updater reads `/flasher/latest.json`.
 - **Progress** — download and write both report a rate over the same
   one-second window (`SPEED_WINDOW`). The write is the longest wait in the app,
   so a bar alone would answer "is it moving" but not "how long"; the meter

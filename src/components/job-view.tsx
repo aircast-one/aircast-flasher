@@ -356,8 +356,8 @@ export function JobView({
           <h2 className="text-xl font-semibold">Stopped</h2>
           <p className="text-sm text-balance text-muted-foreground">
             {cardTouched
-              ? "You cancelled the write. The card is partly written and won't boot, so flash it again before using it."
-              : "You cancelled before the write started. Nothing was written to the SD card."}
+              ? `You cancelled the write. ${usb ? "The board" : "The card"} is partly written and won't boot, so flash it again before using it.`
+              : `You cancelled before the write started. Nothing was written to ${usb ? "the board" : "the SD card"}.`}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -418,8 +418,8 @@ export function JobView({
           <h2 className="text-xl font-semibold">Flash failed</h2>
           <p className="text-sm text-balance text-muted-foreground">
             {cardTouched
-              ? "Something went wrong while writing the SD card. It is partly written and won't boot, so flash it again before using it."
-              : "Something went wrong before the write started. Nothing was written to the SD card."}
+              ? `Something went wrong while writing ${usb ? "the board" : "the SD card"}. It is partly written and won't boot, so flash it again before using it.`
+              : `Something went wrong before the write started. Nothing was written to ${usb ? "the board" : "the SD card"}.`}
           </p>
         </div>
         <Alert variant="destructive" className="text-left">
