@@ -17,6 +17,9 @@ const SSH_MODES: { value: SshMode; label: string }[] = [
   { value: "disabled", label: "Off" },
 ];
 
+export const sshModeLabel = (mode: SshMode): string =>
+  SSH_MODES.find((m) => m.value === mode)?.label ?? mode;
+
 const OTHER_KEY = "other";
 
 export function SshModePicker({

@@ -1,4 +1,5 @@
-import { Globe, Lock, SquareTerminal, Swords } from "lucide-react";
+import { useState } from "react";
+import { ChevronRight, Globe, Lock, SquareTerminal, Swords } from "lucide-react";
 
 import { StepShell, focusField, type Problem } from "@/components/step-shell";
 import { SettingCard } from "@/components/setting-card";
@@ -10,6 +11,7 @@ import {
 import {
   DeviceAccessSection,
   SshModePicker,
+  sshModeLabel,
   type DeviceAccessProps,
 } from "@/components/device-access-section";
 import {
@@ -85,6 +87,12 @@ export function StepAccess({
   const devicePasswordWeak =
     access.sshMode === "password" &&
     isWeakDevicePassword(access.devicePassword, fight.enabled);
+  const fightKeyMissing =
+    fight.enabled &&
+    access.sshMode === "key-only" &&
+    access.sshKey.trim() === "";
+  const sshProblem = sshKeyInvalid || devicePasswordWeak || fightKeyMissing;
+  const [advancedOpen, setAdvancedOpen] = useState(false);
   const unreachable =
     fightModeUnreachable(fight.enabled, tailnetKey, tailnetServer) ||
     (fight.enabled && controlServerMissing);
@@ -107,9 +115,7 @@ export function StepAccess({
           },
         ]
       : []),
-    ...(fight.enabled &&
-    access.sshMode === "key-only" &&
-    access.sshKey.trim() === ""
+    ...(fightKeyMissing
       ? [
           {
             message:
@@ -151,25 +157,6 @@ export function StepAccess({
       }}
     >
       <div className="flex max-w-xl flex-col gap-4">
-        <SettingCard
-          icon={<SquareTerminal />}
-          title="SSH login"
-          description="Log in to the drone's shell"
-          action={
-            <SshModePicker
-              value={access.sshMode}
-              onChange={access.onSshMode}
-            />
-          }
-        >
-          <DeviceAccessSection
-            {...access}
-            sshKeyInvalid={sshKeyInvalid}
-            devicePasswordWeak={devicePasswordWeak}
-            fighting={fight.enabled}
-          />
-        </SettingCard>
-
         <SettingCard
           icon={<Globe />}
           title="Remote access"
@@ -249,6 +236,41 @@ export function StepAccess({
             </div>
           ) : null}
         </SettingCard>
+
+        <details
+          id="access-advanced"
+          open={advancedOpen || sshProblem}
+          onToggle={(e) => setAdvancedOpen(e.currentTarget.open)}
+          className="group"
+        >
+          <summary className="flex cursor-pointer list-none items-center gap-2 py-1 text-sm font-medium text-muted-foreground hover:text-foreground [&::-webkit-details-marker]:hidden">
+            <ChevronRight className="size-4 transition-transform group-open:rotate-90" />
+            Advanced
+            <span className="font-normal">
+              · SSH login: {sshModeLabel(access.sshMode)}
+            </span>
+          </summary>
+          <div className="mt-3">
+            <SettingCard
+              icon={<SquareTerminal />}
+              title="SSH login"
+              description="Log in to the drone's shell"
+              action={
+                <SshModePicker
+                  value={access.sshMode}
+                  onChange={access.onSshMode}
+                />
+              }
+            >
+              <DeviceAccessSection
+                {...access}
+                sshKeyInvalid={sshKeyInvalid}
+                devicePasswordWeak={devicePasswordWeak}
+                fighting={fight.enabled}
+              />
+            </SettingCard>
+          </div>
+        </details>
       </div>
     </StepShell>
   );

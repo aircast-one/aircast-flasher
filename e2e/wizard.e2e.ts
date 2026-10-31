@@ -161,6 +161,13 @@ async function openRemoteAccess() {
   }
 }
 
+async function openAdvanced() {
+  const advanced = $("#access-advanced");
+  if ((await advanced.getAttribute("open")) === null) {
+    await advanced.$("summary").click();
+  }
+}
+
 describe("flasher wizard", () => {
   before(async () => {
     await attachToAppWindow();
@@ -378,6 +385,7 @@ describe("flasher wizard", () => {
     await $("button=Headscale").click();
     await $("#control-server").setValue("https://hs.example.com");
     await $("#auth-key").setValue("hskey-auth-keep");
+    await openAdvanced();
     await $("button=Password").click();
     await $("#device-password").setValue("drone-pass-1");
     await browser.waitUntil(
@@ -419,19 +427,22 @@ describe("flasher wizard", () => {
 
   it("never prefills the stock device password", async () => {
     await onAccessStep();
+    await openAdvanced();
     await $("button=Password").click();
     await expect($("#device-password")).toHaveValue("");
     await $("button=Next").click();
     await waitForHeading("Storage");
 
     await backToStep("Access");
+    await openAdvanced();
     await $("button=SSH key").click();
   });
 
   it("shows the login the device will ship with, without being asked", async () => {
     await onAccessStep();
-    await expect($("button=SSH key")).toBeDisplayed();
-    await expect($("button=Off")).toBeDisplayed();
+    await expect($("#access-advanced summary")).toHaveText(
+      expect.stringContaining("SSH login: SSH key"),
+    );
   });
 
   it("persists settings to disk, on every platform", async () => {
@@ -481,6 +492,7 @@ describe("flasher wizard", () => {
     await $("button=Tailscale").click();
     await $("#auth-key").setValue("tskey-auth-abc123");
 
+    await openAdvanced();
     await $("button=Password").click();
     await $("#device-password").setValue("drone-pass1");
     await expect($("#device-password-help")).toHaveText(
