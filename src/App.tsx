@@ -145,7 +145,8 @@ function App() {
   const devicePassword = settings.devicePassword;
   const setDevicePassword = (devicePassword: string) =>
     update({ devicePassword });
-  const tailnetKey = settings.remoteAccess ? authKey : "";
+  const remoteAccess = settings.remoteAccess ?? true;
+  const tailnetKey = remoteAccess ? authKey : "";
   const tailnetServer = settings.selfHosted ? settings.controlServer : "";
 
   const encryptEnabled = settings.encryption;
@@ -728,7 +729,7 @@ function App() {
                 onControlServer: setControlServer,
                 authKey,
                 onAuthKey: setAuthKey,
-                enabled: settings.remoteAccess,
+                enabled: remoteAccess,
                 onEnabled: (remoteAccess) => update({ remoteAccess }),
                 selfHosted: settings.selfHosted,
                 onSelfHosted: (selfHosted) => update({ selfHosted }),

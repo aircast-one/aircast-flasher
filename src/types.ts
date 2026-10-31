@@ -168,7 +168,7 @@ export interface Settings {
   tangThreshold: number;
   tangCloud: boolean;
   authKey: string;
-  remoteAccess: boolean;
+  remoteAccess: boolean | null;
   selfHosted: boolean;
   sshMode: SshMode | null;
   devicePassword: string;

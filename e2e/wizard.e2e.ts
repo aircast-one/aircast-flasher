@@ -327,6 +327,14 @@ describe("flasher wizard", () => {
     await $("#password").clearValue();
   });
 
+  it("offers remote access before anyone asks for it", async () => {
+    await onAccessStep();
+    await expect(
+      $('[role="switch"][aria-label="Remote access"]'),
+    ).toHaveAttribute("aria-checked", "true");
+    await expect($("#auth-key")).toBeDisplayed();
+  });
+
   it("warns about a Headscale key with no control server without blocking", async () => {
     await onAccessStep();
     await openRemoteAccess();
@@ -376,7 +384,7 @@ describe("flasher wizard", () => {
       () => {
         const saved = savedSettings();
         return (
-          saved.remoteAccess === true &&
+          saved.remoteAccess !== false &&
           saved.selfHosted === true &&
           saved.controlServer === "https://hs.example.com" &&
           saved.authKey === "hskey-auth-keep" &&
