@@ -6,7 +6,6 @@ export interface ImageInfo {
   filename: string;
   extension: string;
   size: number;
-  uncompressed_size: number | null;
   download_url: string;
   checksum_url: string;
 }

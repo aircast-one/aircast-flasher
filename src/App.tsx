@@ -446,7 +446,7 @@ function App() {
   const fighting = fightMode && fightAvailable;
   const requiredCardBytes =
     sourceKind === "aircast" && release !== null
-      ? (release.image.uncompressed_size ?? releasesQuery.data?.min_card_bytes)
+      ? releasesQuery.data?.min_card_bytes
       : undefined;
   const detectedKeys = sshKeysQuery.data ?? [];
   const sshKey =
