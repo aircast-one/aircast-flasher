@@ -30,7 +30,7 @@ dependencies = [
 
 [[package]]
 name = "aircast-flasher"
-version = "0.2.14"
+version = "0.2.15"
 dependencies = [
  "flasher-ops",
  "reqwest 0.12.28",
@@ -1403,7 +1403,7 @@ checksum = "5baebc0774151f905a1a2cc41989300b1e6fbb29aff0ceffa1064fdd3088d582"
 
 [[package]]
 name = "flasher-cli"
-version = "0.2.14"
+version = "0.2.15"
 dependencies = [
  "clap",
  "flasher-ops",
@@ -1420,7 +1420,7 @@ dependencies = [
 
 [[package]]
 name = "flasher-core"
-version = "0.2.14"
+version = "0.2.15"
 dependencies = [
  "fatfs",
  "fscommon",
@@ -1439,7 +1439,7 @@ dependencies = [
 
 [[package]]
 name = "flasher-ops"
-version = "0.2.14"
+version = "0.2.15"
 dependencies = [
  "base64 0.22.1",
  "byte-unit",
