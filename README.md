@@ -17,8 +17,8 @@ list_releases ─► download_image ─► flash_image ─► provision_device
 ```
 
 - **Image source** — one catalog per board on the channel's downloads host:
-  `/lite/releases.json` for Raspberry Pi, and one named after each Orange Pi
-  and Radxa board, e.g. `/orangepi5/releases.json` (the full list is `BOARDS`
+  `/lite/releases.json` for Raspberry Pi, and one named after each Orange Pi,
+  Radxa and Banana Pi board, e.g. `/orangepi5/releases.json` (the full list is `BOARDS`
   in `crates/flasher-ops/src/releases.rs`; the Pi images come from
   aircast-pi-gen, the others from aircast-armbian). Hosts: `stable` →
   `downloads.aircast.one`, `staging` → `downloads-stage.aircast.one`,

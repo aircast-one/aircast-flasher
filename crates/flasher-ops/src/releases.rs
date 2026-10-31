@@ -20,7 +20,7 @@ pub struct Board {
     catalog: &'static str,
 }
 
-const fn rockchip(
+const fn armbian(
     id: &'static str,
     name: &'static str,
     maker: &'static str,
@@ -51,7 +51,7 @@ pub const BOARDS: &[Board] = &[
         tested: true,
         catalog: "lite",
     },
-    rockchip(
+    armbian(
         "orangepi5",
         "Orange Pi 5",
         "Orange Pi",
@@ -59,7 +59,7 @@ pub const BOARDS: &[Board] = &[
         false,
         "orangepi5",
     ),
-    rockchip(
+    armbian(
         "orangepi5-plus",
         "Orange Pi 5 Plus",
         "Orange Pi",
@@ -67,7 +67,7 @@ pub const BOARDS: &[Board] = &[
         false,
         "orangepi5-plus",
     ),
-    rockchip(
+    armbian(
         "orangepi5pro",
         "Orange Pi 5 Pro",
         "Orange Pi",
@@ -75,7 +75,7 @@ pub const BOARDS: &[Board] = &[
         true,
         "orangepi5pro",
     ),
-    rockchip(
+    armbian(
         "orangepi5-max",
         "Orange Pi 5 Max",
         "Orange Pi",
@@ -83,7 +83,7 @@ pub const BOARDS: &[Board] = &[
         true,
         "orangepi5-max",
     ),
-    rockchip(
+    armbian(
         "orangepi5-ultra",
         "Orange Pi 5 Ultra",
         "Orange Pi",
@@ -91,7 +91,7 @@ pub const BOARDS: &[Board] = &[
         true,
         "orangepi5-ultra",
     ),
-    rockchip(
+    armbian(
         "orangepi3b",
         "Orange Pi 3B",
         "Orange Pi",
@@ -99,7 +99,7 @@ pub const BOARDS: &[Board] = &[
         true,
         "orangepi3b",
     ),
-    rockchip(
+    armbian(
         "rock-5a",
         "Radxa ROCK 5A",
         "Radxa",
@@ -107,7 +107,7 @@ pub const BOARDS: &[Board] = &[
         false,
         "rock-5a",
     ),
-    rockchip(
+    armbian(
         "rock-5b",
         "Radxa ROCK 5B",
         "Radxa",
@@ -115,7 +115,7 @@ pub const BOARDS: &[Board] = &[
         false,
         "rock-5b",
     ),
-    rockchip(
+    armbian(
         "rock-5b-plus",
         "Radxa ROCK 5B+",
         "Radxa",
@@ -123,7 +123,7 @@ pub const BOARDS: &[Board] = &[
         true,
         "rock-5b-plus",
     ),
-    rockchip(
+    armbian(
         "rock-5c",
         "Radxa ROCK 5C",
         "Radxa",
@@ -131,7 +131,7 @@ pub const BOARDS: &[Board] = &[
         true,
         "rock-5c",
     ),
-    rockchip(
+    armbian(
         "rock-5t",
         "Radxa ROCK 5T",
         "Radxa",
@@ -139,7 +139,7 @@ pub const BOARDS: &[Board] = &[
         false,
         "rock-5t",
     ),
-    rockchip(
+    armbian(
         "rock-5-itx",
         "Radxa ROCK 5 ITX",
         "Radxa",
@@ -147,7 +147,7 @@ pub const BOARDS: &[Board] = &[
         false,
         "rock-5-itx",
     ),
-    rockchip(
+    armbian(
         "rock-3a",
         "Radxa ROCK 3A",
         "Radxa",
@@ -155,7 +155,7 @@ pub const BOARDS: &[Board] = &[
         false,
         "rock-3a",
     ),
-    rockchip(
+    armbian(
         "rock-3c",
         "Radxa ROCK 3C",
         "Radxa",
@@ -165,7 +165,7 @@ pub const BOARDS: &[Board] = &[
     ),
     Board {
         tested: true,
-        ..rockchip(
+        ..armbian(
             "radxa-zero3w",
             "Radxa ZERO 3W",
             "Radxa",
@@ -174,7 +174,7 @@ pub const BOARDS: &[Board] = &[
             "radxa-zero3",
         )
     },
-    rockchip(
+    armbian(
         "radxa-zero3e",
         "Radxa ZERO 3E",
         "Radxa",
@@ -182,7 +182,7 @@ pub const BOARDS: &[Board] = &[
         false,
         "radxa-zero3",
     ),
-    rockchip(
+    armbian(
         "radxa-e52c",
         "Radxa E52C",
         "Radxa",
@@ -190,13 +190,85 @@ pub const BOARDS: &[Board] = &[
         false,
         "radxa-e52c",
     ),
-    rockchip(
+    armbian(
         "radxa-e25",
         "Radxa E25",
         "Radxa",
         "Rockchip RK3568",
         false,
         "radxa-e25",
+    ),
+    armbian(
+        "bananapim7",
+        "Banana Pi BPI-M7",
+        "Banana Pi",
+        "Rockchip RK3588",
+        true,
+        "bananapim7",
+    ),
+    armbian(
+        "bananapir2pro",
+        "Banana Pi BPI-R2 Pro",
+        "Banana Pi",
+        "Rockchip RK3568",
+        false,
+        "bananapir2pro",
+    ),
+    armbian(
+        "bananapim5",
+        "Banana Pi BPI-M5",
+        "Banana Pi",
+        "Amlogic S905X3",
+        false,
+        "bananapim5",
+    ),
+    armbian(
+        "bananapim2pro",
+        "Banana Pi BPI-M2 Pro",
+        "Banana Pi",
+        "Amlogic S905X3",
+        true,
+        "bananapim2pro",
+    ),
+    armbian(
+        "bananapim2s",
+        "Banana Pi BPI-M2S",
+        "Banana Pi",
+        "Amlogic A311D",
+        false,
+        "bananapim2s",
+    ),
+    armbian(
+        "bananapicm4io",
+        "Banana Pi BPI-CM4 + IO board",
+        "Banana Pi",
+        "Amlogic A311D",
+        false,
+        "bananapicm4io",
+    ),
+    armbian(
+        "bananapim4zero",
+        "Banana Pi BPI-M4 Zero",
+        "Banana Pi",
+        "Allwinner H618",
+        true,
+        "bananapim4zero",
+    ),
+    armbian(
+        "bananapim4berry",
+        "Banana Pi BPI-M4 Berry",
+        "Banana Pi",
+        "Allwinner H618",
+        true,
+        "bananapim4berry",
+    ),
+    armbian(
+        "bananapim64",
+        "Banana Pi BPI-M64",
+        "Banana Pi",
+        "Allwinner A64",
+        true,
+        "bananapim64",
     ),
 ];
 

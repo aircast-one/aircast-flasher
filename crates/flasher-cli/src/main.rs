@@ -467,19 +467,24 @@ async fn run(cli: Cli) -> Result<(), String> {
         }
         Command::Boards => match json {
             true => print_json(&flasher_ops::releases::BOARDS),
-            false => say(flasher_ops::releases::BOARDS
-                .iter()
-                .map(|b| {
-                    format!(
-                        "{:16} {:20} {}{}",
-                        b.id,
-                        b.name,
-                        if b.builtin_wifi { "WiFi" } else { "no WiFi" },
-                        if b.beta { "  beta" } else { "" }
-                    )
-                })
-                .collect::<Vec<_>>()
-                .join("\n")),
+            false => {
+                let boards = flasher_ops::releases::BOARDS;
+                let id_width = boards.iter().map(|b| b.id.len()).max().unwrap_or(0);
+                let name_width = boards.iter().map(|b| b.name.len()).max().unwrap_or(0);
+                say(boards
+                    .iter()
+                    .map(|b| {
+                        format!(
+                            "{:id_width$} {:name_width$} {}{}",
+                            b.id,
+                            b.name,
+                            if b.builtin_wifi { "WiFi" } else { "no WiFi" },
+                            if b.beta { "  beta" } else { "" }
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n"))
+            }
         },
         Command::Cards => {
             let cards = flasher_ops::devices::list_block_devices().await?;

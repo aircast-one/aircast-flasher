@@ -118,7 +118,7 @@ export function StepImage({
           <div
             role="group"
             aria-label="Board"
-            className="grid grid-cols-3 gap-3"
+            className="grid grid-cols-2 gap-3"
           >
             {makers.map((name) => {
               const range = boards.filter((option) => option.maker === name);

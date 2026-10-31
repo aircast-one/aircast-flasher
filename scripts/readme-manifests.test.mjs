@@ -9,7 +9,7 @@ const manifestPaths = (text) =>
 
 const boardCatalogs = [
   ...read("crates/flasher-ops/src/releases.rs").matchAll(
-    /catalog: "([a-z0-9-]+)"|rockchip\(\s*(?:"[^"]*",\s*){4}(?:true|false),\s*"([a-z0-9-]+)"/g,
+    /catalog: "([a-z0-9-]+)"|armbian\(\s*(?:"[^"]*",\s*){4}(?:true|false),\s*"([a-z0-9-]+)"/g,
   ),
 ].map(([, pi, board]) => `/${pi ?? board}/releases.json`);
 
