@@ -15,6 +15,7 @@ pub struct Board {
     pub detail: &'static str,
     pub builtin_wifi: bool,
     pub beta: bool,
+    pub tested: bool,
     #[serde(skip)]
     catalog: &'static str,
 }
@@ -34,6 +35,7 @@ const fn rockchip(
         detail,
         builtin_wifi,
         beta: true,
+        tested: false,
         catalog,
     }
 }
@@ -46,6 +48,7 @@ pub const BOARDS: &[Board] = &[
         detail: "Pi 3, 4, 5 and Zero 2 W",
         builtin_wifi: true,
         beta: false,
+        tested: true,
         catalog: "lite",
     },
     rockchip(
@@ -160,14 +163,17 @@ pub const BOARDS: &[Board] = &[
         true,
         "rock-3c",
     ),
-    rockchip(
-        "radxa-zero3w",
-        "Radxa ZERO 3W",
-        "Radxa",
-        "Rockchip RK3566",
-        true,
-        "radxa-zero3",
-    ),
+    Board {
+        tested: true,
+        ..rockchip(
+            "radxa-zero3w",
+            "Radxa ZERO 3W",
+            "Radxa",
+            "Rockchip RK3566",
+            true,
+            "radxa-zero3",
+        )
+    },
     rockchip(
         "radxa-zero3e",
         "Radxa ZERO 3E",
@@ -321,6 +327,18 @@ mod tests {
         assert_eq!(json["maker"], "Orange Pi");
         assert_eq!(json["detail"], "Rockchip RK3588S");
         assert!(json.get("catalog").is_none());
+    }
+
+    #[test]
+    fn only_the_zero_3w_among_the_beta_boards_has_run_on_real_hardware() {
+        let tested: Vec<_> = BOARDS[1..]
+            .iter()
+            .filter(|b| b.tested)
+            .map(|b| b.id)
+            .collect();
+        assert_eq!(tested, ["radxa-zero3w"]);
+        assert!(BOARDS[0].tested);
+        assert_eq!(serde_json::to_value(BOARDS[1]).unwrap()["tested"], false);
     }
 
     #[test]

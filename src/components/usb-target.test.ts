@@ -11,6 +11,7 @@ const board = (detail: string): Board => ({
   detail,
   builtinWifi: false,
   beta: true,
+  tested: false,
 });
 
 const device = (path: string): BlockDevice => ({

@@ -25,6 +25,7 @@ export interface Board {
   detail: string;
   builtinWifi: boolean;
   beta: boolean;
+  tested: boolean;
 }
 
 export interface ListReleasesResponse {

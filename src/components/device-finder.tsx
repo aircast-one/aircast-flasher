@@ -409,7 +409,7 @@ export function DeviceFinder({
         <span className="flex items-center gap-1.5">
           <Network className="size-3.5 shrink-0" />
           {remoteEnrolled
-            ? "It joins your private network on first boot, using the key you wrote to the card."
+            ? "It joins your private network on first boot, using the key the Flasher wrote."
             : "Once it's online you can sign it in to Tailscale from here — keep this window open."}
         </span>
       </div>

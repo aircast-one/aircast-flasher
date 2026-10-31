@@ -634,10 +634,13 @@ function App() {
   const stopped = cancelled && flashMutation.isError;
   const signedOut =
     flashMutation.isError && lastVars?.cloudKeyServer === true && !cloudSignedIn;
+  const writesBoard = isUsbTarget(lastVars?.targetDisk ?? "");
   const status = writing
     ? "Writing in progress"
     : flashMutation.isSuccess
-      ? "Card written"
+      ? writesBoard
+        ? "Board written"
+        : "Card written"
       : stopped
         ? "Write stopped"
         : flashMutation.isError
@@ -781,7 +784,7 @@ function App() {
             <JobView
               hostname={(lastVars?.hostname ?? hostname).trim()}
               board={sourceKind === "aircast" ? board : null}
-              usb={isUsbTarget(lastVars?.targetDisk ?? "")}
+              usb={writesBoard}
               noWifi={noWifi}
               remoteEnrolled={remoteEnrolled}
               encryption={flashMutation.data ?? null}

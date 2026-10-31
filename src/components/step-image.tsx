@@ -26,8 +26,9 @@ function BetaNote({ board }: { board: Board }) {
     <div className="flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2">
       <TriangleAlert className="mt-0.5 size-4 shrink-0 text-amber-600 dark:text-amber-400" />
       <p className="text-sm text-muted-foreground">
-        {board.name} support is in beta: the image is built and checked, but
-        hasn't been tested on real hardware yet.
+        {board.tested
+          ? `${board.name} support is in beta. It has been tested on real hardware.`
+          : `${board.name} support is in beta: the image is built and checked, but hasn't been tested on real hardware yet.`}
       </p>
     </div>
   );

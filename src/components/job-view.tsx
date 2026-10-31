@@ -205,7 +205,15 @@ function EncryptionReminder({
 
 const BOARDS_DOCS_URL = "https://aircast.one/docs/hardware/boards";
 
-function NotShowingUp({ board, noWifi }: { board: Board; noWifi: boolean }) {
+function NotShowingUp({
+  board,
+  usb,
+  noWifi,
+}: {
+  board: Board;
+  usb: boolean;
+  noWifi: boolean;
+}) {
   return (
     <div className="w-full text-left text-sm text-muted-foreground">
       <h3 className="mb-1 font-medium text-foreground">
@@ -218,10 +226,12 @@ function NotShowingUp({ board, noWifi }: { board: Board; noWifi: boolean }) {
             Ethernet cable, then power it on again.
           </li>
         ) : null}
-        <li>
-          This card holds the {board.name} image. It won't start on a
-          different board.
-        </li>
+        {usb ? null : (
+          <li>
+            This card holds the {board.name} image. It won't start on a
+            different board.
+          </li>
+        )}
         <li>
           <button
             type="button"
@@ -308,7 +318,7 @@ export function JobView({
           <EncryptionReminder hostname={hostname} encryption={encryption} />
         ) : null}
         <DeviceFinder hostname={hostname} remoteEnrolled={remoteEnrolled} />
-        {board ? <NotShowingUp board={board} noWifi={noWifi} /> : null}
+        {board ? <NotShowingUp board={board} usb={usb} noWifi={noWifi} /> : null}
         <div className="flex w-full items-center justify-between gap-3 rounded-xl border border-border px-4 py-3 text-left">
           <div className="flex min-w-0 flex-col gap-0.5">
             <span className="text-sm font-medium">
@@ -506,7 +516,9 @@ export function JobView({
         : phase === "verifying"
           ? "Reading the card back to confirm a clean write."
           : phase === "customizing"
-            ? "Writing your network and access settings to the card."
+            ? usb
+              ? "Adding your network and access settings to the image."
+              : "Writing your network and access settings to the card."
             : usb
               ? "Keep the board plugged in while writing."
               : "Don't remove the SD card while writing.";
@@ -553,7 +565,7 @@ export function JobView({
       <ProgressPanel
         icon={Loader2}
         title="Starting…"
-        subtitle="Preparing to flash your SD card."
+        subtitle={usb ? "Preparing to write the board." : "Preparing to flash your SD card."}
         stepLabel={null}
         percent={0}
         detail={null}
