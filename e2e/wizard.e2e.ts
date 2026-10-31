@@ -222,10 +222,8 @@ describe("flasher wizard", () => {
 
     await pickMaker("Radxa");
     await expectBlocked("Next", "Choose the Radxa model");
-    await $('[aria-label="Model"]').click();
-    await $(
-      '//*[@role="option"][.//span[normalize-space()="Radxa ROCK 5B"]]',
-    ).click();
+    await expect($('[aria-label="Model"] [data-board="rock-5b"] img')).toBeDisplayed();
+    await $('[aria-label="Model"] [data-board="rock-5b"]').click();
     await browser.waitUntil(
       () =>
         fs.existsSync(settingsFile()) &&
@@ -508,10 +506,7 @@ describe("flasher wizard", () => {
     await backToStep("Operating system");
     const boards = $('[aria-label="Board"]');
     await boards.$("button*=Radxa").click();
-    await $('[aria-label="Model"]').click();
-    await $(
-      '//*[@role="option"][.//span[normalize-space()="Radxa ROCK 5B"]]',
-    ).click();
+    await $('[aria-label="Model"] [data-board="rock-5b"]').click();
     await expect($("button*=Aircast OS for Radxa ROCK 5B")).toHaveText(
       expect.stringContaining(".img.xz"),
     );

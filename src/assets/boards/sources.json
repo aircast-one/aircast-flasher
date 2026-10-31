@@ -1,0 +1,114 @@
+{
+  "bananapicm4io": {
+    "page": "https://docs.banana-pi.org/en/BPI-CM4/Photo_BPI-CM4",
+    "image": "https://docs.banana-pi.org/bpi-cm4/banana_pi_bpi-cm4_+_io_1.jpg"
+  },
+  "bananapim2pro": {
+    "page": "https://docs.banana-pi.org/en/BPI-M5_M2_Pro/Photo_BPI-M2_Pro",
+    "image": "https://docs.banana-pi.org/bpi-m2pro/banana_pi_bpi-m2_pro_1.jpg"
+  },
+  "bananapim2s": {
+    "page": "https://docs.banana-pi.org/en/BPI-M2S/Photo_BPI-M2S",
+    "image": "https://docs.banana-pi.org/bpi-m2s/banana_pi_bpi-m2s_1.jpg"
+  },
+  "bananapim4berry": {
+    "page": "https://docs.banana-pi.org/en/BPI-M4_Berry/Photo_BPI-M4_Berry",
+    "image": "https://docs.banana-pi.org/bpi-m4berry/banana_pi_bpi-m4_berry_1.jpg"
+  },
+  "bananapim4zero": {
+    "page": "https://docs.banana-pi.org/en/BPI-M4_Zero/Photo_BPI-M4_Zero",
+    "image": "https://docs.banana-pi.org/bpi-m4zero/banana_pi_bpi-m4_zero_1.jpg"
+  },
+  "bananapim5": {
+    "page": "https://docs.banana-pi.org/en/BPI-M5/Photo_BPI-M5",
+    "image": "https://docs.banana-pi.org/bpi-m5/banana_pi_bpi-m5_1.jpg"
+  },
+  "bananapim64": {
+    "page": "https://wiki.banana-pi.org/Banana_Pi_BPI-M64",
+    "image": "https://wiki.banana-pi.org/images/7/78/Banana_pi_BPI-M64_1.jpg"
+  },
+  "bananapim7": {
+    "page": "https://docs.banana-pi.org/en/BPI-M7/Photo_BPI-M7",
+    "image": "https://docs.banana-pi.org/bpi-m7/banana_pi_bpi-m7_1.jpg"
+  },
+  "bananapir2pro": {
+    "page": "https://docs.banana-pi.org/en/BPI-R2_Pro/Photo_BPI-R2_Pro",
+    "image": "https://docs.banana-pi.org/bpi-r2pro/banana_pi_bpi-r2_pro_1.jpg"
+  },
+  "orangepi3b": {
+    "page": "http://www.orangepi.org/html/hardWare/computerAndMicrocontrollers/details/Orange-Pi-3B.html",
+    "image": "http://www.orangepi.org/img/pi3b/0719-pi3b-28.png"
+  },
+  "orangepi5": {
+    "page": "http://www.orangepi.org/html/hardWare/computerAndMicrocontrollers/details/Orange-Pi-5.html",
+    "image": "http://www.orangepi.org/img/pi5-fix/pi5-26.png"
+  },
+  "orangepi5-max": {
+    "page": "http://www.orangepi.org/html/hardWare/computerAndMicrocontrollers/details/Orange-Pi-5-Max.html",
+    "image": "http://www.orangepi.org/img/pi5-max/max-26.png"
+  },
+  "orangepi5-plus": {
+    "page": "http://www.orangepi.org/html/hardWare/computerAndMicrocontrollers/details/Orange-Pi-5-plus.html",
+    "image": "http://www.orangepi.org/img/pi5-plus/pi5-plus-26.png"
+  },
+  "orangepi5-ultra": {
+    "page": "http://www.orangepi.org/html/hardWare/computerAndMicrocontrollers/details/Orange-Pi-5-Ultra.html",
+    "image": "http://www.orangepi.org/img/pi5-ultra/22.png"
+  },
+  "orangepi5pro": {
+    "page": "http://www.orangepi.org/html/hardWare/computerAndMicrocontrollers/details/Orange-Pi-5-Pro.html",
+    "image": "http://www.orangepi.org/img/pi5-pro/pi5-pro-27.png"
+  },
+  "radxa-e25": {
+    "page": "https://radxa.com/products/network-computer/e25",
+    "image": "https://radxa.com/network-computer/e25/spec_radxa_e25_01.webp"
+  },
+  "radxa-e52c": {
+    "page": "https://radxa.com/products/network-computer/e52c",
+    "image": "https://radxa.com/network-computer/e52c/spec_radxa_e52c_01.webp"
+  },
+  "radxa-zero3e": {
+    "page": "https://radxa.com/products/zeros/zero3e",
+    "image": "https://radxa.com/zero/3e/spec_zero3e_03.webp"
+  },
+  "radxa-zero3w": {
+    "page": "https://radxa.com/products/zeros/zero3w",
+    "image": "https://radxa.com/zero/3w/spec_zero3w_04.webp"
+  },
+  "rock-3a": {
+    "page": "https://radxa.com/products/rock3/3a",
+    "image": "https://radxa.com/rock3/rock_3a/spec_rock3a_03.webp"
+  },
+  "rock-3c": {
+    "page": "https://radxa.com/products/rock3/3c",
+    "image": "https://radxa.com/rock3/rock_3c/spec_rock3c_03.webp"
+  },
+  "rock-5-itx": {
+    "page": "https://radxa.com/products/rock5/5itx",
+    "image": "https://radxa.com/rock5/rock_5itx/spec_radxa_rock_5_itx_03.webp"
+  },
+  "rock-5a": {
+    "page": "https://radxa.com/products/rock5/5a",
+    "image": "https://radxa.com/rock5/rock_5a/spec_rock5a_03.webp"
+  },
+  "rock-5b": {
+    "page": "https://radxa.com/products/rock5/5b",
+    "image": "https://radxa.com/rock5/rock_5b/spec_rock5b_03.webp"
+  },
+  "rock-5b-plus": {
+    "page": "https://radxa.com/products/rock5/5bp",
+    "image": "https://radxa.com/rock5/rock_5b+/spec_rock5bp_03.webp"
+  },
+  "rock-5c": {
+    "page": "https://radxa.com/products/rock5/5c",
+    "image": "https://radxa.com/rock5/rock_5c/spec_rock_5c_03.webp"
+  },
+  "rock-5t": {
+    "page": "https://radxa.com/products/rock5/5t",
+    "image": "https://radxa.com/rock5/rock_5t/spec_rock5t_03.webp"
+  },
+  "rpi": {
+    "page": "https://www.raspberrypi.com/products/raspberry-pi-5/",
+    "image": "https://assets.raspberrypi.com/static/8f6eca535dbb23a21eb41a748050e3a0/3fd03/16gb.png"
+  }
+}
