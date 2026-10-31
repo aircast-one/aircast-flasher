@@ -135,7 +135,7 @@ struct FlashArgs {
     recovery_file: Option<String>,
     #[arg(
         long = "fight",
-        help = "Fight mode: no logs on the drone, tailnet-only, SSH key only"
+        help = "Fight mode: no logs on the drone, tailnet-only, SSH by key or a 12+ character password"
     )]
     fight_mode: bool,
     #[arg(long, short = 'y', help = "Erase without asking")]

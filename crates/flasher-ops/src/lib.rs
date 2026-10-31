@@ -21,7 +21,7 @@ pub use validation::*;
 
 pub use flasher_core::{
     AccessConfig, EncryptionConfig, InitFormat, ProvisionConfig, SshMode, TailscaleConfig,
-    TangServer, WifiConfig,
+    TangServer, WifiConfig, MIN_FIGHT_PASSWORD,
 };
 
 use serde::{Deserialize, Serialize};

@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Segmented } from "@/components/segmented";
-import { MIN_DEVICE_PASSWORD } from "@/components/step-network.validation";
+import { minDevicePassword } from "@/components/step-network.validation";
 import { cn } from "@/lib/utils";
 import type { SshKeyIdentity, SshMode, SshPublicKey } from "@/types";
 
@@ -22,18 +22,14 @@ const OTHER_KEY = "other";
 export function SshModePicker({
   value,
   onChange,
-  keysOnly,
 }: {
   value: SshMode;
   onChange: (v: SshMode) => void;
-  keysOnly: boolean;
 }) {
   return (
     <Segmented
       label="SSH login"
-      options={
-        keysOnly ? SSH_MODES.filter((m) => m.value !== "password") : SSH_MODES
-      }
+      options={SSH_MODES}
       value={value}
       onChange={onChange}
     />
@@ -227,7 +223,7 @@ export interface DeviceAccessProps {
   onDevicePassword: (v: string) => void;
   sshKeyInvalid: boolean;
   devicePasswordWeak: boolean;
-  keysOnly: boolean;
+  fighting: boolean;
 }
 
 export function DeviceAccessSection({
@@ -240,7 +236,7 @@ export function DeviceAccessSection({
   onDevicePassword,
   sshKeyInvalid,
   devicePasswordWeak,
-  keysOnly,
+  fighting,
 }: DeviceAccessProps) {
   const [showDevicePassword, setShowDevicePassword] = useState(false);
 
@@ -282,7 +278,7 @@ export function DeviceAccessSection({
         </div>
         {devicePasswordWeak ? (
           <Hint id="device-password-help" tone="error">
-            Use at least {MIN_DEVICE_PASSWORD} characters.
+            Use at least {minDevicePassword(fighting)} characters.
           </Hint>
         ) : devicePassword === "" ? (
           <Hint id="device-password-help" tone="warn">
@@ -313,8 +309,8 @@ export function DeviceAccessSection({
         </Hint>
       ) : sshKey.trim() === "" ? (
         <Hint id="ssh-key-help" tone="warn">
-          {keysOnly
-            ? "No key yet — add one, or turn SSH off. Fight mode won't leave the password login on."
+          {fighting
+            ? "No key yet — add one, pick Password, or turn SSH off. Fight mode won't leave the default login on."
             : "No key yet — the default pi / raspberry login stays on."}
         </Hint>
       ) : (

@@ -187,13 +187,13 @@ Every command takes `--json`.
 | `--tang URL` (repeatable), `--threshold N` | Disk encryption with Tang key servers |
 | `--cloud-unlock` | Also unlock through Aircast Cloud (needs `cloud login`) |
 | `--recovery-file PATH` | Where the recovery key is saved; must not exist yet |
-| `--fight` | Fight mode: no logs on the drone, tailnet-only, SSH keys only |
+| `--fight` | Fight mode: no logs on the drone, tailnet-only |
 | `--yes` | Erase without the prompt |
 
 Fight mode and disk encryption need Aircast OS v0.3.6 or newer; with an older
 release `flash` refuses rather than write flags the image would ignore. Fight
-mode also needs an SSH key (or `--no-ssh`) — it never leaves a password login
-on.
+mode also needs an SSH key, a device password of 12+ characters, or `--no-ssh`
+— it never leaves the image's default login on.
 
 Secrets come from the environment so they stay out of shell history:
 `AIRCAST_WIFI_PASSWORD`, `AIRCAST_DEVICE_PASSWORD` (password SSH login) and

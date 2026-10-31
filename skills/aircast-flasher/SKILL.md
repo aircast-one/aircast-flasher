@@ -87,7 +87,7 @@ the disk always comes from what the computer reports — never from a guess.
 | WiFi | `--wifi-ssid NAME` + `AIRCAST_WIFI_PASSWORD` env, `--wifi-country GB` | `wifi: {ssid, password, country}` |
 | Ethernet / cellular only | leave WiFi out | leave `wifi` out |
 | SSH key | `--ssh-key ~/.ssh/id_ed25519.pub` or the key text | `ssh: {mode: "key", key}` |
-| SSH password | `AIRCAST_DEVICE_PASSWORD` env (8+ chars) | `ssh: {mode: "password", password}` |
+| SSH password | `AIRCAST_DEVICE_PASSWORD` env (8+ chars, 12+ in fight mode) | `ssh: {mode: "password", password}` |
 | SSH off | `--no-ssh` | `ssh: {mode: "off"}` |
 | Tailscale | `AIRCAST_TAILSCALE_KEY` env | `tailscale: {authKey}` |
 | Headscale | `AIRCAST_TAILSCALE_KEY` + `--control-server https://hs.example.com` | `tailscale: {authKey, controlServer}` |
@@ -109,10 +109,10 @@ Defaults worth knowing:
 
 Rules the CLI enforces, so check them before calling:
 - **Fight mode** (no logs or video on the drone, reachable only over the
-  tailnet with an SSH key) needs a tailnet key, Aircast OS v0.3.6+, and an SSH
-  key or SSH turned off — never a password, and never the image's default
+  tailnet) needs a tailnet key, Aircast OS v0.3.6+, and an SSH key, a device
+  password of 12+ characters, or SSH turned off — never the image's default
   login. The only key in `~/.ssh` counts; with none or several, pass
-  `--ssh-key` (or `--no-ssh`) explicitly.
+  `--ssh-key`, `AIRCAST_DEVICE_PASSWORD` or `--no-ssh` explicitly.
 - **Encryption** needs Aircast OS v0.3.6+, at least one key server (a Tang URL or
   `--cloud-unlock`), a threshold no higher than the server count, and a
   recovery file path that doesn't exist yet. The recovery key is written there

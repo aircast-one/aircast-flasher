@@ -22,11 +22,11 @@ import {
   encryptionProblems,
 } from "@/components/encryption";
 import {
-  MIN_DEVICE_PASSWORD,
   fightModeUnreachable,
   isInvalidSshKey,
   isValidControlServer,
   isWeakDevicePassword,
+  minDevicePassword,
   needsControlServer,
 } from "@/components/step-network.validation";
 
@@ -84,7 +84,7 @@ export function StepAccess({
     access.sshMode === "key-only" && isInvalidSshKey(access.sshKey);
   const devicePasswordWeak =
     access.sshMode === "password" &&
-    isWeakDevicePassword(access.devicePassword);
+    isWeakDevicePassword(access.devicePassword, fight.enabled);
   const unreachable =
     fightModeUnreachable(fight.enabled, tailnetKey, tailnetServer) ||
     (fight.enabled && controlServerMissing);
@@ -102,7 +102,7 @@ export function StepAccess({
     ...(devicePasswordWeak
       ? [
           {
-            message: `Make the device password at least ${MIN_DEVICE_PASSWORD} characters`,
+            message: `Make the device password at least ${minDevicePassword(fight.enabled)} characters`,
             fix: focusField("device-password"),
           },
         ]
@@ -113,7 +113,7 @@ export function StepAccess({
       ? [
           {
             message:
-              "Add an SSH key, or turn SSH off — in fight mode the image's password login would stay on",
+              "Add an SSH key, pick Password, or turn SSH off — in fight mode the image's default login would stay on",
             fix: focusField("ssh-key"),
           },
         ]
@@ -159,7 +159,6 @@ export function StepAccess({
             <SshModePicker
               value={access.sshMode}
               onChange={access.onSshMode}
-              keysOnly={fight.enabled}
             />
           }
         >
@@ -167,7 +166,7 @@ export function StepAccess({
             {...access}
             sshKeyInvalid={sshKeyInvalid}
             devicePasswordWeak={devicePasswordWeak}
-            keysOnly={fight.enabled}
+            fighting={fight.enabled}
           />
         </SettingCard>
 
@@ -239,7 +238,7 @@ export function StepAccess({
               <p>
                 No video is recorded, and the flight log, journal and flight
                 controller logs are wiped on every start. Only the tailnet gets
-                in, and only with an SSH key.
+                in.
               </p>
               {unreachable ? (
                 <p id="fight-mode-help" className="text-destructive">

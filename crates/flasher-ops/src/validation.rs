@@ -1,5 +1,5 @@
 use super::format_bytes;
-use flasher_core::{ProvisionConfig, SshMode};
+use flasher_core::{AccessConfig, ProvisionConfig, MIN_FIGHT_PASSWORD};
 
 pub(crate) fn validate_disk_path(path: &str) -> Result<(), String> {
     let valid = if cfg!(target_os = "macos") {
@@ -29,19 +29,11 @@ pub(crate) fn validate_disk_path(path: &str) -> Result<(), String> {
 }
 
 pub(crate) fn validate_fight_access(config: &ProvisionConfig) -> Result<(), String> {
-    let keys_only = config.access.as_ref().is_some_and(|a| match a.ssh {
-        SshMode::Disabled => true,
-        SshMode::KeyOnly => a
-            .authorized_key
-            .as_deref()
-            .is_some_and(|key| !key.trim().is_empty()),
-        SshMode::Password => false,
-    });
-    if config.fight_mode && !keys_only {
-        return Err(
-            "Fight mode takes SSH keys only — add a key or turn SSH off, or the image's password login stays on."
-                .to_string(),
-        );
+    let holds = config.access.as_ref().is_some_and(AccessConfig::holds_in_fight);
+    if config.fight_mode && !holds {
+        return Err(format!(
+            "Fight mode needs an SSH key, a password of at least {MIN_FIGHT_PASSWORD} characters, or SSH turned off — the image's default login must not stay on."
+        ));
     }
     Ok(())
 }
@@ -159,7 +151,7 @@ pub(crate) fn check_available_space(path: &std::path::Path, required: u64) -> Re
 #[cfg(test)]
 mod tests {
     use super::*;
-    use flasher_core::{AccessConfig, InitFormat};
+    use flasher_core::{InitFormat, SshMode};
 
     fn config(access: Option<AccessConfig>, fight_mode: bool) -> ProvisionConfig {
         ProvisionConfig {
@@ -177,15 +169,29 @@ mod tests {
         Some(AccessConfig {
             ssh,
             authorized_key: key.map(str::to_string),
-            password: Some("device-password".into()),
+            password: None,
+        })
+    }
+
+    fn password(pw: &str) -> Option<AccessConfig> {
+        Some(AccessConfig {
+            ssh: SshMode::Password,
+            authorized_key: None,
+            password: Some(pw.into()),
         })
     }
 
     #[test]
-    fn fight_mode_takes_ssh_keys_only() {
+    fn fight_mode_takes_a_key_or_a_long_password() {
         let key = Some("ssh-ed25519 AAAA me");
         assert!(validate_fight_access(&config(ssh(SshMode::KeyOnly, key), true)).is_ok());
         assert!(validate_fight_access(&config(ssh(SshMode::Disabled, None), true)).is_ok());
+        assert!(validate_fight_access(&config(password("twelve-chars"), true)).is_ok());
+        assert!(validate_fight_access(&config(password("eleven-char"), true)).is_err());
+        assert!(
+            validate_fight_access(&config(password("  eleven-char  "), true)).is_err(),
+            "padding doesn't count toward the length"
+        );
         assert!(validate_fight_access(&config(ssh(SshMode::Password, None), true)).is_err());
         assert!(
             validate_fight_access(&config(ssh(SshMode::KeyOnly, Some("  ")), true)).is_err(),
@@ -196,6 +202,6 @@ mod tests {
             "no access settings keep the image's password login"
         );
         assert!(validate_fight_access(&config(None, false)).is_ok());
-        assert!(validate_fight_access(&config(ssh(SshMode::Password, None), false)).is_ok());
+        assert!(validate_fight_access(&config(password("short"), false)).is_ok());
     }
 }

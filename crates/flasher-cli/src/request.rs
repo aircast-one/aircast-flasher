@@ -4,7 +4,7 @@ use std::sync::Arc;
 use flasher_ops::flash::{FlashEvents, FlashTrace};
 use flasher_ops::{
     AccessConfig, BlockDevice, DownloadProgress, EncryptionConfig, InitFormat, ProvisionConfig,
-    Release, SshMode, TailscaleConfig, TangServer, WifiConfig,
+    Release, SshMode, TailscaleConfig, TangServer, WifiConfig, MIN_FIGHT_PASSWORD,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -79,7 +79,7 @@ pub struct SshRequest {
     #[schemars(description = "Public key text, or a path to a .pub file. Mode key only.")]
     pub key: Option<String>,
     #[schemars(
-        description = "Password for the pi account, at least 8 characters. Mode password only."
+        description = "Password for the pi account, at least 8 characters (12 in fight mode). Mode password only."
     )]
     pub password: Option<String>,
 }
@@ -141,10 +141,11 @@ fn wifi_password_valid(password: &str) -> bool {
 }
 
 pub fn problems(request: &FlashRequest, detected_keys: usize) -> Vec<String> {
-    let ssh_password = request
-        .ssh
-        .as_ref()
-        .is_some_and(|ssh| ssh.mode == SshChoice::Password);
+    let min_password = if request.fight_mode {
+        MIN_FIGHT_PASSWORD
+    } else {
+        8
+    };
     let tailnet = request
         .tailscale
         .as_ref()
@@ -182,8 +183,8 @@ pub fn problems(request: &FlashRequest, detected_keys: usize) -> Vec<String> {
             .ssh
             .as_ref()
             .filter(|s| s.mode == SshChoice::Password)
-            .filter(|s| s.password.as_deref().unwrap_or("").len() < 8)
-            .map(|_| "Make the device password at least 8 characters".to_string()),
+            .filter(|s| s.password.as_deref().unwrap_or("").trim().chars().count() < min_password)
+            .map(|_| format!("Make the device password at least {min_password} characters")),
         request
             .ssh
             .as_ref()
@@ -198,10 +199,8 @@ pub fn problems(request: &FlashRequest, detected_keys: usize) -> Vec<String> {
         (request.fight_mode && tailnet.is_none()).then(|| {
             "Fight mode needs a tailnet pre-auth key — the tailnet is the only way in".to_string()
         }),
-        (request.fight_mode && ssh_password)
-            .then(|| "Fight mode takes SSH keys only — use a key or turn SSH off".to_string()),
         (request.fight_mode && request.ssh.is_none() && detected_keys != 1).then(|| {
-            "Fight mode needs an SSH key — pass one, or turn SSH off; the image's password login would stay on"
+            "Fight mode needs an SSH key or a device password — pass one, or turn SSH off; the image's default login would stay on"
                 .to_string()
         }),
         request
@@ -628,6 +627,28 @@ mod tests {
         assert!(problems(&fight, 2)
             .iter()
             .any(|p| p.contains("needs an SSH key")));
+    }
+
+    #[test]
+    fn fight_mode_takes_a_password_of_twelve_characters() {
+        let fight = |password: &str| FlashRequest {
+            fight_mode: true,
+            tailscale: Some(TailnetRequest {
+                auth_key: "tskey-auth-x".into(),
+                control_server: None,
+            }),
+            ssh: Some(SshRequest {
+                mode: SshChoice::Password,
+                key: None,
+                password: Some(password.into()),
+            }),
+            ..request()
+        };
+        assert!(problems(&fight("twelve-chars"), 0).is_empty());
+        assert_eq!(
+            problems(&fight("eleven-char"), 0),
+            ["Make the device password at least 12 characters"]
+        );
     }
 
     #[test]

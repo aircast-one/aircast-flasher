@@ -2,6 +2,7 @@ use crate::{psk, AccessConfig, InitFormat, ProvisionConfig, SshMode, TailscaleCo
 
 const ENCRYPT_MARKER_NAME: &str = "aircast-encrypt";
 const FIGHT_MARKER_NAME: &str = "aircast-fight-mode";
+const FIGHT_PASSWORD_LOGIN: &str = "ssh-password\n";
 
 const TS_STATE_PATH: &str = "/var/lib/aircastd/tailscale.json";
 const TS_KEY_PATH: &str = "/var/lib/aircastd/tailscale.authkey";
@@ -75,9 +76,17 @@ pub fn boot_markers(config: &ProvisionConfig) -> Vec<ProvisionFile> {
         .chain(
             config
                 .fight_mode
-                .then(|| ProvisionFile::plain(FIGHT_MARKER_NAME, String::new())),
+                .then(|| ProvisionFile::plain(FIGHT_MARKER_NAME, fight_marker(config))),
         )
         .collect()
+}
+
+fn fight_marker(config: &ProvisionConfig) -> String {
+    config
+        .access
+        .as_ref()
+        .filter(|a| a.password_login())
+        .map_or_else(String::new, |_| FIGHT_PASSWORD_LOGIN.to_string())
 }
 
 pub fn encryption_files(config: &ProvisionConfig) -> Vec<ProvisionFile> {
@@ -983,6 +992,27 @@ mod tests {
         assert_eq!(markers.len(), 1);
         assert_eq!(markers[0].name, "aircast-fight-mode");
         assert!(markers[0].contents.is_empty());
+    }
+
+    #[test]
+    fn a_fight_card_with_a_password_tells_aircastd_to_keep_password_login() {
+        let mut c = access_cfg(
+            InitFormat::CloudInit,
+            AccessConfig {
+                ssh: SshMode::Password,
+                authorized_key: None,
+                password: Some("long-enough-pass".into()),
+            },
+        );
+        c.fight_mode = true;
+        assert_eq!(boot_markers(&c)[0].contents, "ssh-password\n");
+
+        c.access = Some(AccessConfig {
+            ssh: SshMode::KeyOnly,
+            authorized_key: Some("ssh-ed25519 AAAA me".into()),
+            password: Some("long-enough-pass".into()),
+        });
+        assert!(boot_markers(&c)[0].contents.is_empty());
     }
 
     #[test]

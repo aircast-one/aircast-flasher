@@ -4,6 +4,7 @@ import { test } from "node:test";
 import {
   fightModeUnreachable,
   isInvalidWifiPassword,
+  isWeakDevicePassword,
   needsControlServer,
   networkProblems,
 } from "./step-network.validation.ts";
@@ -31,6 +32,15 @@ test("a blank control server is only a problem once a key exists", () => {
     false,
   );
   assert.equal(needsControlServer(false, "", "hskey-auth-abc"), false);
+});
+
+test("fight mode takes a longer device password, and never the default", () => {
+  assert.equal(isWeakDevicePassword("", false), false);
+  assert.equal(isWeakDevicePassword("drone-p1", false), false);
+  assert.equal(isWeakDevicePassword("", true), true);
+  assert.equal(isWeakDevicePassword("drone-pass1", true), true);
+  assert.equal(isWeakDevicePassword("  drone-pass1  ", true), true);
+  assert.equal(isWeakDevicePassword("drone-pass12", true), false);
 });
 
 test("fight mode is unreachable until the drone joins a tailnet", () => {

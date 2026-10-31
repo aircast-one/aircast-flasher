@@ -450,8 +450,6 @@ describe("flasher wizard", () => {
 
     const fight = $('[role="switch"][aria-label="Fight mode"]');
     await fight.click();
-    await expect($("button=Password")).not.toBeDisplayed();
-    await expect($("button=SSH key")).toBeDisplayed();
 
     await onNetworkStep();
     await $("#hostname").setValue("fight-01");
@@ -465,7 +463,30 @@ describe("flasher wizard", () => {
     await $("button=Next").click();
     await waitForHeading("Access");
     await fight.click();
-    await expect($("button=Password")).toBeDisplayed();
+  });
+
+  it("fight mode takes a password, as long as it's long", async () => {
+    await useNewestRelease();
+    await onAccessStep();
+    const fight = $('[role="switch"][aria-label="Fight mode"]');
+    await fight.click();
+    await $("button=Tailscale").click();
+    await $("#auth-key").setValue("tskey-auth-abc123");
+
+    await $("button=Password").click();
+    await $("#device-password").setValue("drone-pass1");
+    await expect($("#device-password-help")).toHaveText(
+      "Use at least 12 characters.",
+    );
+    await expectBlocked("Next", "at least 12 characters");
+
+    await $("#device-password").setValue("drone-pass12");
+    await expect(problems()).not.toBeDisplayed();
+
+    await $("#device-password").clearValue();
+    await $("#auth-key").clearValue();
+    await $("button=SSH key").click();
+    await fight.click();
   });
 
   it("won't let fight mode write a drone nothing can reach", async () => {

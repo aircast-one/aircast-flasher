@@ -48,7 +48,9 @@ import {
 } from "@/components/encryption";
 import { cardLabel, withCloudServer } from "@/components/cloud";
 import {
+  MIN_FIGHT_PASSWORD,
   fightModeUnreachable,
+  isWeakDevicePassword,
   joinsTailnet,
 } from "@/components/step-network.validation";
 import { useSettings } from "@/lib/use-settings";
@@ -192,7 +194,6 @@ function App() {
     update({
       fightMode: on,
       ...(on ? { remoteAccess: true } : {}),
-      ...(on && sshMode === "password" ? { sshMode: "key-only" as const } : {}),
     });
 
   const password = settings.wifiPassword;
@@ -452,8 +453,10 @@ function App() {
   const sshKey =
     settings.authorizedKey ??
     (detectedKeys.length === 1 ? detectedKeys[0].contents : "");
-  const fightKeyMissing =
-    fighting && sshMode === "key-only" && sshKey.trim() === "";
+  const fightLoginMissing =
+    fighting &&
+    ((sshMode === "key-only" && sshKey.trim() === "") ||
+      (sshMode === "password" && isWeakDevicePassword(devicePassword, true)));
   const selectedDevice = devices.find((d) => d.path === selectedDisk);
   const cardTooSmall =
     requiredCardBytes !== undefined &&
@@ -493,11 +496,10 @@ function App() {
           },
         ]
       : []),
-    ...(fightKeyMissing
+    ...(fightLoginMissing
       ? [
           {
-            message:
-              "Fight mode needs an SSH key, or SSH turned off — the image's password login would stay on",
+            message: `Fight mode needs an SSH key, a password of ${MIN_FIGHT_PASSWORD}+ characters, or SSH turned off — the image's default login would stay on`,
             fix: () => setStep(STEP.access),
           },
         ]

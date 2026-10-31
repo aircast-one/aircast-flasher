@@ -79,7 +79,23 @@ impl AccessConfig {
             SshMode::Password => non_blank(&self.password),
         }
     }
+
+    pub fn holds_in_fight(&self) -> bool {
+        match self.ssh {
+            SshMode::Password => self
+                .password
+                .as_deref()
+                .is_some_and(|p| p.trim().chars().count() >= MIN_FIGHT_PASSWORD),
+            _ => self.is_effective(),
+        }
+    }
+
+    pub fn password_login(&self) -> bool {
+        self.ssh == SshMode::Password && self.is_effective()
+    }
 }
+
+pub const MIN_FIGHT_PASSWORD: usize = 12;
 
 fn non_blank(v: &Option<String>) -> bool {
     v.as_deref().is_some_and(|s| !s.trim().is_empty())

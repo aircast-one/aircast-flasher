@@ -56,9 +56,15 @@ export function isInvalidWifiPassword(value: string): boolean {
 }
 
 export const MIN_DEVICE_PASSWORD = 8;
+export const MIN_FIGHT_PASSWORD = 12;
 
-export function isWeakDevicePassword(value: string): boolean {
-  return value !== "" && value.length < MIN_DEVICE_PASSWORD;
+export const minDevicePassword = (fighting: boolean): number =>
+  fighting ? MIN_FIGHT_PASSWORD : MIN_DEVICE_PASSWORD;
+
+export function isWeakDevicePassword(value: string, fighting: boolean): boolean {
+  return fighting
+    ? value.trim().length < MIN_FIGHT_PASSWORD
+    : value !== "" && value.length < MIN_DEVICE_PASSWORD;
 }
 
 export const networkProblems = (p: {

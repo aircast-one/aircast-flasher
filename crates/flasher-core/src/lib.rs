@@ -12,6 +12,6 @@ pub use engine::{customize_image, flash, BlockDevice, FlashParams, FlashStage, B
 
 pub use model::{
     AccessConfig, EncryptionConfig, InitFormat, ProvisionConfig, SshMode, TailscaleConfig,
-    TangServer, WifiConfig,
+    TangServer, WifiConfig, MIN_FIGHT_PASSWORD,
 };
 pub use provision::{encryption_files, plan, ProvisionFile, ProvisionPlan};
