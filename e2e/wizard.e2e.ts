@@ -220,6 +220,11 @@ describe("flasher wizard", () => {
     };
     await expectBlocked("Next", "Choose the board this card is for");
 
+    await pickMaker("Orange Pi");
+    await expect(
+      $('[aria-label="Model"] [data-board="orangepi5-plus"]'),
+    ).toHaveText(expect.stringContaining("Orange Pi 5 Plus"));
+
     await pickMaker("Radxa");
     await expectBlocked("Next", "Choose the Radxa model");
     await expect($('[aria-label="Model"] [data-board="rock-5b"] img')).toBeDisplayed();

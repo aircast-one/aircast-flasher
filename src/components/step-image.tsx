@@ -22,6 +22,11 @@ function aircastTitle(board: Board | null, release: Release | null): string {
   return `Aircast OS for ${board.name}${recommended ? " (recommended)" : ""}`;
 }
 
+function modelTitle(board: Board): string {
+  const model = board.name.replace(`${board.maker} `, "");
+  return /^\d/.test(model) ? board.name : model;
+}
+
 function BetaNote({ board }: { board: Board }) {
   return (
     <div className="flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2">
@@ -161,7 +166,7 @@ export function StepImage({
                   key={option.id}
                   board={option.id}
                   photo={boardPhoto(option.id)}
-                  title={option.name.replace(`${option.maker} `, "")}
+                  title={modelTitle(option)}
                   selected={chosen?.id === option.id}
                   onClick={() => pickModel(option.id)}
                 >
