@@ -509,6 +509,7 @@ mod tests {
             access: None,
             encryption: None,
             fight_mode: false,
+            restore: None,
             init_format: InitFormat::CloudInit,
         }
     }
@@ -620,6 +621,7 @@ mod tests {
             access: None,
             encryption: None,
             fight_mode: false,
+            restore: None,
             init_format: InitFormat::FirstRun,
         };
         let params = FlashParams {
@@ -658,6 +660,7 @@ mod tests {
             access: None,
             encryption: None,
             fight_mode: true,
+            restore: None,
             init_format: InitFormat::CloudInit,
         };
         let params = FlashParams {
@@ -673,6 +676,43 @@ mod tests {
         assert_eq!(
             read_fat_file(&written, "aircast-fight-mode").as_deref(),
             Some("")
+        );
+        assert!(read_fat_file(&written, "user-data").is_none());
+    }
+
+    #[test]
+    fn a_restore_bundle_lands_on_the_boot_partition_as_is() {
+        let image = build_image_with(gpt_table);
+        let mut device = MemDevice::zeroed(image.len());
+        let bundle = r#"{"created":"2026-11-01T12:00:00Z","files":[{"data":"e30=","mode":384,"path":"/var/lib/aircastd/gimbal.json"}],"format":1,"hostname":"falcon","sameDrone":false}"#;
+        let cfg = ProvisionConfig {
+            hostname: None,
+            wifi: None,
+            tailscale: None,
+            access: None,
+            encryption: None,
+            fight_mode: false,
+            restore: Some(bundle.into()),
+            init_format: InitFormat::CloudInit,
+        };
+        let params = FlashParams {
+            image_len: image.len() as u64,
+            verify: false,
+        };
+
+        flash(
+            &mut device,
+            &mut Cursor::new(image),
+            &params,
+            &cfg,
+            &mut |_, _, _| {},
+        )
+        .expect("flash a restore card");
+
+        let written = device.into_bytes();
+        assert_eq!(
+            read_fat_file(&written, "aircast-restore.json").as_deref(),
+            Some(bundle)
         );
         assert!(read_fat_file(&written, "user-data").is_none());
     }

@@ -1,6 +1,6 @@
 ---
 name: aircast-flasher
-description: Flash Aircast OS onto SD cards for Raspberry Pi drones and manage the fleet with aircast-flasher-cli or its MCP tools. Use this whenever someone wants to flash, write, burn or provision an SD card for an Aircast drone or Raspberry Pi; set a card's WiFi, hostname, SSH key, Tailscale or Headscale key, disk encryption (Tang / Aircast Cloud unlock) or fight mode; download an Aircast OS image; find a freshly flashed drone on the network; list drones on the tailnet or sign one in to Tailscale; or list Aircast Cloud cards and mark a lost one — even if they only say "set up a new drone card" or "prep falcon-02".
+description: Flash Aircast OS onto SD cards for Raspberry Pi drones and manage the fleet with aircast-flasher-cli or its MCP tools. Use this whenever someone wants to flash, write, burn or provision an SD card for an Aircast drone or Raspberry Pi; set a card's WiFi, hostname, SSH key, Tailscale or Headscale key, disk encryption (Tang / Aircast Cloud unlock) or fight mode; download an Aircast OS image; find a freshly flashed drone on the network; list drones on the tailnet or sign one in to Tailscale; back up a drone's settings and restore them onto a new card; or list Aircast Cloud cards and mark a lost one — even if they only say "set up a new drone card", "prep falcon-02" or "the card in falcon died".
 ---
 
 # Aircast Flasher
@@ -34,6 +34,7 @@ commands:
 | `devices` | `list_devices` | `{tailnet, devices: [{name, address, ip}], offline: [names], notAnswering: [names]}` |
 | `releases` | `list_releases` | `{releases: [{version, prerelease, created_at, image}], min_card_bytes}` |
 | `find NAME` | `find_device` | `{address}` — `null` until the drone has booted |
+| `backups list` | `list_backups` | array of `{id, hostname, created}`, newest first |
 
 `devices` lists drones that answer as Aircast on this computer's tailnet.
 `offline` names Linux machines on the tailnet that are offline — they may be
@@ -93,6 +94,7 @@ the disk always comes from what the computer reports — never from a guess.
 | Headscale | `AIRCAST_TAILSCALE_KEY` + `--control-server https://hs.example.com` | `tailscale: {authKey, controlServer}` |
 | Disk encryption | `--tang http://10.0.0.5:7500` (repeatable), `--threshold N`, `--cloud-unlock`, `--recovery-file PATH` | `encryption: {tangServers, threshold, cloudUnlock, recoveryFile}` |
 | Fight mode | `--fight` | `fightMode: true` |
+| Restore a backup | `--restore ID --same-drone` or `--new-drone` | `restore: {backup: ID, sameDrone}` |
 
 Pass secrets (WiFi password, device password, tailnet key) through the
 environment variables rather than as arguments, so they stay out of shell
@@ -135,6 +137,26 @@ When something is missing, the CLI lists every problem at once
   computer's tailnet. It needs Tailscale installed and signed in here; the
   error says which is missing.
 
+## Backups and restore
+
+A backup is a drone's settings (WiFi, cloud link, tailnet identity, the rest
+aircastd keeps), saved on this computer so a dead or replaced card can be
+rebuilt.
+
+- **Take one** while the drone is up: `device backup <target>` (MCP
+  `backup_device`), where the target is what `devices` lists or
+  `NAME.local`. Fight-mode drones answer only over the tailnet, so use their
+  tailnet name. It prints the backup id.
+- **Restore** when flashing: `--restore ID` plus exactly one of
+  `--same-drone` (the card goes back into that aircraft and it returns as the
+  same drone; the hostname defaults to the backup's) or `--new-drone` (copy
+  the setup onto another aircraft, which gets its own identity). Ask which
+  when the person hasn't said — two cards restored as the same drone fight
+  over one identity. The drone restores on first boot and restarts once more.
+- `backups list` / `backups delete ID` (MCP `list_backups`, `delete_backup`).
+  Backups hold secrets and stay on this computer; never print or copy their
+  contents.
+
 ## Aircast Cloud
 
 Cloud unlock lets an encrypted card unlock anywhere it gets online, until it
@@ -161,3 +183,7 @@ is marked lost.
 | `Card too small` | The image needs a bigger card (about 4 GB minimum) |
 | `Elevated flash failed (authorization declined or write error)` | The admin dialog was dismissed, or the card failed — retry, and try another card if it repeats |
 | `Tailscale isn't signed in on this computer` | `devices` needs Tailscale running here |
+| `… update aircastd on the drone first` | The drone's aircastd has no backup endpoint yet |
+| `Couldn't reach … on your tailnet` | The drone is off, still booting, or not on this computer's tailnet |
+| `This backup is format N …` | Made by a newer aircastd — update the Flasher before restoring it |
+| `No backup named …` | Wrong id — run `backups list` |

@@ -252,6 +252,7 @@ async fn write_usb(
             access: None,
             encryption: None,
             fight_mode: false,
+            restore: None,
             init_format: InitFormat::CloudInit,
         };
         let mut file =
@@ -436,7 +437,10 @@ async fn run_elevated_flash(
 
 const PROVISION_FILE_PREFIX: &str = "aircast-provision-";
 
-fn write_secret_file(path: &std::path::Path, contents: &str) -> Result<(), String> {
+pub(crate) fn write_secret_file(
+    path: &std::path::Path,
+    contents: impl AsRef<[u8]>,
+) -> Result<(), String> {
     use std::io::Write as _;
     let _ = std::fs::remove_file(path);
     let mut f = {
@@ -454,9 +458,9 @@ fn write_secret_file(path: &std::path::Path, contents: &str) -> Result<(), Strin
             std::fs::File::create(path)
         }
     }
-    .map_err(|e| format!("Failed to create provision file: {e}"))?;
-    f.write_all(contents.as_bytes())
-        .map_err(|e| format!("Failed to write provision file: {e}"))?;
+    .map_err(|e| format!("Failed to create {}: {e}", path.display()))?;
+    f.write_all(contents.as_ref())
+        .map_err(|e| format!("Failed to write {}: {e}", path.display()))?;
     Ok(())
 }
 

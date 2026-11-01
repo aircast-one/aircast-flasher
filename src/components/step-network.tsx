@@ -29,6 +29,9 @@ import {
 import { GENERATED_HOSTNAME } from "@/components/default-hostname";
 import { nextFreeHostname } from "@/components/next-hostname";
 import { useLocalTailscale } from "@/lib/use-local-tailscale";
+import { useBackups } from "@/lib/use-backups";
+import { RestoreSection, restoreProblems } from "@/components/restore-section";
+import type { RestoreDraft } from "@/components/wizard-types";
 import type { Board } from "@/types";
 
 function AdapterNote({ name }: { name: string }) {
@@ -58,6 +61,8 @@ export function StepNetwork({
   onHostname,
   noWifi,
   onNoWifi,
+  restore,
+  onRestore,
   onBack,
   onNext,
 }: {
@@ -75,10 +80,13 @@ export function StepNetwork({
   onHostname: (v: string) => void;
   noWifi: boolean;
   onNoWifi: (v: boolean) => void;
+  restore: RestoreDraft | null;
+  onRestore: (next: RestoreDraft | null) => void;
   onBack: () => void;
   onNext: () => void;
 }) {
   const local = useLocalTailscale();
+  const backups = useBackups();
   const [ssidTouched, setSsidTouched] = useState(false);
 
   const trimmedHostname = hostname.trim();
@@ -90,7 +98,12 @@ export function StepNetwork({
   const takenNames = (local?.peers ?? [])
     .filter((peer) => peer.sameTailnet)
     .map((peer) => peer.hostName.toLowerCase());
-  const nameTaken = takenNames.includes(trimmedHostname.toLowerCase());
+  const sameDroneName = restore?.sameDrone
+    ? backups.find((b) => b.id === restore.backup)?.hostname.toLowerCase()
+    : undefined;
+  const nameTaken =
+    takenNames.includes(trimmedHostname.toLowerCase()) &&
+    trimmedHostname.toLowerCase() !== sameDroneName;
   const suggestion = nextFreeHostname(trimmedHostname, takenNames);
 
   const wifiPasswordInvalid = !noWifi && isInvalidWifiPassword(password);
@@ -108,9 +121,12 @@ export function StepNetwork({
       next={{
         label: "Next",
         onClick: onNext,
-        problems: networkProblems({ noWifi, ssid, password, hostname }).map(
-          ({ field, message }) => ({ message, fix: focusField(field) }),
-        ),
+        problems: [
+          ...networkProblems({ noWifi, ssid, password, hostname }).map(
+            ({ field, message }) => ({ message, fix: focusField(field) }),
+          ),
+          ...restoreProblems(restore, backups).map((message) => ({ message })),
+        ],
       }}
     >
       <div className="flex max-w-xl flex-col gap-5">
@@ -298,6 +314,11 @@ export function StepNetwork({
           ) : null}
         </div>
 
+        <RestoreSection
+          backups={backups}
+          restore={restore}
+          onRestore={onRestore}
+        />
       </div>
     </StepShell>
   );

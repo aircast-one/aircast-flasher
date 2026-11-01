@@ -51,6 +51,21 @@ pub struct FlashRequest {
         description = "No logs or video on the drone, tailnet-only access with an SSH key. Needs tailscale."
     )]
     pub fight_mode: bool,
+    #[schemars(
+        description = "Put a saved backup (an id from list_backups) on the card; the drone restores it on first boot and restarts once."
+    )]
+    pub restore: Option<RestoreRequest>,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct RestoreRequest {
+    #[schemars(description = "Backup id, as list_backups reports it.")]
+    pub backup: String,
+    #[schemars(
+        description = "true when the card goes back into the drone the backup came from (it returns as the same aircraft, and the hostname defaults to the backup's); false to copy the setup onto a new drone with its own identity."
+    )]
+    pub same_drone: bool,
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
@@ -231,6 +246,10 @@ pub fn problems(request: &FlashRequest, detected_keys: usize) -> Vec<String> {
                     e.recovery_file
                 )
             }),
+        request
+            .restore
+            .as_ref()
+            .and_then(|r| restore_file(r).err()),
     ]
     .into_iter()
     .flatten()
@@ -495,6 +514,21 @@ fn save_recovery(path: &str, text: &str) -> Result<(), String> {
         .map_err(|e| format!("Could not save the recovery key to {path}: {e}"))
 }
 
+fn restore_file(restore: &RestoreRequest) -> Result<String, String> {
+    flasher_ops::paths::backup_dir().and_then(|dir| {
+        flasher_ops::backup::restore_file(&dir, &restore.backup, restore.same_drone)
+    })
+}
+
+fn restored_hostname(restore: Option<&RestoreRequest>) -> Option<String> {
+    let restore = restore.filter(|r| r.same_drone)?;
+    let dir = flasher_ops::paths::backup_dir().ok()?;
+    flasher_ops::backup::get(&dir, &restore.backup)
+        .ok()
+        .map(|backup| backup.hostname)
+        .filter(|name| hostname_valid(name))
+}
+
 pub struct Prepared {
     pub card: BlockDevice,
     pub image: String,
@@ -510,7 +544,11 @@ pub async fn run(
         .hostname
         .as_deref()
         .map(str::trim)
-        .filter(|h| !h.is_empty());
+        .filter(|h| !h.is_empty())
+        .map(str::to_string)
+        .or_else(|| restored_hostname(request.restore.as_ref()));
+    let hostname = hostname.as_deref();
+    let restore = request.restore.as_ref().map(restore_file).transpose()?;
     let (access, ssh_summary) = access(request.ssh.as_ref())?;
     let wifi = wifi(request.wifi.as_ref()).await;
     let tailscale = request.tailscale.as_ref().map(|t| TailscaleConfig {
@@ -526,6 +564,7 @@ pub async fn run(
         access,
         encryption,
         fight_mode: request.fight_mode,
+        restore,
         init_format: InitFormat::CloudInit,
     };
 
@@ -649,6 +688,22 @@ mod tests {
             problems(&fight("eleven-char"), 0),
             ["Make the device password at least 12 characters"]
         );
+    }
+
+    #[test]
+    fn a_backup_that_is_not_on_this_computer_is_a_problem() {
+        let restoring = FlashRequest {
+            restore: Some(RestoreRequest {
+                backup: "no-such-backup-0".into(),
+                same_drone: true,
+            }),
+            ..request()
+        };
+        assert_eq!(
+            problems(&restoring, 1),
+            ["No backup named no-such-backup-0 on this computer"]
+        );
+        assert_eq!(restored_hostname(restoring.restore.as_ref()), None);
     }
 
     #[test]

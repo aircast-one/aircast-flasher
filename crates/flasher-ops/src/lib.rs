@@ -1,3 +1,4 @@
+pub mod backup;
 pub mod cloud;
 pub mod devices;
 pub mod download;

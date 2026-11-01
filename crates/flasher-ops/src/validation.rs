@@ -161,6 +161,7 @@ mod tests {
             access,
             encryption: None,
             fight_mode,
+            restore: None,
             init_format: InitFormat::CloudInit,
         }
     }

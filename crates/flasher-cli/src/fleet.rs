@@ -99,6 +99,10 @@ pub async fn login(target: &str, control_server: Option<&str>) -> Result<String,
     flasher_ops::tailnet::tailscale_login(url).await
 }
 
+pub async fn backup(target: &str) -> Result<flasher_ops::backup::Backup, String> {
+    flasher_ops::backup::take(&flasher_ops::paths::backup_dir()?, &address(target)).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -1,7 +1,11 @@
+import fs from "node:fs";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
+import path from "node:path";
 
 import { browser, expect } from "@wdio/globals";
+
+import { e2eConfigDir } from "./settings-file";
 
 const ATTACH_TIMEOUT = 30_000;
 
@@ -30,25 +34,64 @@ async function attachToAppWindow() {
 
 function invokeFromApp(
   command: string,
-  url: string,
+  args: Record<string, unknown>,
 ): Promise<boolean | string> {
-  return browser.executeAsync<boolean | string, [string, string]>(
-    (cmd, target, done) => {
+  return browser.executeAsync<
+    boolean | string,
+    [string, Record<string, unknown>]
+  >(
+    (cmd, cmdArgs, done) => {
       const tauri = (window as { __TAURI__?: TauriGlobal }).__TAURI__;
       if (!tauri) return done("no-global-tauri");
-      tauri.core.invoke(cmd, { url: target }).then(
+      tauri.core.invoke(cmd, cmdArgs).then(
         (v) => done(typeof v === "object" ? JSON.stringify(v) : (v as boolean | string)),
         (e) => done(`invoke failed: ${String(e)}`),
       );
     },
     command,
-    url,
+    args,
   );
 }
 
-const probeFromApp = (url: string) => invokeFromApp("probe_device", url);
-const loginFromApp = (url: string) => invokeFromApp("tailscale_login", url);
-const statusFromApp = (url: string) => invokeFromApp("tailscale_status", url);
+const probeFromApp = (url: string) => invokeFromApp("probe_device", { url });
+const loginFromApp = (url: string) => invokeFromApp("tailscale_login", { url });
+const statusFromApp = (url: string) =>
+  invokeFromApp("tailscale_status", { url });
+
+const BUNDLE = JSON.stringify({
+  format: 1,
+  hostname: "falcon",
+  created: "2026-11-01T12:00:00Z",
+  files: [
+    {
+      path: "/var/lib/aircastd/gimbal.json",
+      mode: 384,
+      data: "eyJ0aWx0IjoxfQ==",
+    },
+  ],
+});
+
+async function backupServer(
+  status: number,
+  body: string,
+): Promise<{ url: string; close: () => void }> {
+  const server = http.createServer((req, res) => {
+    if (req.method !== "GET" || req.url !== "/api/backup") {
+      res.writeHead(404);
+      return res.end();
+    }
+    res.writeHead(status, {
+      "content-type": "application/json",
+      "content-disposition": 'attachment; filename="backup.json"',
+    });
+    res.end(body);
+  });
+  await new Promise<void>((resolve) => {
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  const { port } = server.address() as AddressInfo;
+  return { url: `http://127.0.0.1:${port}`, close: () => server.close() };
+}
 
 describe("device probing", () => {
   before(async () => {
@@ -188,5 +231,69 @@ describe("device probing", () => {
     } finally {
       server.close();
     }
+  });
+});
+
+describe("settings backups", () => {
+  before(async () => {
+    await attachToAppWindow();
+  });
+
+  it("keeps the backup a drone hands over as sent, owner-only, until deleted", async () => {
+    const drone = await backupServer(200, BUNDLE);
+    try {
+      const saved = JSON.parse(
+        String(await invokeFromApp("backup_device", { url: drone.url })),
+      );
+      expect(saved).toEqual({
+        id: "falcon-20261101120000",
+        hostname: "falcon",
+        created: "2026-11-01T12:00:00Z",
+      });
+      const file = path.join(e2eConfigDir(), "backups", `${saved.id}.json`);
+      expect(fs.readFileSync(file, "utf8")).toBe(BUNDLE);
+      if (process.platform !== "win32") {
+        expect(fs.statSync(file).mode & 0o777).toBe(0o600);
+      }
+      expect(
+        JSON.parse(String(await invokeFromApp("list_backups", {}))),
+      ).toContainEqual(saved);
+
+      await invokeFromApp("delete_backup", { id: saved.id });
+      expect(fs.existsSync(file)).toBe(false);
+    } finally {
+      drone.close();
+    }
+  });
+
+  it("tells a drone without the endpoint to update aircastd", async () => {
+    const drone = await backupServer(404, "");
+    try {
+      expect(await invokeFromApp("backup_device", { url: drone.url })).toContain(
+        "update aircastd on the drone first",
+      );
+    } finally {
+      drone.close();
+    }
+  });
+
+  it("refuses a backup in a format it does not know", async () => {
+    const drone = await backupServer(200, BUNDLE.replace('"format":1', '"format":2'));
+    try {
+      expect(await invokeFromApp("backup_device", { url: drone.url })).toContain(
+        "format 2",
+      );
+      expect(
+        JSON.parse(String(await invokeFromApp("list_backups", {}))),
+      ).toEqual([]);
+    } finally {
+      drone.close();
+    }
+  });
+
+  it("says when the drone can't be reached", async () => {
+    expect(
+      await invokeFromApp("backup_device", { url: "http://127.0.0.1:1" }),
+    ).toContain("Couldn't reach http://127.0.0.1:1");
   });
 });

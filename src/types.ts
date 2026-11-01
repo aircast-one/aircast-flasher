@@ -195,3 +195,14 @@ export interface SshPublicKey {
   label: string;
   contents: string;
 }
+
+export interface Backup {
+  id: string;
+  hostname: string;
+  created: string;
+}
+
+export interface RestoreChoice {
+  backup: string;
+  sameDrone: boolean;
+}

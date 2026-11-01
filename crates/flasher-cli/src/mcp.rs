@@ -17,7 +17,8 @@ use crate::{fleet, request, session};
 const INSTRUCTIONS: &str = "Aircast Flasher: write Aircast OS to SD cards for Raspberry Pi drones and manage the fleet. \
 Flashing erases the whole card: call list_cards, name the exact disk, and repeat it in confirmErase. \
 Writing asks for an administrator password on this computer unless the server runs as root. \
-After a flash, find_device locates the drone on the LAN once it boots; list_devices shows drones on the tailnet.";
+After a flash, find_device locates the drone on the LAN once it boots; list_devices shows drones on the tailnet. \
+backup_device saves a drone's settings on this computer; flash_card's restore puts one on a new card, for the same drone or a new one.";
 
 #[derive(Clone)]
 pub struct Flasher {
@@ -76,6 +77,13 @@ pub struct DeviceLoginParams {
     pub target: String,
     #[schemars(description = "Point the device at this Headscale server first.")]
     pub control_server: Option<String>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct BackupParams {
+    #[schemars(description = "Backup id, as list_backups reports it.")]
+    pub id: String,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -180,7 +188,7 @@ impl Flasher {
     }
 
     #[tool(
-        description = "Erase an SD card, write Aircast OS (or a local image) and configure WiFi, hostname, SSH, tailnet, disk encryption and fight mode. Takes a few minutes and asks for an administrator password unless the server runs as root."
+        description = "Erase an SD card, write Aircast OS (or a local image) and configure WiFi, hostname, SSH, tailnet, disk encryption, fight mode and a settings restore. Takes a few minutes and asks for an administrator password unless the server runs as root."
     )]
     async fn flash_card(
         &self,
@@ -268,6 +276,32 @@ impl Flasher {
         json(&serde_json::json!({
             "authUrl": fleet::login(&p.target, p.control_server.as_deref()).await?
         }))
+    }
+
+    #[tool(
+        description = "Save a drone's settings on this computer: Wi-Fi, cloud link, tailnet identity and the rest aircastd keeps. Works over the tailnet, so fight-mode drones too. Returns the backup id for flash_card's restore."
+    )]
+    async fn backup_device(
+        &self,
+        Parameters(p): Parameters<DeviceParams>,
+    ) -> Result<String, String> {
+        json(&fleet::backup(&p.target).await?)
+    }
+
+    #[tool(description = "List the settings backups saved on this computer, newest first.")]
+    async fn list_backups(&self) -> Result<String, String> {
+        json(&flasher_ops::backup::list(
+            &flasher_ops::paths::backup_dir()?
+        ))
+    }
+
+    #[tool(description = "Delete a saved settings backup from this computer.")]
+    async fn delete_backup(
+        &self,
+        Parameters(p): Parameters<BackupParams>,
+    ) -> Result<String, String> {
+        flasher_ops::backup::delete(&flasher_ops::paths::backup_dir()?, &p.id)?;
+        json(&serde_json::json!({ "deleted": p.id }))
     }
 
     #[tool(description = "Who is signed in to Aircast Cloud on this computer, if anyone.")]

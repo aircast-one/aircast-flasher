@@ -14,6 +14,19 @@ export function formatDate(iso: string): string {
   });
 }
 
+export function formatDateTime(iso: string): string {
+  const date = new Date(iso);
+  return Number.isNaN(date.getTime())
+    ? iso
+    : date.toLocaleString(undefined, {
+        dateStyle: "medium",
+        timeStyle: "short",
+      });
+}
+
+export const backupLabel = (backup: { hostname: string; created: string }) =>
+  `${backup.hostname} · ${formatDateTime(backup.created)}`;
+
 export function formatSpeed(bps: number): string {
   if (!Number.isFinite(bps) || bps <= 0) return "";
   const mbps = bps / 1000 / 1000;

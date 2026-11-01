@@ -43,9 +43,15 @@ pub struct Settings {
 
 const E2E_CONFIG_DIR: &str = "FLASHER_E2E_CONFIG_DIR";
 
+pub fn e2e_dir() -> Option<PathBuf> {
+    std::env::var_os(E2E_CONFIG_DIR)
+        .filter(|_| cfg!(feature = "wdio"))
+        .map(PathBuf::from)
+}
+
 fn config_dir(app: &AppHandle) -> Result<PathBuf, String> {
-    match std::env::var_os(E2E_CONFIG_DIR).filter(|_| cfg!(feature = "wdio")) {
-        Some(dir) => Ok(PathBuf::from(dir)),
+    match e2e_dir() {
+        Some(dir) => Ok(dir),
         None => app
             .path()
             .app_config_dir()

@@ -56,6 +56,8 @@ import {
 } from "@/components/step-network.validation";
 import { useSettings } from "@/lib/use-settings";
 import { useLocalTailscale } from "@/lib/use-local-tailscale";
+import { useBackups } from "@/lib/use-backups";
+import { restoreProblems } from "@/components/restore-section";
 import { answerConsent, asksConsent } from "@/components/consent";
 import { UpdateBanner } from "@/components/update-banner";
 import { WizardSidebar } from "@/components/wizard-sidebar";
@@ -77,6 +79,7 @@ import {
   type FlashProgressState,
   type FleetView,
   type FlashVars,
+  type RestoreDraft,
   type SourceKind,
   type WizardStep,
 } from "@/components/wizard-types";
@@ -208,6 +211,17 @@ function App() {
 
   const noWifi = settings.noWifi;
   const setNoWifi = (value: boolean) => update({ noWifi: value });
+
+  const backups = useBackups();
+  const [restore, setRestore] = useState<RestoreDraft | null>(null);
+  const restoreBackup = backups.find((b) => b.id === restore?.backup) ?? null;
+  const chooseRestore = (next: RestoreDraft | null) => {
+    setRestore(next);
+    const source = next?.sameDrone
+      ? backups.find((b) => b.id === next.backup)
+      : undefined;
+    if (source) setHostname(source.hostname);
+  };
 
   const [step, setStep] = useState<WizardStep>(STEP.os);
   const [fleetView, setFleetView] = useState<FleetView | null>(null);
@@ -413,6 +427,7 @@ function App() {
         access: vars.access,
         encryption,
         fightMode: vars.fightMode,
+        restore: vars.restore,
         initFormat: "cloud-init" satisfies InitFormat,
       });
       return encryption;
@@ -527,6 +542,10 @@ function App() {
       cloud: cloudOn,
       recoverySaved,
     }).map(({ message }) => ({ message, fix: () => setStep(STEP.access) })),
+    ...restoreProblems(restore, backups).map((message) => ({
+      message,
+      fix: () => setStep(STEP.network),
+    })),
   ];
   const canProceed = storageProblems.length === 0;
 
@@ -559,6 +578,10 @@ function App() {
       ? { tang: tangServers.some(isCaptured), cloud: cloudOn }
       : null,
     fightMode: fighting,
+    restore:
+      restore === null
+        ? null
+        : { backup: restoreBackup, sameDrone: restore.sameDrone },
   });
 
   async function handlePickLocal() {
@@ -618,6 +641,10 @@ function App() {
       encryption,
       cloudKeyServer: encrypting && cloudOn,
       fightMode: fighting,
+      restore:
+        restore === null || restore.sameDrone === null
+          ? null
+          : { backup: restore.backup, sameDrone: restore.sameDrone },
     };
     setLastVars(vars);
     flashMutation.mutate(vars);
@@ -646,6 +673,7 @@ function App() {
   }
 
   function flashAnother() {
+    setRestore(null);
     setHostname(nextFreeHostname(hostname, takenHostnames));
     backTo(STEP.os);
   }
@@ -735,6 +763,8 @@ function App() {
               onHostname={setHostname}
               noWifi={noWifi}
               onNoWifi={setNoWifi}
+              restore={restore}
+              onRestore={chooseRestore}
               onBack={() => setStep(STEP.os)}
               onNext={() => setStep(STEP.access)}
             />

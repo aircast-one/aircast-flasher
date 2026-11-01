@@ -1,4 +1,5 @@
-import type { KeyWrite, SshMode, SshPublicKey } from "@/types";
+import type { Backup, KeyWrite, SshMode, SshPublicKey } from "@/types";
+import { backupLabel } from "@/lib/format";
 import { STEP, type WizardStep } from "@/components/wizard-types";
 import {
   isValidControlServer,
@@ -28,6 +29,7 @@ export interface SummaryInput {
   devicePassword: string;
   encryption: { tang: boolean; cloud: boolean } | null;
   fightMode: boolean;
+  restore: { backup: Backup | null; sameDrone: boolean | null } | null;
 }
 
 const IMAGE_DEFAULT_LOGIN = "Image default (pi / raspberry)";
@@ -114,6 +116,23 @@ function fight(input: SummaryInput): SummaryItem {
     : { ...row, value: "On · needs remote access", warn: true };
 }
 
+function restore(r: SummaryInput["restore"]): SummaryItem {
+  const row = { label: "Restore", step: STEP.network };
+  if (r === null) return { ...row, value: "Off" };
+  if (r.backup === null)
+    return { ...row, value: "Backup no longer on this computer", warn: true };
+  if (r.sameDrone === null)
+    return {
+      ...row,
+      value: `${backupLabel(r.backup)} · same or new drone not chosen`,
+      warn: true,
+    };
+  return {
+    ...row,
+    value: `${backupLabel(r.backup)} · ${r.sameDrone ? "same drone" : "new drone"}`,
+  };
+}
+
 export function buildSummary(input: SummaryInput): SummaryItem[] {
   const hostname = input.hostname.trim();
   const access = deviceAccess(
@@ -139,5 +158,6 @@ export function buildSummary(input: SummaryInput): SummaryItem[] {
     },
     encryption(input.encryption),
     fight(input),
+    restore(input.restore),
   ];
 }

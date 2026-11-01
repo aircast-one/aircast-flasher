@@ -15,7 +15,8 @@ use indicatif::{ProgressBar, ProgressStyle};
 use serde::Serialize;
 
 use request::{
-    EncryptionRequest, FlashRequest, SshChoice, SshRequest, TailnetRequest, WifiRequest,
+    EncryptionRequest, FlashRequest, RestoreRequest, SshChoice, SshRequest, TailnetRequest,
+    WifiRequest,
 };
 
 #[derive(Parser)]
@@ -64,6 +65,8 @@ enum Command {
     Find { hostname: String },
     #[command(subcommand, about = "Inspect a device or sign it in to a tailnet")]
     Device(DeviceCommand),
+    #[command(subcommand, about = "Settings backups kept on this computer")]
+    Backups(BackupsCommand),
     #[command(subcommand, about = "Aircast Cloud: sign-in and Cloud-unlock cards")]
     Cloud(CloudCommand),
     #[command(about = "Serve these tools over MCP on stdio")]
@@ -72,6 +75,7 @@ enum Command {
 
 #[derive(clap::Args)]
 #[command(group(ArgGroup::new("login").args(["ssh_key", "ssh_password", "no_ssh"])))]
+#[command(group(ArgGroup::new("drone").args(["same_drone", "new_drone"]).requires("restore")))]
 struct FlashArgs {
     #[arg(long, help = "Card to erase, as `cards` lists it (e.g. /dev/disk4)")]
     disk: String,
@@ -138,6 +142,23 @@ struct FlashArgs {
         help = "Fight mode: no logs on the drone, tailnet-only, SSH by key or a 12+ character password"
     )]
     fight_mode: bool,
+    #[arg(
+        long,
+        value_name = "BACKUP",
+        requires = "drone",
+        help = "Put a saved backup on the card (an id from `backups list`); needs --same-drone or --new-drone"
+    )]
+    restore: Option<String>,
+    #[arg(
+        long,
+        help = "The card goes back into the drone the backup came from; the hostname defaults to the backup's"
+    )]
+    same_drone: bool,
+    #[arg(
+        long,
+        help = "Copy the backup's setup onto a new drone with its own identity"
+    )]
+    new_drone: bool,
     #[arg(long, short = 'y', help = "Erase without asking")]
     yes: bool,
 }
@@ -152,6 +173,16 @@ enum DeviceCommand {
         #[arg(long, help = "Point the device at a Headscale server first")]
         control_server: Option<String>,
     },
+    #[command(about = "Save the device's settings on this computer, to restore onto a new card")]
+    Backup { target: String },
+}
+
+#[derive(Subcommand)]
+enum BackupsCommand {
+    #[command(about = "List saved backups, newest first")]
+    List,
+    #[command(about = "Delete a saved backup")]
+    Delete { id: String },
 }
 
 #[derive(Subcommand)]
@@ -216,6 +247,10 @@ impl FlashArgs {
                 recovery_file: self.recovery_file.clone().unwrap_or_default(),
             }),
             fight_mode: self.fight_mode,
+            restore: self.restore.as_ref().map(|backup| RestoreRequest {
+                backup: backup.clone(),
+                same_drone: self.same_drone,
+            }),
         }
     }
 }
@@ -443,6 +478,33 @@ async fn cloud(command: &CloudCommand, json: bool) -> Result<(), String> {
     }
 }
 
+fn backups(command: &BackupsCommand, json: bool) -> Result<(), String> {
+    let dir = flasher_ops::paths::backup_dir()?;
+    match command {
+        BackupsCommand::List => {
+            let backups = flasher_ops::backup::list(&dir);
+            match (json, backups.is_empty()) {
+                (true, _) => print_json(&backups),
+                (false, true) => {
+                    tell("No backups yet — take one with `device backup <target>`.".to_string())
+                }
+                (false, false) => say(backups
+                    .iter()
+                    .map(|b| format!("{:32} {:20} {}", b.id, b.hostname, b.created))
+                    .collect::<Vec<_>>()
+                    .join("\n")),
+            }
+        }
+        BackupsCommand::Delete { id } => {
+            flasher_ops::backup::delete(&dir, id)?;
+            match json {
+                true => print_json(&serde_json::json!({ "deleted": id })),
+                false => say(format!("Deleted {id}")),
+            }
+        }
+    }
+}
+
 async fn run(cli: Cli) -> Result<(), String> {
     let json = cli.json;
     match &cli.command {
@@ -571,6 +633,17 @@ async fn run(cli: Cli) -> Result<(), String> {
                 (false, false) => say(format!("Approve the device: {url}")),
             }
         }
+        Command::Device(DeviceCommand::Backup { target }) => {
+            let backup = fleet::backup(target).await?;
+            match json {
+                true => print_json(&backup),
+                false => say(format!(
+                    "Saved {}'s settings as {} — restore with `flash --restore {} --same-drone` (or --new-drone)",
+                    backup.hostname, backup.id, backup.id
+                )),
+            }
+        }
+        Command::Backups(command) => backups(command, json),
         Command::Cloud(command) => cloud(command, json).await,
         Command::Mcp => mcp::serve().await,
     }

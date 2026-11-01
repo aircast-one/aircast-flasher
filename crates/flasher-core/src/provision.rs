@@ -3,6 +3,7 @@ use crate::{psk, AccessConfig, InitFormat, ProvisionConfig, SshMode, TailscaleCo
 const ENCRYPT_MARKER_NAME: &str = "aircast-encrypt";
 const FIGHT_MARKER_NAME: &str = "aircast-fight-mode";
 const FIGHT_PASSWORD_LOGIN: &str = "ssh-password\n";
+const RESTORE_FILE_NAME: &str = "aircast-restore.json";
 
 const TS_STATE_PATH: &str = "/var/lib/aircastd/tailscale.json";
 const TS_KEY_PATH: &str = "/var/lib/aircastd/tailscale.authkey";
@@ -77,6 +78,12 @@ pub fn boot_markers(config: &ProvisionConfig) -> Vec<ProvisionFile> {
             config
                 .fight_mode
                 .then(|| ProvisionFile::plain(FIGHT_MARKER_NAME, fight_marker(config))),
+        )
+        .chain(
+            config
+                .restore
+                .clone()
+                .map(|bundle| ProvisionFile::plain(RESTORE_FILE_NAME, bundle)),
         )
         .collect()
 }
@@ -451,6 +458,7 @@ mod tests {
             access: None,
             encryption: None,
             fight_mode: false,
+            restore: None,
             init_format: init,
         }
     }
@@ -466,6 +474,7 @@ mod tests {
             access: None,
             encryption: None,
             fight_mode: false,
+            restore: None,
             init_format: init,
         }
     }
@@ -478,6 +487,7 @@ mod tests {
             access: Some(access),
             encryption: None,
             fight_mode: false,
+            restore: None,
             init_format: init,
         }
     }
@@ -1013,6 +1023,17 @@ mod tests {
             password: Some("long-enough-pass".into()),
         });
         assert!(boot_markers(&c)[0].contents.is_empty());
+    }
+
+    #[test]
+    fn a_restore_bundle_rides_along_with_the_other_markers() {
+        let mut c = cfg(InitFormat::CloudInit, false, None);
+        c.fight_mode = true;
+        c.restore = Some("{\"format\":1,\"sameDrone\":true}".into());
+        let markers = boot_markers(&c);
+        let names: Vec<_> = markers.iter().map(|f| f.name.as_str()).collect();
+        assert_eq!(names, ["aircast-fight-mode", "aircast-restore.json"]);
+        assert_eq!(markers[1].contents, "{\"format\":1,\"sameDrone\":true}");
     }
 
     #[test]

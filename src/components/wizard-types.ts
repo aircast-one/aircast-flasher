@@ -4,6 +4,7 @@ import type {
   EncryptionConfig,
   FlashProgress,
   Release,
+  RestoreChoice,
   TailscaleConfig,
   WifiConfig,
 } from "@/types";
@@ -40,4 +41,10 @@ export interface FlashVars {
   encryption: EncryptionConfig | null;
   cloudKeyServer: boolean;
   fightMode: boolean;
+  restore: RestoreChoice | null;
+}
+
+export interface RestoreDraft {
+  backup: string;
+  sameDrone: boolean | null;
 }

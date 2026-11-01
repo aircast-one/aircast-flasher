@@ -97,6 +97,25 @@ list_releases ─► download_image ─► flash_image ─► provision_device
   external — the Tailscale keys page, docs, QGC — still open in the real
   browser, deliberately: Google refuses OAuth sign-in inside an embedded
   webview.
+- **Backups** — each row in **Devices** has **Back up settings**, which GETs
+  aircastd's `/api/backup` over the same tailnet address the row opens, so a
+  fight-mode drone (tailnet only) backs up too. A 404 means the drone's aircastd
+  predates backups: update it first. The bundle is kept as sent, owner-only
+  (0600), in `<data dir>/one.aircast.flasher/backups/<host>-<created>.json` —
+  it carries WiFi passwords, cloud tokens and the tailnet node key, so it never
+  goes into `settings.json`, the event log or telemetry. Its `files` are opaque
+  to the Flasher; only `format` is read, and anything but `1` is refused.
+  **Devices** lists the saved backups (hostname, date) and deletes them.
+- **Restore** — the Network step's **Restore settings from a backup** picks a
+  saved backup and asks **Same drone** (a reflash: it comes back as the same
+  aircraft, and the hostname is prefilled from the backup) or **New drone**
+  (the setup is copied, the identity is not). The card gets
+  `aircast-restore.json` on the boot partition — the bundle plus
+  `"sameDrone": true|false` — through the same customize path as every other
+  boot marker, so the elevated helper and USB writes carry it too. aircastd
+  consumes it on first boot, deletes it and restarts once; what a new drone
+  drops is aircastd's call. The bundle is read from disk by the Rust side at
+  write time, so it never passes through the webview.
 
 - **Headscale** — `status --json` does not carry the control server, so
   `tailscale debug prefs` supplies `ControlURL`. Anything that is not
@@ -121,7 +140,7 @@ crates/flasher-core/    pure, tested logic (no I/O):
   src/model.rs            WifiConfig · ProvisionConfig · InitFormat
 crates/flasher-ops/     everything with I/O, shared by the app and the CLI:
   src/releases.rs · devices.rs · download.rs · flash.rs · helper.rs
-  src/tang.rs · cloud.rs · tailnet.rs · sshkeys.rs · wifi.rs · paths.rs
+  src/tang.rs · cloud.rs · tailnet.rs · backup.rs · sshkeys.rs · wifi.rs · paths.rs
 crates/flasher-cli/     aircast-flasher-cli: commands, plus `mcp` for agents
 skills/aircast-flasher/ Claude skill for the CLI and MCP tools
 src-tauri/
@@ -165,6 +184,8 @@ Or build it from this repo: `just cli` → `target/release/aircast-flasher-cli`.
 | `find <hostname>` | Locate a freshly flashed device (`<hostname>.local`, or its hotspot) |
 | `device status <target>` | Whether a device is on a tailnet, and its name |
 | `device login <target> [--control-server URL]` | Start Tailscale sign-in on a device, print the approval URL |
+| `device backup <target>` | Save a device's settings on this computer (works over the tailnet, fight mode too) |
+| `backups list` / `backups delete <id>` | Saved backups, newest first / remove one |
 | `cloud login` / `logout` / `whoami` | Aircast Cloud session (browser sign-in, kept on this computer) |
 | `cloud cards` | Cards that unlock through Aircast Cloud |
 | `cloud lost <id> --yes` | Mark a card lost — it never unlocks again |
@@ -188,6 +209,7 @@ Every command takes `--json`.
 | `--cloud-unlock` | Also unlock through Aircast Cloud (needs `cloud login`) |
 | `--recovery-file PATH` | Where the recovery key is saved; must not exist yet |
 | `--fight` | Fight mode: no logs on the drone, tailnet-only |
+| `--restore ID` + `--same-drone` or `--new-drone` | Put a saved backup on the card. Same drone: it comes back as the same aircraft, hostname defaults to the backup's. New drone: copy the setup, new identity |
 | `--yes` | Erase without the prompt |
 
 Fight mode and disk encryption need Aircast OS v0.3.6 or newer; with an older
@@ -227,6 +249,7 @@ claude mcp add aircast-flasher -- /usr/local/bin/aircast-flasher-cli mcp
 | `flash_card` | Same options as `flash`; must repeat the disk in `confirmErase`. Streams progress and stops when the call is cancelled |
 | `list_devices`, `find_device` | Same as `devices` / `find` |
 | `device_status`, `device_tailscale_login` | Same as `device status` / `device login` |
+| `backup_device`, `list_backups`, `delete_backup` | Same as `device backup` / `backups list` / `backups delete`; `flash_card` takes `restore: {backup, sameDrone}` |
 | `cloud_account`, `cloud_sign_in`, `cloud_sign_in_finish` | Cloud session: start returns the approval URL, finish waits up to 5 minutes |
 | `cloud_list_cards`, `cloud_mark_lost` | Cloud cards; marking lost must repeat the card label in `confirmLabel` |
 

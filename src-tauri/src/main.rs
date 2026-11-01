@@ -3,6 +3,7 @@
 #[cfg(all(feature = "wdio", not(debug_assertions)))]
 compile_error!("the wdio feature embeds a WebDriver server — never enable it in a release build");
 
+mod backup;
 mod cloud;
 mod flasher;
 mod settings;
@@ -44,6 +45,9 @@ async fn main() {
             flasher::flash_image,
             flasher::fetch_tang_adv,
             flasher::save_recovery_file,
+            backup::backup_device,
+            backup::list_backups,
+            backup::delete_backup,
             cloud::cloud_sign_in_start,
             cloud::cloud_sign_in_poll,
             cloud::cloud_account,

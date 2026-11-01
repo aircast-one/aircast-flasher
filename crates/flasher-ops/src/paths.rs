@@ -17,3 +17,9 @@ pub fn config_dir() -> Result<PathBuf, String> {
         .map(|dir| dir.join(IDENTIFIER))
         .ok_or_else(|| "This system has no config directory".to_string())
 }
+
+pub fn backup_dir() -> Result<PathBuf, String> {
+    dirs::data_dir()
+        .map(|dir| dir.join(IDENTIFIER).join("backups"))
+        .ok_or_else(|| "This system has no data directory".to_string())
+}

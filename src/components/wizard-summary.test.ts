@@ -19,6 +19,7 @@ const base: SummaryInput = {
   devicePassword: "",
   encryption: null,
   fightMode: false,
+  restore: null,
 };
 
 const rowOf = (input: SummaryInput, label: string) =>
@@ -224,4 +225,29 @@ test("fight mode without a tailnet is flagged as unreachable", () => {
     controlServer: "hs.example.com",
   };
   assert.equal(rowOf(badServer, "Fight mode")?.warn, true);
+});
+
+test("a restore names the backup and which drone it is for", () => {
+  const backup = {
+    id: "falcon-20261101120000",
+    hostname: "falcon",
+    created: "2026-11-01T12:00:00Z",
+  };
+  assert.equal(valueOf(base, "Restore"), "Off");
+  const same = { ...base, restore: { backup, sameDrone: true } };
+  assert.match(valueOf(same, "Restore") ?? "", /^falcon · .+ · same drone$/);
+  assert.equal(rowOf(same, "Restore")?.warn, undefined);
+  assert.match(
+    valueOf({ ...base, restore: { backup, sameDrone: false } }, "Restore") ??
+      "",
+    /· new drone$/,
+  );
+  assert.equal(
+    rowOf({ ...base, restore: { backup, sameDrone: null } }, "Restore")?.warn,
+    true,
+  );
+  assert.equal(
+    valueOf({ ...base, restore: { backup: null, sameDrone: true } }, "Restore"),
+    "Backup no longer on this computer",
+  );
 });

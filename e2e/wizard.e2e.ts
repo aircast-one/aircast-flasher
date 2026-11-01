@@ -1,8 +1,9 @@
 import fs from "node:fs";
+import path from "node:path";
 
 import { browser, $, $$, expect } from "@wdio/globals";
 
-import { settingsFile } from "./settings-file";
+import { e2eConfigDir, settingsFile } from "./settings-file";
 
 const HEADING_TIMEOUT = 30_000;
 const CATALOG_TIMEOUT = 60_000;
@@ -51,6 +52,26 @@ async function pageDiagnostics(): Promise<string> {
     .catch((e: unknown) => `module probe failed: ${String(e)}`);
 
   return `page=${dump} ${moduleError}`;
+}
+
+const BACKUP_ID = "falcon-20261101120000";
+
+function backupFile(): string {
+  return path.join(e2eConfigDir(), "backups", `${BACKUP_ID}.json`);
+}
+
+function seedBackup() {
+  fs.mkdirSync(path.dirname(backupFile()), { recursive: true });
+  fs.writeFileSync(
+    backupFile(),
+    JSON.stringify({
+      format: 1,
+      hostname: "falcon",
+      created: "2026-11-01T12:00:00Z",
+      files: [],
+    }),
+    { mode: 0o600 },
+  );
 }
 
 function savedSettings(): Record<string, unknown> {
@@ -573,6 +594,52 @@ describe("flasher wizard", () => {
     await backToStep("Operating system");
     await boards.$("button*=Raspberry Pi").click();
     await expect($('[aria-label="Aircast OS version"]')).toBeDisplayed();
+  });
+
+  it("restores a saved backup onto the card, as the same drone or a new one", async () => {
+    seedBackup();
+    await knownGoodNetworkState();
+    await $("button=Next").click();
+    await waitForHeading("Access");
+    await backToStep("Network");
+
+    await $('[role="switch"][aria-label="Restore settings"]').click();
+    await expect($('[aria-label="Backup to restore"]')).toHaveText(
+      expect.stringContaining("falcon"),
+    );
+    await expectBlocked("Next", "same drone or a new one");
+
+    await $("button*=New drone").click();
+    await expect($("#hostname")).toHaveValue("falcon-01");
+    await $("button*=Same drone").click();
+    await expect($("#hostname")).toHaveValue("falcon");
+
+    await $("button=Next").click();
+    await waitForHeading("Access");
+    await $("button=Next").click();
+    await waitForHeading("Storage");
+    await expect($("dl")).toHaveText(expect.stringContaining("same drone"));
+    expect(JSON.stringify(savedSettings())).not.toContain(BACKUP_ID);
+
+    await backToStep("Network");
+    await $('[role="switch"][aria-label="Restore settings"]').click();
+    await $("#hostname").setValue("falcon-01");
+  });
+
+  it("lists saved backups under Devices, and deletes one only when confirmed", async () => {
+    seedBackup();
+    await $('nav[aria-label="Fleet"]').$("button*=Devices").click();
+    await waitForHeading("Devices");
+
+    const row = $(`[data-backup="${BACKUP_ID}"]`);
+    await expect(row).toHaveText(expect.stringContaining("falcon"));
+    await row.$('button[aria-label="Delete the falcon backup"]').click();
+    expect(fs.existsSync(backupFile())).toBe(true);
+    await row.$("button=Delete backup").click();
+    await expect(row).not.toBeExisting();
+    expect(fs.existsSync(backupFile())).toBe(false);
+
+    await $('nav[aria-label="Fleet"]').$("button*=Devices").click();
   });
 
   it("sends you back to the step that owns a setting you want to change", async () => {

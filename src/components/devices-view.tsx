@@ -1,19 +1,30 @@
 import { useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  ArchiveRestore,
   Check,
   Copy,
+  DatabaseBackup,
   ExternalLink,
   Loader2,
   RefreshCw,
   Share2,
+  Trash2,
 } from "lucide-react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 
-import { openDeviceWindow, probeDevices, track } from "@/api";
+import {
+  backupDevice,
+  deleteBackup,
+  openDeviceWindow,
+  probeDevices,
+  track,
+} from "@/api";
 import { Button } from "@/components/ui/button";
+import { errorMessage, formatDateTime } from "@/lib/format";
+import { BACKUPS_KEY, useBackups } from "@/lib/use-backups";
 import { useLocalTailscale } from "@/lib/use-local-tailscale";
-import type { TailnetPeer } from "@/types";
+import type { Backup, TailnetPeer } from "@/types";
 
 const COPIED_FEEDBACK_MS = 2000;
 const PROBE_STALE_MS = 30_000;
@@ -49,40 +60,175 @@ function CopyButton({ address }: { address: string }) {
 }
 
 function DeviceRow({ peer }: { peer: TailnetPeer }) {
+  const queryClient = useQueryClient();
+  const backup = useMutation({
+    mutationFn: () => backupDevice(deviceUrl(peer)),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: BACKUPS_KEY }),
+  });
   return (
-    <div className="flex items-center gap-3 rounded-xl border border-border px-4 py-3">
-      <span
-        className="size-2 shrink-0 rounded-full bg-green-500 dark:bg-green-400"
-        aria-label="Online"
-      />
-      <div className="flex min-w-0 flex-1 flex-col">
-        <span className="flex items-center gap-2 truncate text-sm font-medium">
-          {peer.hostName}
-          {peer.sameTailnet ? null : (
-            <Share2
-              className="size-3.5 shrink-0 text-muted-foreground"
-              aria-label="Shared from another tailnet"
-            />
+    <div className="flex flex-col gap-2 rounded-xl border border-border px-4 py-3">
+      <div className="flex items-center gap-3">
+        <span
+          className="size-2 shrink-0 rounded-full bg-green-500 dark:bg-green-400"
+          aria-label="Online"
+        />
+        <div className="flex min-w-0 flex-1 flex-col">
+          <span className="flex items-center gap-2 truncate text-sm font-medium">
+            {peer.hostName}
+            {peer.sameTailnet ? null : (
+              <Share2
+                className="size-3.5 shrink-0 text-muted-foreground"
+                aria-label="Shared from another tailnet"
+              />
+            )}
+          </span>
+          <span className="truncate font-mono text-xs text-muted-foreground">
+            {peer.dnsName}
+          </span>
+        </div>
+        <CopyButton address={peer.dnsName} />
+        <Button
+          type="button"
+          size="sm"
+          variant="secondary"
+          className="shrink-0"
+          disabled={backup.isPending}
+          onClick={() => {
+            track("device_backup");
+            backup.mutate();
+          }}
+        >
+          {backup.isPending ? (
+            <Loader2 className="size-4 animate-spin" />
+          ) : backup.isSuccess ? (
+            <Check className="size-4 text-green-500 dark:text-green-400" />
+          ) : (
+            <DatabaseBackup className="size-4" />
           )}
-        </span>
-        <span className="truncate font-mono text-xs text-muted-foreground">
-          {peer.dnsName}
-        </span>
+          {backup.isPending
+            ? "Backing up…"
+            : backup.isSuccess
+              ? "Backed up"
+              : "Back up settings"}
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          className="shrink-0"
+          onClick={() => {
+            track("device_open_from_list");
+            void openDeviceWindow(deviceUrl(peer), peer.hostName);
+          }}
+        >
+          <ExternalLink className="size-4" />
+          Open
+        </Button>
       </div>
-      <CopyButton address={peer.dnsName} />
-      <Button
-        type="button"
-        size="sm"
-        className="shrink-0"
-        onClick={() => {
-          track("device_open_from_list");
-          void openDeviceWindow(deviceUrl(peer), peer.hostName);
-        }}
-      >
-        <ExternalLink className="size-4" />
-        Open
-      </Button>
+      {backup.isError ? (
+        <p className="text-sm text-destructive" role="alert">
+          {errorMessage(backup.error, "The backup failed.")}
+        </p>
+      ) : null}
     </div>
+  );
+}
+
+function BackupRow({ backup }: { backup: Backup }) {
+  const queryClient = useQueryClient();
+  const [confirming, setConfirming] = useState(false);
+  const remove = useMutation({
+    mutationFn: () => deleteBackup(backup.id),
+    onSettled: () => {
+      setConfirming(false);
+      void queryClient.invalidateQueries({ queryKey: BACKUPS_KEY });
+    },
+  });
+
+  return (
+    <div
+      className="flex flex-col gap-2 rounded-xl border border-border px-4 py-3"
+      data-backup={backup.id}
+    >
+      <div className="flex items-center gap-3">
+        <ArchiveRestore className="size-4 shrink-0 text-muted-foreground" />
+        <div className="flex min-w-0 flex-1 flex-col">
+          <span className="truncate text-sm font-medium">
+            {backup.hostname}
+          </span>
+          <span className="truncate text-xs text-muted-foreground">
+            Backed up {formatDateTime(backup.created)}
+          </span>
+        </div>
+        {confirming ? (
+          <div className="flex shrink-0 items-center gap-2">
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              onClick={() => setConfirming(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="destructive"
+              disabled={remove.isPending}
+              onClick={() => remove.mutate()}
+            >
+              {remove.isPending ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : null}
+              Delete backup
+            </Button>
+          </div>
+        ) : (
+          <Button
+            type="button"
+            size="sm"
+            variant="secondary"
+            className="shrink-0"
+            aria-label={`Delete the ${backup.hostname} backup`}
+            onClick={() => setConfirming(true)}
+          >
+            <Trash2 className="size-4" />
+            Delete
+          </Button>
+        )}
+      </div>
+      {remove.isError ? (
+        <p className="text-sm text-destructive" role="alert">
+          {errorMessage(remove.error, "Couldn't delete the backup.")}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+function SavedBackups() {
+  const backups = useBackups();
+  return (
+    <section
+      aria-labelledby="saved-backups"
+      className="mt-4 flex flex-col gap-3"
+    >
+      <div className="flex flex-col gap-1 px-1">
+        <h2 id="saved-backups" className="text-sm font-medium">
+          Saved backups
+        </h2>
+        <p className="text-xs text-muted-foreground">
+          Kept on this computer only — they hold the drone's WiFi passwords and
+          tailnet identity. Restore one onto a new card from the Network step.
+        </p>
+      </div>
+      {backups.length === 0 ? (
+        <Empty>
+          No backups yet. Back up a device above to keep its settings.
+        </Empty>
+      ) : (
+        backups.map((backup) => <BackupRow key={backup.id} backup={backup} />)
+      )}
+    </section>
   );
 }
 
@@ -234,6 +380,8 @@ export function DevicesView({ onFlash }: { onFlash: () => void }) {
             {tailnetSummary(others, offline)}
           </p>
         ) : null}
+
+        <SavedBackups />
       </div>
     </div>
   );

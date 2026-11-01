@@ -138,8 +138,13 @@ pub async fn flash_image(
     access: Option<flasher_ops::AccessConfig>,
     encryption: Option<flasher_ops::EncryptionConfig>,
     fight_mode: bool,
+    restore: Option<crate::backup::RestoreChoice>,
     init_format: flasher_ops::InitFormat,
 ) -> Result<(), String> {
+    let restore = restore
+        .as_ref()
+        .map(crate::backup::RestoreChoice::file)
+        .transpose()?;
     let config = ProvisionConfig {
         hostname,
         wifi,
@@ -147,6 +152,7 @@ pub async fn flash_image(
         access,
         encryption,
         fight_mode,
+        restore,
         init_format,
     };
     let facts = telemetry::describe_config(&config);

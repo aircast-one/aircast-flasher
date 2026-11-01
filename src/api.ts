@@ -9,6 +9,7 @@ import {
 import { relaunch } from "@tauri-apps/plugin-process";
 import type {
   AccessConfig,
+  Backup,
   CloudCard,
   CloudKeyset,
   CloudSignIn,
@@ -22,6 +23,7 @@ import type {
   FlashProgress,
   InitFormat,
   ListReleasesResponse,
+  RestoreChoice,
   Settings,
   LocalTailscale,
   SshKeyIdentity,
@@ -86,6 +88,7 @@ export function flashImage(args: {
   access: AccessConfig | null;
   encryption: EncryptionConfig | null;
   fightMode: boolean;
+  restore: RestoreChoice | null;
   initFormat: InitFormat;
 }): Promise<void> {
   return invoke<void>("flash_image", {
@@ -98,8 +101,21 @@ export function flashImage(args: {
     access: args.access,
     encryption: args.encryption,
     fightMode: args.fightMode,
+    restore: args.restore,
     initFormat: args.initFormat,
   });
+}
+
+export function backupDevice(url: string): Promise<Backup> {
+  return invoke<Backup>("backup_device", { url });
+}
+
+export function listBackups(): Promise<Backup[]> {
+  return invoke<Backup[]>("list_backups");
+}
+
+export function deleteBackup(id: string): Promise<void> {
+  return invoke<void>("delete_backup", { id });
 }
 
 export function fetchTangAdv(url: string): Promise<string> {
