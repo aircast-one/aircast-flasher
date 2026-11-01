@@ -7,6 +7,7 @@ import {
   isWeakDevicePassword,
   needsControlServer,
   networkProblems,
+  reusedKeyNotice,
 } from "./step-network.validation.ts";
 
 test("an open network needs no password", () => {
@@ -53,6 +54,23 @@ test("fight mode is unreachable until the drone joins a tailnet", () => {
     fightModeUnreachable(true, "hskey-auth-abc", "https://hs.example.com"),
     false,
   );
+});
+
+test("warns when the saved key already went onto a card", () => {
+  const written = { hostname: "pizero2", at: "2026-11-01T00:24:00.000Z" };
+  const notice = reusedKeyNotice(written, "hskey-auth-abc") ?? "";
+  assert.match(notice, /^Already written to pizero2 on /);
+  assert.match(notice, /unless this key is reusable/);
+  assert.match(
+    reusedKeyNotice({ ...written, hostname: "" }, "hskey-auth-abc") ?? "",
+    /^Already written to a card on /,
+  );
+});
+
+test("a fresh key, or no key, carries no reuse warning", () => {
+  assert.equal(reusedKeyNotice(null, "hskey-auth-abc"), null);
+  const written = { hostname: "pizero2", at: "2026-11-01T00:24:00.000Z" };
+  assert.equal(reusedKeyNotice(written, " "), null);
 });
 
 test("lists every network problem, in page order", () => {

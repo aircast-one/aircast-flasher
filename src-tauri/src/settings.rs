@@ -7,6 +7,13 @@ use tauri::{AppHandle, Manager};
 const SETTINGS_FILE: &str = "settings.json";
 
 #[derive(Serialize, Deserialize, Default, Clone, PartialEq, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct KeyWrite {
+    pub hostname: String,
+    pub at: String,
+}
+
+#[derive(Serialize, Deserialize, Default, Clone, PartialEq, Debug)]
 #[serde(default, rename_all = "camelCase")]
 pub struct Settings {
     pub ssid: Option<String>,
@@ -22,6 +29,7 @@ pub struct Settings {
     pub tang_threshold: u32,
     pub tang_cloud: bool,
     pub auth_key: String,
+    pub auth_key_written_to: Option<KeyWrite>,
     pub remote_access: Option<bool>,
     pub self_hosted: bool,
     pub ssh_mode: Option<SshMode>,
@@ -189,6 +197,10 @@ mod tests {
             tang_threshold: 1,
             tang_cloud: false,
             auth_key: "hskey-auth-abc".into(),
+            auth_key_written_to: Some(KeyWrite {
+                hostname: "falcon-01".into(),
+                at: "2026-11-01T00:24:00.000Z".into(),
+            }),
             remote_access: Some(true),
             self_hosted: true,
             ssh_mode: Some(SshMode::Password),
@@ -278,6 +290,20 @@ mod tests {
         assert!(saved.no_wifi);
         assert_eq!(saved.wifi_password, sample().wifi_password);
         assert_eq!(saved.ssid, sample().ssid);
+    }
+
+    #[test]
+    fn a_new_key_forgets_which_card_the_old_one_went_to() {
+        let path = temp_path("key-write");
+        save_to(&path, &sample()).expect("seed");
+        merge_into(
+            &path,
+            patch(serde_json::json!({ "authKey": "hskey-auth-fresh", "authKeyWrittenTo": null })),
+        )
+        .expect("new key");
+        let saved = load_from(&path);
+        assert_eq!(saved.auth_key, "hskey-auth-fresh");
+        assert_eq!(saved.auth_key_written_to, None);
     }
 
     #[test]

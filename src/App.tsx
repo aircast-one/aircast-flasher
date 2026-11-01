@@ -139,7 +139,8 @@ function App() {
   const fightMode = settings.fightMode;
   const [showPassword, setShowPassword] = useState(false);
   const authKey = settings.authKey;
-  const setAuthKey = (authKey: string) => update({ authKey });
+  const setAuthKey = (authKey: string) =>
+    update({ authKey, authKeyWrittenTo: null });
   const sshMode: SshMode = settings.sshMode ?? "key-only";
   const setSshMode = (sshMode: SshMode) => update({ sshMode });
   const devicePassword = settings.devicePassword;
@@ -418,11 +419,24 @@ function App() {
     },
     onSuccess: (_result, vars) => {
       const written = vars.hostname.trim();
-      if (written === "" || settings.flashedHostnames.includes(written)) return;
+      const remembered =
+        written === "" || settings.flashedHostnames.includes(written);
       update({
-        flashedHostnames: [...settings.flashedHostnames, written].slice(
-          -FLASHED_HISTORY_LIMIT,
-        ),
+        ...(vars.tailscale === null
+          ? {}
+          : {
+              authKeyWrittenTo: {
+                hostname: written,
+                at: new Date().toISOString(),
+              },
+            }),
+        ...(remembered
+          ? {}
+          : {
+              flashedHostnames: [...settings.flashedHostnames, written].slice(
+                -FLASHED_HISTORY_LIMIT,
+              ),
+            }),
       });
     },
     onError: () => queryClient.invalidateQueries({ queryKey: ACCOUNT_KEY }),
@@ -534,6 +548,7 @@ function App() {
         ? board.name
         : null,
     authKey: tailnetKey,
+    keyWrittenTo: settings.authKeyWrittenTo,
     controlServer: tailnetServer,
     sshMode,
     sshKey,
@@ -729,6 +744,7 @@ function App() {
                 onControlServer: setControlServer,
                 authKey,
                 onAuthKey: setAuthKey,
+                keyWrittenTo: settings.authKeyWrittenTo,
                 enabled: remoteAccess,
                 onEnabled: (remoteAccess) => update({ remoteAccess }),
                 selfHosted: settings.selfHosted,
@@ -790,6 +806,7 @@ function App() {
               usb={writesBoard}
               noWifi={noWifi}
               remoteEnrolled={remoteEnrolled}
+              fightMode={fighting}
               encryption={flashMutation.data ?? null}
               success={flashMutation.isSuccess}
               cancelled={stopped}

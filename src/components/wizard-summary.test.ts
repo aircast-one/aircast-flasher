@@ -11,6 +11,7 @@ const base: SummaryInput = {
   noWifi: false,
   wifilessBoard: null,
   authKey: "",
+  keyWrittenTo: null,
   controlServer: "",
   sshMode: "key-only",
   sshKey: "",
@@ -102,6 +103,26 @@ test("a control server that isn't a URL means remote access is skipped", () => {
     "Off — control server isn't a URL",
   );
   assert.equal(rowOf(bad, "Remote access")?.warn, true);
+});
+
+test("flags a key that already went onto another card", () => {
+  const reused = {
+    ...base,
+    authKey: "hskey-auth-abc",
+    controlServer: "https://hs.example.com",
+    keyWrittenTo: { hostname: "pizero2", at: "2026-11-01T00:24:00.000Z" },
+  };
+  assert.equal(
+    valueOf(reused, "Remote access"),
+    "Headscale · hs.example.com · key already used on pizero2",
+  );
+  assert.equal(rowOf(reused, "Remote access")?.warn, true);
+  const unnamed = { ...reused.keyWrittenTo, hostname: "" };
+  assert.equal(
+    valueOf({ ...reused, keyWrittenTo: unnamed }, "Remote access"),
+    "Headscale · hs.example.com · key already used on a card",
+  );
+  assert.equal(valueOf({ ...reused, authKey: "" }, "Remote access"), "Off");
 });
 
 test("an empty key or password means the image default login survives", () => {

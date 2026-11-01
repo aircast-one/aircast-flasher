@@ -1,3 +1,5 @@
+import type { KeyWrite } from "@/types";
+
 export interface FieldProblem {
   field: string;
   message: string;
@@ -24,6 +26,23 @@ export function needsControlServer(
 
 export function joinsTailnet(authKey: string, controlServer: string): boolean {
   return authKey.trim() !== "" && isValidControlServer(controlServer);
+}
+
+export const keyCardName = (written: KeyWrite): string =>
+  written.hostname === "" ? "a card" : written.hostname;
+
+export function reusedKeyNotice(
+  written: KeyWrite | null,
+  authKey: string,
+): string | null {
+  if (written === null || authKey.trim() === "") return null;
+  const when = new Date(written.at).toLocaleString(undefined, {
+    day: "numeric",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+  return `Already written to ${keyCardName(written)} on ${when}. A one-time or short-lived key won't let another card in — paste a fresh one unless this key is reusable.`;
 }
 
 export function fightModeUnreachable(

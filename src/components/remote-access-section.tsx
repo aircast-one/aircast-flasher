@@ -1,5 +1,11 @@
 import { useState } from "react";
-import { Check, Copy, Download, ExternalLink } from "lucide-react";
+import {
+  Check,
+  Copy,
+  Download,
+  ExternalLink,
+  TriangleAlert,
+} from "lucide-react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 
 import { track } from "@/api";
@@ -7,7 +13,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Segmented } from "@/components/segmented";
+import { reusedKeyNotice } from "@/components/step-network.validation";
 import { useLocalTailscale } from "@/lib/use-local-tailscale";
+import type { KeyWrite } from "@/types";
 
 const KEYS_URL = "https://login.tailscale.com/admin/settings/keys";
 const DOWNLOAD_URL = "https://aircast.one/docs/software/tailscale";
@@ -95,6 +103,7 @@ export interface RemoteAccessProps {
   onControlServer: (v: string) => void;
   authKey: string;
   onAuthKey: (v: string) => void;
+  keyWrittenTo: KeyWrite | null;
   selfHosted: boolean;
   onSelfHosted: (v: boolean) => void;
   controlServerValid: boolean;
@@ -106,6 +115,7 @@ export function RemoteAccessSection({
   onControlServer,
   authKey,
   onAuthKey,
+  keyWrittenTo,
   selfHosted,
   onSelfHosted,
   controlServerValid,
@@ -114,6 +124,7 @@ export function RemoteAccessSection({
   const pickProvider = (provider: Provider) => {
     onSelfHosted(provider === "headscale");
   };
+  const reused = reusedKeyNotice(keyWrittenTo, authKey);
 
   return (
     <>
@@ -169,8 +180,18 @@ export function RemoteAccessSection({
           autoCapitalize="none"
           autoCorrect="off"
           spellCheck={false}
-          aria-describedby="auth-key-help"
+          aria-describedby={
+            reused === null ? "auth-key-help" : "auth-key-reused auth-key-help"
+          }
         />
+        {reused === null ? null : (
+          <div className="flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2">
+            <TriangleAlert className="mt-0.5 size-4 shrink-0 text-amber-600 dark:text-amber-400" />
+            <p id="auth-key-reused" className="text-sm text-muted-foreground">
+              {reused}
+            </p>
+          </div>
+        )}
         <p id="auth-key-help" className="text-sm text-muted-foreground">
           Used once on first boot, so pick a short-expiry or ephemeral key.
           {selfHosted ? " Create one on your server with:" : null}

@@ -1,8 +1,9 @@
-import type { SshMode, SshPublicKey } from "@/types";
+import type { KeyWrite, SshMode, SshPublicKey } from "@/types";
 import { STEP, type WizardStep } from "@/components/wizard-types";
 import {
   isValidControlServer,
   joinsTailnet,
+  keyCardName,
 } from "@/components/step-network.validation";
 
 export interface SummaryItem {
@@ -19,6 +20,7 @@ export interface SummaryInput {
   noWifi: boolean;
   wifilessBoard: string | null;
   authKey: string;
+  keyWrittenTo: KeyWrite | null;
   controlServer: string;
   sshMode: SshMode;
   sshKey: string;
@@ -30,17 +32,27 @@ export interface SummaryInput {
 
 const IMAGE_DEFAULT_LOGIN = "Image default (pi / raspberry)";
 
-function remoteAccess(authKey: string, controlServer: string): SummaryItem {
+function remoteAccess(
+  authKey: string,
+  controlServer: string,
+  keyWrittenTo: KeyWrite | null,
+): SummaryItem {
   const row = { label: "Remote access", step: STEP.access };
   const server = controlServer.trim();
   if (authKey.trim() === "") return { ...row, value: "Off" };
-  if (server === "") return { ...row, value: "Tailscale" };
   if (!isValidControlServer(server))
     return { ...row, value: "Off — control server isn't a URL", warn: true };
-  return {
-    ...row,
-    value: `Headscale · ${server.replace(/^https?:\/\//, "")}`,
-  };
+  const value =
+    server === ""
+      ? "Tailscale"
+      : `Headscale · ${server.replace(/^https?:\/\//, "")}`;
+  return keyWrittenTo === null
+    ? { ...row, value }
+    : {
+        ...row,
+        value: `${value} · key already used on ${keyCardName(keyWrittenTo)}`,
+        warn: true,
+      };
 }
 
 function keyName(sshKey: string, detectedKeys: SshPublicKey[]): string {
@@ -118,7 +130,7 @@ export function buildSummary(input: SummaryInput): SummaryItem[] {
       step: STEP.network,
     },
     wifi(input.noWifi, input.ssid.trim(), input.wifilessBoard),
-    remoteAccess(input.authKey, input.controlServer),
+    remoteAccess(input.authKey, input.controlServer, input.keyWrittenTo),
     {
       label: "Device access",
       value: access,

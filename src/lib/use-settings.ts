@@ -20,6 +20,7 @@ const EMPTY: Settings = {
   tangThreshold: 1,
   tangCloud: false,
   authKey: "",
+  authKeyWrittenTo: null,
   remoteAccess: null,
   selfHosted: false,
   sshMode: null,

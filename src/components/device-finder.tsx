@@ -308,12 +308,35 @@ function DeviceActions({
   );
 }
 
+function FightWaiting() {
+  return (
+    <div className="flex w-full flex-col gap-3 rounded-xl border border-border px-4 py-3 text-left">
+      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+        <Loader2 className="size-4 shrink-0 animate-spin" />
+        <span>Waiting for it to join your private network.</span>
+      </div>
+      <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+        <Network className="size-3.5 shrink-0" />
+        Fight mode turns off its hotspot and blocks every other network, so
+        this is the only place it shows up.
+      </span>
+      <span className="text-xs text-muted-foreground">
+        Not here after 10 minutes? The pre-auth key was probably expired or
+        already used on another card. Make a fresh key and write the card
+        again.
+      </span>
+    </div>
+  );
+}
+
 export function DeviceFinder({
   hostname,
   remoteEnrolled,
+  fightMode,
 }: {
   hostname: string;
   remoteEnrolled: boolean;
+  fightMode: boolean;
 }) {
   const [foundUrl, setFoundUrl] = useState<string | null>(null);
   const [rounds, setRounds] = useState(0);
@@ -322,7 +345,7 @@ export function DeviceFinder({
   const lanUrl = `http://${hostname}.local`;
 
   useEffect(() => {
-    if (foundUrl !== null) return;
+    if (foundUrl !== null || fightMode) return;
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout>;
 
@@ -351,7 +374,7 @@ export function DeviceFinder({
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [foundUrl, lanUrl]);
+  }, [foundUrl, lanUrl, fightMode]);
 
   function handleJoinHotspot() {
     setJoin({ phase: "joining" });
@@ -390,13 +413,21 @@ export function DeviceFinder({
           {tailnetPeer.hostName.toLowerCase() === hostname.trim().toLowerCase()
             ? `Reachable at ${tailnetPeer.ip} from anywhere on your tailnet.`
             : `Tailscale named it ${tailnetPeer.hostName} — ${hostname.trim()} was taken. Reachable at ${tailnetPeer.ip}.`}
-          {" It isn't on this network, so "}
-          <span className="font-mono">{hostname}.local</span>
-          {" won't answer from here."}
+          {fightMode ? (
+            " Fight mode blocks every other way in."
+          ) : (
+            <>
+              {" It isn't on this network, so "}
+              <span className="font-mono">{hostname}.local</span>
+              {" won't answer from here."}
+            </>
+          )}
         </span>
       </div>
     );
   }
+
+  if (fightMode) return <FightWaiting />;
 
   return (
     <div className="flex w-full flex-col gap-3 rounded-xl border border-border px-4 py-3 text-left">

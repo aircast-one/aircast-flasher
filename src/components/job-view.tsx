@@ -252,6 +252,7 @@ export function JobView({
   usb,
   noWifi,
   remoteEnrolled,
+  fightMode,
   encryption,
   success,
   cancelled,
@@ -270,6 +271,7 @@ export function JobView({
   usb: boolean;
   noWifi: boolean;
   remoteEnrolled: boolean;
+  fightMode: boolean;
   encryption: EncryptionConfig | null;
   success: boolean;
   cancelled: boolean;
@@ -308,16 +310,22 @@ export function JobView({
               it.
             </li>
             <li>
-              {remoteEnrolled
-                ? "It appears below when it's ready — on this network or your private one."
-                : "Keep this computer on the same network. The device appears below when it's ready."}
+              {fightMode
+                ? "It appears below once it joins your private network — fight mode keeps it off every other one."
+                : remoteEnrolled
+                  ? "It appears below when it's ready — on this network or your private one."
+                  : "Keep this computer on the same network. The device appears below when it's ready."}
             </li>
           </ol>
         </div>
         {encryption ? (
           <EncryptionReminder hostname={hostname} encryption={encryption} />
         ) : null}
-        <DeviceFinder hostname={hostname} remoteEnrolled={remoteEnrolled} />
+        <DeviceFinder
+          hostname={hostname}
+          remoteEnrolled={remoteEnrolled}
+          fightMode={fightMode}
+        />
         {board ? <NotShowingUp board={board} usb={usb} noWifi={noWifi} /> : null}
         <div className="flex w-full items-center justify-between gap-3 rounded-xl border border-border px-4 py-3 text-left">
           <div className="flex min-w-0 flex-col gap-0.5">

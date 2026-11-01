@@ -38,6 +38,7 @@ type RemoteAccessInputs = Pick<
   | "onControlServer"
   | "authKey"
   | "onAuthKey"
+  | "keyWrittenTo"
   | "selfHosted"
   | "onSelfHosted"
 > & { enabled: boolean; onEnabled: (v: boolean) => void };

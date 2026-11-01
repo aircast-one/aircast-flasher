@@ -168,6 +168,7 @@ export interface Settings {
   tangThreshold: number;
   tangCloud: boolean;
   authKey: string;
+  authKeyWrittenTo: KeyWrite | null;
   remoteAccess: boolean | null;
   selfHosted: boolean;
   sshMode: SshMode | null;
@@ -177,6 +178,11 @@ export interface Settings {
   useLocalImage: boolean;
   localImagePath: string | null;
   board: string | null;
+}
+
+export interface KeyWrite {
+  hostname: string;
+  at: string;
 }
 
 export interface SshKeyIdentity {
