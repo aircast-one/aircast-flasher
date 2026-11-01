@@ -50,6 +50,7 @@ import { cardLabel, withCloudServer } from "@/components/cloud";
 import {
   MIN_FIGHT_PASSWORD,
   fightModeUnreachable,
+  defaultSshMode,
   isWeakDevicePassword,
   joinsTailnet,
 } from "@/components/step-network.validation";
@@ -141,7 +142,6 @@ function App() {
   const authKey = settings.authKey;
   const setAuthKey = (authKey: string) =>
     update({ authKey, authKeyWrittenTo: null });
-  const sshMode: SshMode = settings.sshMode ?? "key-only";
   const setSshMode = (sshMode: SshMode) => update({ sshMode });
   const devicePassword = settings.devicePassword;
   const setDevicePassword = (devicePassword: string) =>
@@ -468,6 +468,7 @@ function App() {
   const sshKey =
     settings.authorizedKey ??
     (detectedKeys.length === 1 ? detectedKeys[0].contents : "");
+  const sshMode: SshMode = settings.sshMode ?? defaultSshMode(sshKey);
   const fightLoginMissing =
     fighting &&
     ((sshMode === "key-only" && sshKey.trim() === "") ||

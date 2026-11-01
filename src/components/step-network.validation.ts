@@ -1,4 +1,4 @@
-import type { KeyWrite } from "@/types";
+import type { KeyWrite, SshMode } from "@/types";
 
 export interface FieldProblem {
   field: string;
@@ -73,6 +73,9 @@ export function isInvalidWifiPassword(value: string): boolean {
     !RAW_PSK.test(value)
   );
 }
+
+export const defaultSshMode = (sshKey: string): SshMode =>
+  sshKey.trim() === "" ? "disabled" : "key-only";
 
 export const MIN_DEVICE_PASSWORD = 8;
 export const MIN_FIGHT_PASSWORD = 12;

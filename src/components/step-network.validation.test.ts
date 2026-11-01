@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
+  defaultSshMode,
   fightModeUnreachable,
   isInvalidWifiPassword,
   isWeakDevicePassword,
@@ -33,6 +34,12 @@ test("a blank control server is only a problem once a key exists", () => {
     false,
   );
   assert.equal(needsControlServer(false, "", "hskey-auth-abc"), false);
+});
+
+test("SSH starts off unless this computer has a key to install", () => {
+  assert.equal(defaultSshMode(""), "disabled");
+  assert.equal(defaultSshMode("  "), "disabled");
+  assert.equal(defaultSshMode("ssh-ed25519 AAAA me@host"), "key-only");
 });
 
 test("fight mode takes a longer device password, and never the default", () => {
