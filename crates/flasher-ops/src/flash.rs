@@ -17,6 +17,7 @@ use super::FlashSpeed;
 use super::Ordering;
 use super::ProvisionConfig;
 use super::Read;
+use super::CANCEL_POLL;
 use super::HELPER_ABORT_GRACE;
 use super::MIN_TEMP_SPACE_BYTES;
 use super::PROGRESS_THROTTLE_MS;
@@ -84,15 +85,18 @@ pub async fn flash_image(
 
     let lower = src_path.to_string_lossy().to_ascii_lowercase();
     trace.compressed = lower.ends_with(".xz") || lower.ends_with(".gz");
-    let (write_path, is_temp) = if trace.compressed {
-        check_available_space(&temp_dir, MIN_TEMP_SPACE_BYTES)?;
-        let dst = temp_dir.join("aircast-image.img");
-        if dst.exists() {
-            let _ = std::fs::remove_file(&dst);
+    let kept = kept_image(&src_path);
+    let (write_path, is_temp) = match (&kept, trace.compressed) {
+        (Some(kept), _) => (kept.clone(), false),
+        (None, true) => {
+            check_available_space(&temp_dir, MIN_TEMP_SPACE_BYTES)?;
+            let dst = temp_dir.join("aircast-image.img");
+            if dst.exists() {
+                let _ = std::fs::remove_file(&dst);
+            }
+            (dst, true)
         }
-        (dst, true)
-    } else {
-        (src_path.clone(), false)
+        (None, false) => (src_path.clone(), false),
     };
 
     if !trace.compressed {
@@ -119,15 +123,26 @@ pub async fn flash_image(
         cancel.clone(),
     ));
 
-    let prepared = if trace.compressed {
-        let unpack_started = std::time::Instant::now();
-        decompress(&events, &src_path, &write_path, &lower, cancel.clone())
+    let unpack_started = std::time::Instant::now();
+    let kept_lock = match &kept {
+        Some(_) => Some(lock_kept_images(&cancel).await),
+        None => None,
+    };
+    let prepared = match (&kept, &kept_lock) {
+        (Some(_), Some(Err(e))) => Err(e.clone()),
+        (Some(kept), _) => unpack_kept(&src_path, kept, &events, cancel.clone())
             .await
-            .map(|_| {
-                trace.decompress_ms = Some(unpack_started.elapsed().as_millis() as u64);
-            })
-    } else {
-        Ok(())
+            .map(|unpacked| {
+                trace.decompress_ms = unpacked.then(|| unpack_started.elapsed().as_millis() as u64);
+            }),
+        (None, _) if trace.compressed => {
+            decompress(&events, &src_path, &write_path, &lower, cancel.clone())
+                .await
+                .map(|_| {
+                    trace.decompress_ms = Some(unpack_started.elapsed().as_millis() as u64);
+                })
+        }
+        (None, _) => Ok(()),
     };
 
     let prepared = prepared.and_then(|()| {
@@ -185,7 +200,15 @@ async fn flash_usb(
     let write_path = temp_dir.join("aircast-image.img");
     let _ = std::fs::remove_file(&write_path);
     let result = async {
-        if trace.compressed {
+        if let Some(kept) = kept_image(&src_path) {
+            let _lock = lock_kept_images(&cancel).await?;
+            let started = std::time::Instant::now();
+            if unpack_kept(&src_path, &kept, &events, cancel.clone()).await? {
+                trace.decompress_ms = Some(started.elapsed().as_millis() as u64);
+            }
+            std::fs::copy(&kept, &write_path)
+                .map_err(|e| format!("Failed to copy the image: {e}"))?;
+        } else if trace.compressed {
             let started = std::time::Instant::now();
             decompress(&events, &src_path, &write_path, &lower, cancel.clone()).await?;
             trace.decompress_ms = Some(started.elapsed().as_millis() as u64);
@@ -645,6 +668,91 @@ fn ps_escape(s: &str) -> String {
     s.replace('\'', "''")
 }
 
+static KEPT_IMAGES: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+fn kept_image_in(cache_dir: &std::path::Path, src: &std::path::Path) -> Option<std::path::PathBuf> {
+    let name = src.file_name()?.to_string_lossy().to_ascii_lowercase();
+    let compressed = name.ends_with(".xz") || name.ends_with(".gz");
+    (compressed && src.parent() == Some(cache_dir)).then(|| src.with_extension(""))
+}
+
+fn kept_image(src: &std::path::Path) -> Option<std::path::PathBuf> {
+    let cache_dir = crate::paths::image_cache_dir().ok()?.canonicalize().ok()?;
+    kept_image_in(&cache_dir, src)
+}
+
+fn is_fresh(kept: &std::path::Path, src: &std::path::Path) -> bool {
+    let modified = |p: &std::path::Path| std::fs::metadata(p).and_then(|m| m.modified()).ok();
+    matches!((modified(kept), modified(src)), (Some(k), Some(s)) if k >= s)
+}
+
+fn is_unpacked_image(path: &std::path::Path) -> bool {
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().to_ascii_lowercase())
+        .unwrap_or_default();
+    name.ends_with(".img") || name.ends_with(".img.partial")
+}
+
+fn remove_other_kept_images(dir: &std::path::Path, keep: &std::path::Path) {
+    std::fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| path != keep && is_unpacked_image(path))
+        .for_each(|path| {
+            let _ = std::fs::remove_file(path);
+        });
+}
+
+async fn lock_kept_images(
+    cancel: &AtomicBool,
+) -> Result<tokio::sync::MutexGuard<'static, ()>, String> {
+    loop {
+        if let Ok(guard) = KEPT_IMAGES.try_lock() {
+            return Ok(guard);
+        }
+        if cancel.load(Ordering::SeqCst) {
+            return Err("Flash cancelled".to_string());
+        }
+        tokio::time::sleep(CANCEL_POLL).await;
+    }
+}
+
+async fn unpack_kept(
+    src: &std::path::Path,
+    kept: &std::path::Path,
+    events: &FlashEvents,
+    cancel: Arc<AtomicBool>,
+) -> Result<bool, String> {
+    if is_fresh(kept, src) {
+        return Ok(false);
+    }
+    let dir = kept
+        .parent()
+        .ok_or_else(|| "The image cache has no folder".to_string())?;
+    remove_other_kept_images(dir, kept);
+    check_available_space(dir, MIN_TEMP_SPACE_BYTES)?;
+    let partial = kept.with_extension("img.partial");
+    let lower = src.to_string_lossy().to_ascii_lowercase();
+    decompress(events, src, &partial, &lower, cancel).await?;
+    std::fs::rename(&partial, kept).map_err(|e| format!("Failed to keep the image: {e}"))?;
+    Ok(true)
+}
+
+pub async fn prepare_image(image_path: &str) -> Result<(), String> {
+    let src = validate_image_file(std::path::Path::new(image_path))?;
+    let Some(kept) = kept_image(&src) else {
+        return Ok(());
+    };
+    let _lock = KEPT_IMAGES.lock().await;
+    let quiet: FlashEvents = Arc::new(|_| {});
+    unpack_kept(&src, &kept, &quiet, Arc::new(AtomicBool::new(false)))
+        .await
+        .map(|_| ())
+}
+
 async fn decompress(
     events: &FlashEvents,
     src: &std::path::Path,
@@ -779,6 +887,43 @@ mod tests {
             fresh.exists(),
             "sweep must not delete an in-flight provision file"
         );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn only_downloads_in_the_image_cache_are_kept_unpacked() {
+        let cache = std::path::Path::new("/cache/images");
+        assert_eq!(
+            kept_image_in(cache, &cache.join("aircast-v0.3.5.img.xz")),
+            Some(cache.join("aircast-v0.3.5.img"))
+        );
+        assert_eq!(kept_image_in(cache, &cache.join("aircast.img")), None);
+        assert_eq!(
+            kept_image_in(cache, std::path::Path::new("/Users/me/aircast.img.xz")),
+            None
+        );
+    }
+
+    #[tokio::test]
+    async fn unpacks_once_keeps_the_result_and_drops_older_ones() {
+        let dir = isolated_dir("kept-image");
+        let src = dir.join("aircast-v2.img.xz");
+        let mut encoder = xz2::write::XzEncoder::new(std::fs::File::create(&src).unwrap(), 6);
+        encoder.write_all(b"aircast image").unwrap();
+        encoder.finish().unwrap();
+        let older = dir.join("aircast-v1.img");
+        std::fs::write(&older, b"old").unwrap();
+        let kept = dir.join("aircast-v2.img");
+        let quiet: FlashEvents = Arc::new(|_| {});
+        let cancel = Arc::new(AtomicBool::new(false));
+
+        assert_eq!(
+            unpack_kept(&src, &kept, &quiet, cancel.clone()).await,
+            Ok(true)
+        );
+        assert_eq!(std::fs::read(&kept).unwrap(), b"aircast image");
+        assert!(!older.exists(), "an older unpacked image is dropped");
+        assert_eq!(unpack_kept(&src, &kept, &quiet, cancel).await, Ok(false));
         let _ = std::fs::remove_dir_all(&dir);
     }
 

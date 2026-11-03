@@ -125,6 +125,11 @@ pub async fn download_image(
 }
 
 #[tauri::command]
+pub async fn prepare_image(image_path: String) -> Result<(), String> {
+    flasher_ops::flash::prepare_image(&image_path).await
+}
+
+#[tauri::command]
 #[allow(clippy::too_many_arguments)]
 pub async fn flash_image(
     app_handle: AppHandle,

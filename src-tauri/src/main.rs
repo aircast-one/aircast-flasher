@@ -42,6 +42,7 @@ async fn main() {
             flasher::list_running_boards,
             flasher::list_block_devices,
             flasher::download_image,
+            flasher::prepare_image,
             flasher::flash_image,
             flasher::fetch_tang_adv,
             flasher::save_recovery_file,

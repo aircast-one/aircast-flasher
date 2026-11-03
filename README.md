@@ -25,6 +25,12 @@ list_releases ─► download_image ─► flash_image ─► provision_device
   `development` → `downloads-dev.aircast.one`. Or a local
   `.img`/`.img.xz`/`.img.gz`. The Flasher's own installers are listed in
   `/flasher/releases.json`, and the updater reads `/flasher/latest.json`.
+- **Unpacked ahead of time** — picking a release downloads it in the
+  background, then `prepare_image` decompresses it next to the download as
+  `<name>.img` and keeps it, so a write starts straight away and later cards of
+  the same release skip the ~40 s unpack. Only the newest unpacked image is
+  kept (~4.4 GB); a lock stops a background unpack from removing the image a
+  write is reading. Local images still unpack to a temp file per write.
 - **Progress** — download and write both report a rate over the same
   one-second window (`SPEED_WINDOW`). The write is the longest wait in the app,
   so a bar alone would answer "is it moving" but not "how long"; the meter

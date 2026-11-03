@@ -7,6 +7,7 @@ import {
   mintAuthKey,
   detectSshKeys,
   downloadImage,
+  prepareImage,
   fetchTangAdv,
   flashImage,
   listBlockDevices,
@@ -372,13 +373,25 @@ function App() {
     retry: false,
   });
 
+  const downloadedPath = imageDownload.data?.image_path ?? null;
+  const imageUnpack = useQuery({
+    queryKey: ["unpack", downloadedPath],
+    queryFn: () => prepareImage(downloadedPath!).then(() => true),
+    enabled: downloadedPath !== null,
+    staleTime: Infinity,
+    gcTime: Infinity,
+    retry: false,
+  });
+
   const cacheStatus =
     imageUrl === null
       ? null
       : imageDownload.isSuccess
-        ? imageDownload.data.cached
-          ? "Already on this computer — nothing to download."
-          : "Downloaded — ready to write."
+        ? imageUnpack.isFetching
+          ? "Downloaded — unpacking in the background…"
+          : imageDownload.data.cached
+            ? "Already on this computer — nothing to download."
+            : "Downloaded — ready to write."
         : imageDownload.isError
           ? "Download failed — it retries when you write the card."
           : downloadProgress && downloadProgress.total_bytes > 0

@@ -78,6 +78,10 @@ export function downloadImage(args: {
   });
 }
 
+export function prepareImage(imagePath: string): Promise<void> {
+  return invoke<void>("prepare_image", { imagePath });
+}
+
 export function flashImage(args: {
   jobId: string;
   imagePath: string;
