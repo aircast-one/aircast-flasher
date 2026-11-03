@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  ArrowRight,
   Check,
   Copy,
   Download,
-  ExternalLink,
   Loader2,
   Network,
   Wifi,
@@ -12,7 +12,6 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 
 import {
   joinWifi,
-  openDeviceWindow,
   probeDevice,
   setDeviceControlServer,
   tailscaleLogin,
@@ -22,6 +21,11 @@ import {
 import { Button } from "@/components/ui/button";
 import { errorMessage } from "@/lib/format";
 import { useLocalTailscale } from "@/lib/use-local-tailscale";
+import {
+  type FoundDevice,
+  setupUrl,
+  tailnetDevice,
+} from "@/components/device-address";
 import type { LocalTailscale, TailnetPeer } from "@/types";
 
 const PROBE_INTERVAL_MS = 3000;
@@ -82,7 +86,7 @@ function CopyableAddress({ address }: { address: string }) {
 }
 
 const HOTSPOT_HELP =
-  "You're on the device's hotspot, so it has no internet yet. Connect it to WiFi on the device page, then come back to sign in to Tailscale.";
+  "You're on its hotspot, so it has no internet yet. Setup starts by joining it to your WiFi.";
 
 const LOGIN_HELP: Record<LoginState["phase"], string> = {
   idle: "Opens the sign-in page in your browser, then authorizes this device.",
@@ -182,21 +186,14 @@ function useNewTailnetPeer(
 
 function RestoreNote({ host }: { host: string }) {
   return (
-    <span id="finder-restore" className="text-xs text-muted-foreground">
+    <span id="finder-restore">
       This card is restoring {host}'s settings, so it restarts once more on
       first boot — allow a few extra minutes.
     </span>
   );
 }
 
-function DeviceActions({
-  deviceUrl,
-  hostname,
-}: {
-  deviceUrl: string;
-  hostname: string;
-}) {
-  const onHotspot = deviceUrl === HOTSPOT_URL;
+function TailscaleSignIn({ deviceUrl }: { deviceUrl: string }) {
   const local = useLocalTailscale();
   const [login, setLogin] = useState<LoginState>({ phase: "idle" });
   const selfHostedControl =
@@ -208,7 +205,7 @@ function DeviceActions({
   );
 
   useEffect(() => {
-    if (onHotspot || login.phase !== "idle") return;
+    if (login.phase !== "idle") return;
     let cancelled = false;
     tailscaleStatus(deviceUrl)
       .then((s) => {
@@ -218,7 +215,7 @@ function DeviceActions({
     return () => {
       cancelled = true;
     };
-  }, [deviceUrl, onHotspot, login.phase, connected]);
+  }, [deviceUrl, login.phase, connected]);
 
   useEffect(() => {
     if (login.phase !== "signing-in") return;
@@ -259,24 +256,28 @@ function DeviceActions({
       });
   }
 
-  const showLogin = !onHotspot && login.phase !== "connected";
-
   return (
     <div className="flex flex-col gap-2">
-      <div className="flex flex-wrap items-center gap-2">
-        <Button
-          type="button"
-          size="sm"
-          onClick={() => void openDeviceWindow(deviceUrl, hostname)}
-        >
-          <ExternalLink className="size-4" />
-          Open device page
-        </Button>
-        {showLogin ? (
+      {login.phase === "connected" ? (
+        <p className="flex items-center gap-2 text-xs">
+          <Check className="size-4 shrink-0 text-green-500 dark:text-green-400" />
+          <span>
+            On your tailnet
+            {login.name === "" ? null : (
+              <>
+                {" as "}
+                <span className="font-mono">{login.name}</span>
+              </>
+            )}
+          </span>
+        </p>
+      ) : (
+        <div className="flex flex-col gap-1">
           <Button
             type="button"
             size="sm"
-            variant="secondary"
+            variant="ghost"
+            className="self-start"
             disabled={login.phase === "starting"}
             onClick={handleLogin}
           >
@@ -292,86 +293,31 @@ function DeviceActions({
                   selfHostedControl.replace(/^https?:\/\//, ""),
                 )}
           </Button>
-        ) : null}
-      </div>
-      {login.phase === "connected" ? (
-        <p className="flex items-center gap-2 text-xs">
-          <Check className="size-4 shrink-0 text-green-500 dark:text-green-400" />
-          <span>
-            On your tailnet
-            {login.name === "" ? null : (
-              <>
-                {" as "}
-                <span className="font-mono">{login.name}</span>
-              </>
-            )}
-          </span>
-        </p>
-      ) : (
-        <p
-          className={
-            login.phase === "failed"
-              ? "text-xs text-destructive"
-              : "text-xs text-muted-foreground"
-          }
-        >
-          {onHotspot
-            ? HOTSPOT_HELP
-            : login.phase === "failed"
-              ? login.error
-              : LOGIN_HELP[login.phase]}
-        </p>
+          <p
+            className={
+              login.phase === "failed"
+                ? "text-xs text-destructive"
+                : "text-xs text-muted-foreground"
+            }
+          >
+            {login.phase === "failed" ? login.error : LOGIN_HELP[login.phase]}
+          </p>
+        </div>
       )}
-      {onHotspot ? null : (
-        <LocalTailscaleRow
-          deviceName={login.phase === "connected" ? login.name : ""}
-        />
-      )}
+      <LocalTailscaleRow
+        deviceName={login.phase === "connected" ? login.name : ""}
+      />
     </div>
   );
 }
 
-function FightWaiting({ restore }: { restore: RestoredCard | null }) {
-  return (
-    <div className="flex w-full flex-col gap-3 rounded-xl border border-border px-4 py-3 text-left">
-      <div className="flex items-center gap-2 text-sm text-muted-foreground">
-        <Loader2 className="size-4 shrink-0 animate-spin" />
-        <span>
-          {restore?.rejoins
-            ? `Waiting for ${restore.host} to rejoin your private network.`
-            : "Waiting for it to join your private network."}
-        </span>
-      </div>
-      {restore === null ? null : <RestoreNote host={restore.host} />}
-      <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-        <Network className="size-3.5 shrink-0" />
-        Fight mode turns off its hotspot and blocks every other network, so
-        this is the only place it shows up.
-      </span>
-      <span id="finder-missing" className="text-xs text-muted-foreground">
-        Not here after {missingAfterMinutes(restore)} minutes?{" "}
-        {restore?.rejoins
-          ? `Check it has power and is in range of its WiFi — it rejoins as ${restore.host} with the identity from the backup.`
-          : "The pre-auth key was probably expired or already used on another card. Make a fresh key and write the card again."}
-      </span>
-    </div>
-  );
-}
-
-export function DeviceFinder({
-  hostname,
-  remoteEnrolled,
-  fightMode,
-  restore,
-}: {
-  hostname: string;
-  remoteEnrolled: boolean;
-  fightMode: boolean;
-  restore: RestoredCard | null;
-}) {
+export function useFoundDevice(
+  hostname: string,
+  fightMode: boolean,
+  restore: RestoredCard | null,
+): { found: FoundDevice | null; rounds: number } {
   const [foundUrl, setFoundUrl] = useState<string | null>(null);
   const [rounds, setRounds] = useState(0);
-  const [join, setJoin] = useState<JoinState>({ phase: "idle" });
   const tailnetPeer = useNewTailnetPeer(hostname, restore?.rejoins ?? false);
   const lanUrl = `http://${hostname}.local`;
 
@@ -407,6 +353,71 @@ export function DeviceFinder({
     };
   }, [foundUrl, lanUrl, fightMode]);
 
+  const found: FoundDevice | null =
+    foundUrl === HOTSPOT_URL
+      ? { url: foundUrl, address: new URL(foundUrl).host, via: "hotspot", note: HOTSPOT_HELP }
+      : foundUrl !== null
+        ? { url: foundUrl, address: `${hostname}.local`, via: "lan", note: "" }
+        : tailnetPeer !== null
+          ? tailnetDevice(tailnetPeer, hostname)
+          : null;
+  return { found, rounds };
+}
+
+export function DeviceOnline({ found }: { found: FoundDevice }) {
+  return (
+    <div className="flex flex-col gap-1">
+      <CopyableAddress address={found.address} />
+      {found.note === "" ? null : (
+        <span className="text-xs text-muted-foreground">{found.note}</span>
+      )}
+    </div>
+  );
+}
+
+export function ContinueSetup({
+  found,
+  hostname,
+}: {
+  found: FoundDevice;
+  hostname: string;
+}) {
+  return (
+    <div className="flex flex-col gap-3">
+      <Button
+        type="button"
+        className="self-start"
+        onClick={() => {
+          track("setup_continue_click", { via: found.via });
+          void openUrl(setupUrl(found.url));
+        }}
+      >
+        Continue setup
+        <ArrowRight className="size-4" />
+      </Button>
+      <span className="text-xs text-muted-foreground">
+        Opens {hostname.trim()} in your browser. Nothing to install.
+      </span>
+      {found.via === "lan" ? <TailscaleSignIn deviceUrl={found.url} /> : null}
+    </div>
+  );
+}
+
+export function DeviceWaiting({
+  hostname,
+  remoteEnrolled,
+  fightMode,
+  restore,
+  rounds,
+}: {
+  hostname: string;
+  remoteEnrolled: boolean;
+  fightMode: boolean;
+  restore: RestoredCard | null;
+  rounds: number;
+}) {
+  const [join, setJoin] = useState<JoinState>({ phase: "idle" });
+
   function handleJoinHotspot() {
     setJoin({ phase: "joining" });
     track("hotspot_join_attempt");
@@ -419,72 +430,45 @@ export function DeviceFinder({
       });
   }
 
-  if (foundUrl !== null) {
+  if (fightMode)
     return (
-      <div className="flex w-full flex-col gap-3 rounded-xl border border-green-500/30 bg-green-500/5 px-4 py-3 text-left">
-        <div className="flex flex-col gap-0.5">
-          <span className="text-xs font-medium tracking-wide text-green-600 uppercase dark:text-green-400">
-            Device online
-          </span>
-          <CopyableAddress address={foundUrl} />
-        </div>
-        <DeviceActions deviceUrl={foundUrl} hostname={hostname} />
-      </div>
-    );
-  }
-
-  if (tailnetPeer !== null) {
-    return (
-      <div className="flex w-full flex-col gap-1 rounded-xl border border-green-500/30 bg-green-500/5 px-4 py-3 text-left">
-        <span className="text-xs font-medium tracking-wide text-green-600 uppercase dark:text-green-400">
-          On your tailnet
+      <div className="flex flex-col gap-1 text-xs text-muted-foreground">
+        {restore === null ? null : <RestoreNote host={restore.host} />}
+        <span>
+          Fight mode turns off its hotspot and blocks every other network, so it
+          only shows up once it{" "}
+          {restore?.rejoins
+            ? `rejoins your private network as ${restore.host}.`
+            : "joins your private network."}
         </span>
-        <CopyableAddress address={tailnetPeer.dnsName} />
-        <span className="text-xs text-muted-foreground">
-          {tailnetPeer.hostName.toLowerCase() === hostname.trim().toLowerCase()
-            ? `Reachable at ${tailnetPeer.ip} from anywhere on your tailnet.`
-            : `Tailscale named it ${tailnetPeer.hostName} — ${hostname.trim()} was taken. Reachable at ${tailnetPeer.ip}.`}
-          {fightMode ? (
-            " Fight mode blocks every other way in."
-          ) : (
-            <>
-              {" It isn't on this network, so "}
-              <span className="font-mono">{hostname}.local</span>
-              {" won't answer from here."}
-            </>
-          )}
+        <span id="finder-missing">
+          Not here after {missingAfterMinutes(restore)} minutes?{" "}
+          {restore?.rejoins
+            ? `Check it has power and is in range of its WiFi — it rejoins as ${restore.host} with the identity from the backup.`
+            : "The pre-auth key was probably expired or already used on another card. Make a fresh key and write the card again."}
         </span>
       </div>
     );
-  }
-
-  if (fightMode) return <FightWaiting restore={restore} />;
 
   return (
-    <div className="flex w-full flex-col gap-3 rounded-xl border border-border px-4 py-3 text-left">
-      <div className="flex items-center gap-2 text-sm text-muted-foreground">
-        <Loader2 className="size-4 shrink-0 animate-spin" />
-        <span>Waiting for the device. Checking these addresses:</span>
-      </div>
-      <CopyableAddress address={`${hostname}.local`} />
-      {restore === null ? null : <RestoreNote host={restore.host} />}
-      <div className="flex flex-col gap-1 text-xs text-muted-foreground">
-        <span className="flex items-center gap-1.5">
-          <Network className="size-3.5 shrink-0" />
-          {restore?.rejoins
-            ? `It rejoins your private network as ${restore.host}, with the identity from the backup.`
-            : remoteEnrolled
-              ? "It joins your private network on first boot, using the key the Flasher wrote."
-              : "Once it's online you can sign it in to Tailscale from here — keep this window open."}
-        </span>
-      </div>
+    <div className="flex flex-col gap-2 text-xs text-muted-foreground">
+      <span>
+        {restore === null
+          ? "The first start takes a few minutes and it restarts once — don't unplug it."
+          : `The first start takes a few minutes and it restarts twice, the second time to restore ${restore.host}'s settings — don't unplug it.`}{" "}
+        {restore?.rejoins
+          ? `It rejoins your private network as ${restore.host}, with the identity from the backup.`
+          : remoteEnrolled
+            ? "It shows up here from this network or your private one."
+            : "Keep this computer on the same network."}
+      </span>
       {rounds >= HOTSPOT_AFTER_ROUNDS ? (
         <div className="flex flex-col gap-2">
-          <span className="text-xs text-muted-foreground">
-            Not on this network yet. If it couldn't find your WiFi it starts a
-            hotspot named <span className="font-mono">{hostname}</span>{" "}
-            (password <span className="font-mono">{HOTSPOT_PASSWORD}</span>) —
-            joining it moves this computer off your network.
+          <span>
+            If it couldn't find your WiFi it starts a hotspot named{" "}
+            <span className="font-mono">{hostname}</span> (password{" "}
+            <span className="font-mono">{HOTSPOT_PASSWORD}</span>) — joining it
+            moves this computer off your network.
           </span>
           <div className="flex items-center gap-2">
             <Button

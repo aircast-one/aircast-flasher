@@ -14,10 +14,10 @@ import { track } from "@/api";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
-  DeviceFinder,
   missingAfterMinutes,
   type RestoredCard,
 } from "@/components/device-finder";
+import { SetupSteps } from "@/components/setup-steps";
 
 const QGC_DOWNLOAD_URL = "https://aircast.one/docs/software/qgroundcontrol";
 import { Progress } from "@/components/ui/progress";
@@ -223,7 +223,7 @@ function NotShowingUp({
   return (
     <div className="w-full text-left text-sm text-muted-foreground">
       <h3 className="mb-1 font-medium text-foreground">
-        Not showing up after {minutes} minutes?
+        Still not here after {minutes} minutes?
       </h3>
       <ul className="list-disc space-y-1 pl-5">
         {!board.builtinWifi && !noWifi ? (
@@ -298,87 +298,54 @@ export function JobView({
       <Pane heading="Write">
         <IconBadge icon={CheckCircle2} tone="success" />
         <div className="flex flex-col gap-1.5">
-          <h2 className="text-xl font-semibold">Ready to go</h2>
+          <h2 className="text-xl font-semibold">
+            {usb ? "Aircast OS installed" : "Card ready"}
+          </h2>
           <p className="text-sm text-balance text-muted-foreground">
-            {usb
-              ? "Aircast OS is on the board's built-in storage, and the board is restarting into it."
-              : "Your SD card has been flashed and verified. Remove it and boot your device."}
+            A few more steps and {hostname.trim()} is flying.
           </p>
-        </div>
-        <div className="w-full text-left text-sm text-muted-foreground">
-          <h3 className="mb-1 font-medium text-foreground">What happens next</h3>
-          <ol className="list-decimal space-y-1 pl-5">
-            <li>
-              {usb
-                ? "Leave the board powered — it starts Aircast OS on its own."
-                : "Put the card in the device and power it on."}
-            </li>
-            <li>
-              {restore === null
-                ? "Wait a few minutes. It restarts once on its own — don't unplug it."
-                : `Wait a few minutes. It restarts twice on its own, the second time to restore ${restore.host}'s settings — don't unplug it.`}
-            </li>
-            <li>
-              {fightMode
-                ? "It appears below once it joins your private network — fight mode keeps it off every other one."
-                : remoteEnrolled
-                  ? "It appears below when it's ready — on this network or your private one."
-                  : "Keep this computer on the same network. The device appears below when it's ready."}
-            </li>
-          </ol>
         </div>
         {encryption ? (
           <EncryptionReminder hostname={hostname} encryption={encryption} />
         ) : null}
-        <DeviceFinder
+        <SetupSteps
           hostname={hostname}
+          usb={usb}
           remoteEnrolled={remoteEnrolled}
           fightMode={fightMode}
           restore={restore}
+          notShowingUp={
+            board ? (
+              <NotShowingUp
+                board={board}
+                usb={usb}
+                noWifi={noWifi}
+                minutes={missingAfterMinutes(restore)}
+              />
+            ) : null
+          }
         />
-        {board ? (
-          <NotShowingUp
-            board={board}
-            usb={usb}
-            noWifi={noWifi}
-            minutes={missingAfterMinutes(restore)}
-          />
-        ) : null}
-        <div className="flex w-full items-center justify-between gap-3 rounded-xl border border-border px-4 py-3 text-left">
-          <div className="flex min-w-0 flex-col gap-0.5">
-            <span className="text-sm font-medium">
-              Aircast QGC{" "}
-              <span className="font-normal text-muted-foreground">
-                (optional)
-              </span>
-            </span>
-            <span className="text-xs text-muted-foreground">
-              QGroundControl with Aircast's low-latency video built in.
-            </span>
-          </div>
+        <div className="flex flex-col items-center gap-2">
           <Button
             type="button"
-            size="sm"
+            size="lg"
             variant="secondary"
-            className="shrink-0"
+            className="min-w-45"
+            onClick={onReset}
+          >
+            Flash another
+          </Button>
+          <button
+            type="button"
+            className="text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
             onClick={() => {
               track("qgc_download_click");
               void openUrl(QGC_DOWNLOAD_URL);
             }}
           >
-            <Download className="size-4" />
-            Get it
-          </Button>
+            Prefer a desktop app? Get Aircast QGroundControl
+          </button>
         </div>
-        <Button
-          type="button"
-          size="lg"
-          variant="secondary"
-          className="min-w-45"
-          onClick={onReset}
-        >
-          Flash another
-        </Button>
       </Pane>
     );
   }
