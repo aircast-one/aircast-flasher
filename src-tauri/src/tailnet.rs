@@ -1,12 +1,12 @@
 use flasher_ops::tailnet::{self, LocalTailscale, TailscaleState};
 
 #[tauri::command]
-pub async fn headscale_mint_key(
+pub async fn mint_auth_key(
     control_server: String,
     api_key: String,
     user: String,
 ) -> Result<String, String> {
-    flasher_ops::headscale::mint_key(&control_server, &api_key, &user).await
+    flasher_ops::authkey::resolve(&control_server, &api_key, &user).await
 }
 
 #[tauri::command]

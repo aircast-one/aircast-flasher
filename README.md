@@ -126,9 +126,10 @@ list_releases ─► download_image ─► flash_image ─► provision_device
   and the post-boot sign-in PUTs the control server to the device first, so a
   self-hosted shop's device never tries to sign in to Tailscale.
 
-  An API key (`hskey-api-…`) plus a Headscale user makes the Flasher mint a
-  one-time, non-ephemeral, 90-day pre-auth key per card right before it writes
-  (`flasher-ops/src/headscale.rs`, shared by the app, CLI and MCP). A pasted
+  An API key makes the Flasher mint a one-time, non-ephemeral, 90-day pre-auth
+  key per card right before it writes (`flasher-ops/src/authkey.rs`, shared by
+  the app, CLI and MCP): a Tailscale API access token (`tskey-api-…`), or a
+  Headscale API key (`hskey-api-…`) plus the Headscale user the drone joins as. A pasted
   pre-auth key goes onto the card as is; a spent or expired one leaves a
   fight-mode drone unreachable, since the tailnet is its only way in.
 

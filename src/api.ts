@@ -138,12 +138,12 @@ export function cloudSignOut(): Promise<void> {
   return invoke<void>("cloud_sign_out");
 }
 
-export function headscaleMintKey(
+export function mintAuthKey(
   controlServer: string,
   apiKey: string,
   user: string,
 ): Promise<string> {
-  return invoke<string>("headscale_mint_key", { controlServer, apiKey, user });
+  return invoke<string>("mint_auth_key", { controlServer, apiKey, user });
 }
 
 export function cloudCreateKeyset(label: string): Promise<CloudKeyset> {

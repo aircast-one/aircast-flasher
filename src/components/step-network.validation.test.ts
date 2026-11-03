@@ -7,6 +7,7 @@ import {
   isInvalidWifiPassword,
   isWeakDevicePassword,
   needsControlServer,
+  mintsKeys,
   needsHeadscaleUser,
   networkProblems,
   reusedKeyNotice,
@@ -86,6 +87,13 @@ test("a Headscale API key mints per card and needs the user it joins as", () => 
   assert.equal(needsHeadscaleUser(true, "hskey-api-abc-def", "pilots"), false);
   assert.equal(needsHeadscaleUser(true, "hskey-auth-abc-def", ""), false);
   assert.equal(needsHeadscaleUser(false, "hskey-api-abc-def", ""), false);
+});
+
+test("API keys from either control server mint keys, pre-auth keys don't", () => {
+  assert.equal(mintsKeys(" tskey-api-abc-def"), true);
+  assert.equal(mintsKeys("hskey-api-abc-def"), true);
+  assert.equal(mintsKeys("tskey-auth-abc-def"), false);
+  assert.equal(mintsKeys("hskey-auth-abc-def"), false);
 });
 
 test("lists every network problem, in page order", () => {

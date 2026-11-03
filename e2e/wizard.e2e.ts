@@ -403,6 +403,19 @@ describe("flasher wizard", () => {
     await $("button=Tailscale").click();
   });
 
+  it("mints a key per card from a Tailscale API access token", async () => {
+    await onAccessStep();
+    await openRemoteAccess();
+    await $("button=Tailscale").click();
+    await $("#auth-key").setValue("tskey-api-abc-def");
+    await expect($("#auth-key-help")).toHaveText(
+      expect.stringContaining("its own one-time key"),
+    );
+    await expect($("#headscale-user")).not.toBeDisplayed();
+    await expect(problems()).not.toBeDisplayed();
+    await $("#auth-key").clearValue();
+  });
+
   it("keeps the caret where it is when editing the control server", async () => {
     await onAccessStep();
     await openRemoteAccess();

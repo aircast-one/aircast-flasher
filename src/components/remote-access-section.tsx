@@ -15,6 +15,7 @@ import { Label } from "@/components/ui/label";
 import { Segmented } from "@/components/segmented";
 import {
   isHeadscaleApiKey,
+  mintsKeys,
   reusedKeyNotice,
 } from "@/components/step-network.validation";
 import { useLocalTailscale } from "@/lib/use-local-tailscale";
@@ -131,7 +132,8 @@ export function RemoteAccessSection({
     onSelfHosted(provider === "headscale");
   };
   const reused = reusedKeyNotice(keyWrittenTo, authKey);
-  const minting = selfHosted && isHeadscaleApiKey(authKey);
+  const minting = mintsKeys(authKey);
+  const needsUser = selfHosted && isHeadscaleApiKey(authKey);
 
   return (
     <>
@@ -174,7 +176,9 @@ export function RemoteAccessSection({
       <div className="flex flex-col gap-2">
         <div className="flex items-center justify-between gap-3">
           <Label htmlFor="auth-key">
-            {selfHosted ? "API key or pre-auth key" : "Pre-auth key"}
+            {selfHosted
+              ? "API key or pre-auth key"
+              : "API token or pre-auth key"}
           </Label>
           {selfHosted ? null : <KeyLinks />}
         </div>
@@ -184,7 +188,9 @@ export function RemoteAccessSection({
           value={authKey}
           onChange={(e) => onAuthKey(e.currentTarget.value)}
           placeholder={
-            selfHosted ? "hskey-api-… or hskey-auth-…" : "tskey-auth-…"
+            selfHosted
+              ? "hskey-api-… or hskey-auth-…"
+              : "tskey-api-… or tskey-auth-…"
           }
           autoCapitalize="none"
           autoCorrect="off"
@@ -206,12 +212,12 @@ export function RemoteAccessSection({
             ? "Each card gets its own one-time key, valid for 90 days."
             : selfHosted
               ? "Paste an API key and each card gets its own one-time key. Make one on your server with:"
-              : "Use a new key for each card, still valid when the drone first boots. Not ephemeral — an ephemeral drone leaves the tailnet once it's switched off."}
+              : "Paste an API access token and each card gets its own one-time key. A pasted pre-auth key must be new, unexpired at first boot, and not ephemeral."}
         </p>
         {selfHosted && !minting ? <HeadscaleCommand /> : null}
       </div>
 
-      {minting ? (
+      {needsUser ? (
         <div className="flex flex-col gap-2">
           <Label htmlFor="headscale-user">Headscale user</Label>
           <Input

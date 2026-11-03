@@ -92,6 +92,7 @@ the disk always comes from what the computer reports — never from a guess.
 | SSH off | `--no-ssh` | `ssh: {mode: "off"}` |
 | Tailscale | `AIRCAST_TAILSCALE_KEY` env | `tailscale: {authKey}` |
 | Headscale | `AIRCAST_TAILSCALE_KEY` + `--control-server https://hs.example.com` | `tailscale: {authKey, controlServer}` |
+| Tailscale, fresh key per card | `AIRCAST_TAILSCALE_KEY=tskey-api-…` | `tailscale: {authKey: "tskey-api-…"}` |
 | Headscale, fresh key per card | `AIRCAST_TAILSCALE_KEY=hskey-api-…` + `--control-server URL` + `--headscale-user NAME` | `tailscale: {authKey: "hskey-api-…", controlServer, user}` |
 | Disk encryption | `--tang http://10.0.0.5:7500` (repeatable), `--threshold N`, `--cloud-unlock`, `--recovery-file PATH` | `encryption: {tangServers, threshold, cloudUnlock, recoveryFile}` |
 | Fight mode | `--fight` | `fightMode: true` |
@@ -110,8 +111,8 @@ Defaults worth knowing:
   network, so when the person names a WiFi network without its password, ask
   for it — only leave it empty when they say the network is open.
 
-Prefer a Headscale API key over a pasted pre-auth key: the Flasher mints a
-one-time, 90-day key for each card, so a card booted days later still joins. A
+Prefer an API key (Tailscale API access token or Headscale API key) over a
+pasted pre-auth key: the Flasher mints a one-time, 90-day key for each card, so a card booted days later still joins. A
 pasted one-time or 1-hour key that is spent or expired by first boot leaves a
 fight-mode drone unreachable — it joins WiFi but can never reach the tailnet.
 

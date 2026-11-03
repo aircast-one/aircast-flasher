@@ -103,7 +103,7 @@ pub struct SshRequest {
 #[serde(rename_all = "camelCase")]
 pub struct TailnetRequest {
     #[schemars(
-        description = "Pre-auth key (tskey-auth-… or hskey-auth-…), or a Headscale API key (hskey-api-…) to mint a fresh one-time key for this card."
+        description = "Pre-auth key (tskey-auth-… or hskey-auth-…), or an API key (tskey-api-… for Tailscale, hskey-api-… for Headscale) to mint a fresh one-time key for this card."
     )]
     pub auth_key: String,
     #[schemars(description = "Headscale control server URL. Leave out for Tailscale.")]
@@ -219,11 +219,11 @@ pub fn problems(request: &FlashRequest, detected_keys: usize) -> Vec<String> {
             .filter(|url| !(url.starts_with("http://") || url.starts_with("https://")))
             .map(|_| "The control server must be an http(s):// URL".to_string()),
         tailnet
-            .filter(|t| flasher_ops::headscale::is_api_key(&t.auth_key))
+            .filter(|t| flasher_ops::authkey::is_headscale_api_key(&t.auth_key))
             .filter(|t| t.control_server.is_none())
             .map(|_| "A Headscale API key needs the Headscale control server URL".to_string()),
         tailnet
-            .filter(|t| flasher_ops::headscale::is_api_key(&t.auth_key))
+            .filter(|t| flasher_ops::authkey::is_headscale_api_key(&t.auth_key))
             .filter(|t| t.user.as_deref().unwrap_or("").trim().is_empty())
             .map(|_| "A Headscale API key needs the user the drone joins as".to_string()),
         (request.fight_mode && tailnet.is_none()).then(|| {
@@ -534,17 +534,12 @@ async fn tailscale(request: Option<&TailnetRequest>) -> Result<Option<TailscaleC
         return Ok(None);
     };
     let control_server = request.control_server.clone().unwrap_or_default();
-    let key = request.auth_key.trim();
-    let auth_key = if flasher_ops::headscale::is_api_key(key) {
-        flasher_ops::headscale::mint_key(
-            &control_server,
-            key,
-            request.user.as_deref().unwrap_or(""),
-        )
-        .await?
-    } else {
-        key.to_string()
-    };
+    let auth_key = flasher_ops::authkey::resolve(
+        &control_server,
+        &request.auth_key,
+        request.user.as_deref().unwrap_or(""),
+    )
+    .await?;
     Ok(Some(TailscaleConfig {
         control_server,
         auth_key,

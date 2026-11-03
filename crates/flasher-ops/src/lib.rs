@@ -3,7 +3,7 @@ pub mod cloud;
 pub mod devices;
 pub mod download;
 pub mod flash;
-pub mod headscale;
+pub mod authkey;
 pub mod helper;
 #[cfg(target_os = "macos")]
 mod macos_auth;

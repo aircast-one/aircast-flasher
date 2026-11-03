@@ -31,6 +31,9 @@ export function joinsTailnet(authKey: string, controlServer: string): boolean {
 export const isHeadscaleApiKey = (authKey: string): boolean =>
   authKey.trim().startsWith("hskey-api-");
 
+export const mintsKeys = (authKey: string): boolean =>
+  /^(hskey|tskey)-api-/.test(authKey.trim());
+
 export const needsHeadscaleUser = (
   selfHosted: boolean,
   authKey: string,

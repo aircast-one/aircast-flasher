@@ -117,7 +117,7 @@ struct FlashArgs {
         long,
         env = "AIRCAST_TAILSCALE_KEY",
         hide_env_values = true,
-        help = "Tailnet pre-auth key, or a Headscale API key (hskey-api-…) to mint a one-time key for this card"
+        help = "Tailnet pre-auth key, or an API key (tskey-api-… or hskey-api-…) to mint a one-time key for this card"
     )]
     tailscale_key: Option<String>,
     #[arg(

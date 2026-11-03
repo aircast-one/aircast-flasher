@@ -4,7 +4,7 @@ import {
   cancelFlash,
   cloudCheckSignIn,
   cloudCreateKeyset,
-  headscaleMintKey,
+  mintAuthKey,
   detectSshKeys,
   downloadImage,
   fetchTangAdv,
@@ -51,7 +51,7 @@ import { cardLabel, withCloudServer } from "@/components/cloud";
 import {
   MIN_FIGHT_PASSWORD,
   fightModeUnreachable,
-  isHeadscaleApiKey,
+  mintsKeys,
   needsHeadscaleUser,
   defaultSshMode,
   isWeakDevicePassword,
@@ -420,10 +420,10 @@ function App() {
             )
           : vars.encryption;
       const tailscale =
-        vars.tailscale !== null && isHeadscaleApiKey(vars.tailscale.authKey)
+        vars.tailscale !== null && mintsKeys(vars.tailscale.authKey)
           ? {
               ...vars.tailscale,
-              authKey: await headscaleMintKey(
+              authKey: await mintAuthKey(
                 vars.tailscale.controlServer,
                 vars.tailscale.authKey,
                 vars.headscaleUser,
@@ -452,7 +452,7 @@ function App() {
       const remembered =
         written === "" || settings.flashedHostnames.includes(written);
       update({
-        ...(vars.tailscale === null || isHeadscaleApiKey(vars.tailscale.authKey)
+        ...(vars.tailscale === null || mintsKeys(vars.tailscale.authKey)
           ? {}
           : {
               authKeyWrittenTo: {
