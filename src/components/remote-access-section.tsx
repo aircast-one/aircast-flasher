@@ -87,12 +87,21 @@ function KeyLinks() {
           void openUrl(KEYS_URL);
         }}
       >
-        Get a key
+        Get a token
         <ExternalLink />
       </Button>
     </div>
   );
 }
+
+const keyHelp = (selfHosted: boolean, minting: boolean): string =>
+  selfHosted
+    ? minting
+      ? "Each card gets its own one-time key, valid for 90 days."
+      : "Paste an API key and each card gets its own one-time key. Make one on your server with:"
+    : minting
+      ? "Each card gets its own one-time key, valid for 90 days. The token itself lasts at most 90 days — when Tailscale refuses it, generate a new one."
+      : "Paste an API access token and each card gets its own one-time key: Get a token opens Tailscale's Keys page, then choose Generate access token. Tokens last at most 90 days. A pasted pre-auth key must still be valid when the drone first boots, and not ephemeral.";
 
 type Provider = "tailscale" | "headscale";
 
@@ -208,11 +217,7 @@ export function RemoteAccessSection({
           </div>
         )}
         <p id="auth-key-help" className="text-sm text-muted-foreground">
-          {minting
-            ? "Each card gets its own one-time key, valid for 90 days."
-            : selfHosted
-              ? "Paste an API key and each card gets its own one-time key. Make one on your server with:"
-              : "Paste an API access token and each card gets its own one-time key. A pasted pre-auth key must be new, unexpired at first boot, and not ephemeral."}
+          {keyHelp(selfHosted, minting)}
         </p>
         {selfHosted && !minting ? <HeadscaleCommand /> : null}
       </div>

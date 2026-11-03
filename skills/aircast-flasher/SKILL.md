@@ -111,8 +111,11 @@ Defaults worth knowing:
   network, so when the person names a WiFi network without its password, ask
   for it — only leave it empty when they say the network is open.
 
-Prefer an API key (Tailscale API access token or Headscale API key) over a
-pasted pre-auth key: the Flasher mints a one-time, 90-day key for each card, so a card booted days later still joins. A
+Prefer an API key over a pasted pre-auth key. A Tailscale API access token
+comes from https://login.tailscale.com/admin/settings/keys → "Generate access
+token" and lasts at most 90 days; a Headscale API key from
+`headscale apikeys create --expiration 365d`. The Flasher mints a one-time,
+90-day key for each card, so a card booted days later still joins. A
 pasted one-time or 1-hour key that is spent or expired by first boot leaves a
 fight-mode drone unreachable — it joins WiFi but can never reach the tailnet.
 

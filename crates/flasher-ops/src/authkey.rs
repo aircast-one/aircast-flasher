@@ -44,7 +44,7 @@ async fn call<T: DeserializeOwned>(
     service: &str,
     request: RequestBuilder,
     api_key: &str,
-    renew: &str,
+    refused: &str,
 ) -> Result<T, String> {
     let response = request
         .bearer_auth(api_key.trim())
@@ -53,9 +53,7 @@ async fn call<T: DeserializeOwned>(
         .await
         .map_err(|e| format!("Couldn't reach {service}: {e}"))?;
     match response.status() {
-        StatusCode::UNAUTHORIZED => Err(format!(
-            "{service} refused the API key — it may have expired. {renew}"
-        )),
+        StatusCode::UNAUTHORIZED => Err(refused.to_string()),
         status if !status.is_success() => Err(format!(
             "{service} answered {status}: {}",
             response.text().await.unwrap_or_default()
@@ -89,14 +87,14 @@ fn tailscale_request() -> serde_json::Value {
 }
 
 async fn mint_headscale(control_server: &str, api_key: &str, user: &str) -> Result<String, String> {
-    const RENEW: &str = "Make a new one with `headscale apikeys create --expiration 365d`.";
+    const REFUSED: &str = "Headscale refused the API key — it may have expired. Make a new one with `headscale apikeys create --expiration 365d`.";
     let base = control_server.trim().trim_end_matches('/');
     let user = user.trim();
     let users: Users = call(
         "Headscale",
         crate::http().get(format!("{base}/api/v1/user")),
         api_key,
-        RENEW,
+        REFUSED,
     )
     .await?;
     let id = users
@@ -111,7 +109,7 @@ async fn mint_headscale(control_server: &str, api_key: &str, user: &str) -> Resu
             .post(format!("{base}/api/v1/preauthkey"))
             .json(&headscale_request(&id, chrono::Utc::now())),
         api_key,
-        RENEW,
+        REFUSED,
     )
     .await?;
     Ok(created.pre_auth_key.key)
@@ -124,7 +122,7 @@ async fn mint_tailscale(api_key: &str) -> Result<String, String> {
             .post(TAILSCALE_KEYS_URL)
             .json(&tailscale_request()),
         api_key,
-        "Make a new one at https://login.tailscale.com/admin/settings/keys.",
+        "Tailscale refused the API access token — tokens last at most 90 days. Generate a new one at https://login.tailscale.com/admin/settings/keys (Generate access token).",
     )
     .await?;
     Ok(created.key)
