@@ -178,6 +178,10 @@ pub async fn mark_lost(session_token: &str, id: &str) -> Result<(), String> {
     authed(session_token, request).await.map(|_| ())
 }
 
+pub fn tang_prefix() -> String {
+    format!("{}/v1/tang/", api_base())
+}
+
 pub fn card_label(hostname: &str) -> String {
     match hostname.trim() {
         "" => "unnamed card".to_string(),

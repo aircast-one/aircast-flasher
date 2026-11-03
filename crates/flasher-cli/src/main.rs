@@ -211,7 +211,10 @@ enum CloudCommand {
 
 impl FlashArgs {
     fn request(&self) -> FlashRequest {
-        let encrypting = !self.tang.is_empty() || self.cloud_unlock || self.recovery_file.is_some();
+        let encrypting = !self.tang.is_empty()
+            || self.cloud_unlock
+            || self.recovery_file.is_some()
+            || self.threshold.is_some();
         FlashRequest {
             disk: self.disk.clone(),
             image: self.image.clone(),
@@ -258,6 +261,7 @@ impl FlashArgs {
                 backup: backup.clone(),
                 same_drone: self.same_drone,
             }),
+            rejoins_tailnet: false,
         }
     }
 }
@@ -344,7 +348,10 @@ fn cancel_on_ctrl_c() -> Arc<AtomicBool> {
 }
 
 async fn flash(args: &FlashArgs, json: bool) -> Result<(), String> {
-    let request = args.request();
+    let (request, from_backup) = request::apply_backup(args.request());
+    from_backup
+        .iter()
+        .for_each(|line| eprintln!("From the backup: {line}"));
     let problems = request::problems(&request, flasher_ops::sshkeys::detect_ssh_keys().len());
     if !problems.is_empty() {
         return Err(format!(
@@ -407,7 +414,10 @@ async fn flash(args: &FlashArgs, json: bool) -> Result<(), String> {
     };
     let outcome = request::run(&request, request::Prepared { card, image }, cancel, events).await;
     bar.finish_and_clear();
-    let outcome = outcome?;
+    let outcome = request::FlashOutcome {
+        from_backup,
+        ..outcome?
+    };
 
     match json {
         true => print_json(&outcome),
@@ -485,6 +495,15 @@ async fn cloud(command: &CloudCommand, json: bool) -> Result<(), String> {
     }
 }
 
+fn age_text(age: Option<std::time::Duration>) -> String {
+    match age.map(|age| age.as_secs() / 60) {
+        None => "age unknown".to_string(),
+        Some(minutes) if minutes < 60 => format!("{minutes} min ago"),
+        Some(minutes) if minutes < 48 * 60 => format!("{} h ago", minutes / 60),
+        Some(minutes) => format!("{} d ago", minutes / (24 * 60)),
+    }
+}
+
 fn backups(command: &BackupsCommand, json: bool) -> Result<(), String> {
     let dir = flasher_ops::paths::backup_dir()?;
     match command {
@@ -495,11 +514,25 @@ fn backups(command: &BackupsCommand, json: bool) -> Result<(), String> {
                 (false, true) => {
                     tell("No backups yet — take one with `device backup <target>`.".to_string())
                 }
-                (false, false) => say(backups
-                    .iter()
-                    .map(|b| format!("{:32} {:20} {}", b.id, b.hostname, b.created))
-                    .collect::<Vec<_>>()
-                    .join("\n")),
+                (false, false) => {
+                    let now = std::time::SystemTime::now();
+                    say(backups
+                        .iter()
+                        .map(|b| {
+                            format!(
+                                "{:32} {:20} {:12} {}",
+                                b.id,
+                                b.hostname,
+                                age_text(flasher_ops::backup::age(b, now)),
+                                match b.card {
+                                    Some(_) => "card settings",
+                                    None => "no card settings",
+                                }
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n"))
+                }
             }
         }
         BackupsCommand::Delete { id } => {
@@ -667,5 +700,19 @@ async fn main() -> ExitCode {
             eprintln!("error: {e}");
             ExitCode::FAILURE
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::age_text;
+    use std::time::Duration;
+
+    #[test]
+    fn a_backup_age_reads_in_the_largest_whole_unit() {
+        assert_eq!(age_text(None), "age unknown");
+        assert_eq!(age_text(Some(Duration::from_secs(59 * 60))), "59 min ago");
+        assert_eq!(age_text(Some(Duration::from_secs(3 * 3600))), "3 h ago");
+        assert_eq!(age_text(Some(Duration::from_secs(72 * 3600))), "3 d ago");
     }
 }

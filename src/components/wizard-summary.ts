@@ -1,6 +1,7 @@
 import type { Backup, KeyWrite, SshMode, SshPublicKey } from "@/types";
 import { backupLabel } from "@/lib/format";
 import { STEP, type WizardStep } from "@/components/wizard-types";
+import type { BackupMarks } from "@/components/restore-card";
 import {
   isValidControlServer,
   joinsTailnet,
@@ -12,6 +13,7 @@ export interface SummaryItem {
   label: string;
   value: string;
   warn?: boolean;
+  fromBackup?: boolean;
   step: WizardStep;
 }
 
@@ -31,6 +33,8 @@ export interface SummaryInput {
   encryption: { tang: boolean; cloud: boolean } | null;
   fightMode: boolean;
   restore: { backup: Backup | null; sameDrone: boolean | null } | null;
+  rejoins: string | null;
+  marks: BackupMarks;
 }
 
 const IMAGE_DEFAULT_LOGIN = "Image default (pi / raspberry)";
@@ -39,9 +43,13 @@ function remoteAccess(
   authKey: string,
   controlServer: string,
   keyWrittenTo: KeyWrite | null,
+  rejoins: string | null,
+  fromBackup: boolean,
 ): SummaryItem {
-  const row = { label: "Remote access", step: STEP.access };
+  const row = { label: "Remote access", step: STEP.access, fromBackup };
   const server = controlServer.trim();
+  if (rejoins !== null)
+    return { ...row, value: `Rejoins your tailnet as ${rejoins} · no key needed` };
   if (authKey.trim() === "") return { ...row, value: "Off" };
   if (!isValidControlServer(server))
     return { ...row, value: "Off — control server isn't a URL", warn: true };
@@ -102,8 +110,11 @@ function wifi(
       : { ...row, value: ssid };
 }
 
-function encryption(e: SummaryInput["encryption"]): SummaryItem {
-  const row = { label: "Disk encryption", step: STEP.access };
+function encryption(
+  e: SummaryInput["encryption"],
+  fromBackup: boolean,
+): SummaryItem {
+  const row = { label: "Disk encryption", step: STEP.access, fromBackup };
   if (e === null) return { ...row, value: "Off" };
   if (e.tang && e.cloud)
     return { ...row, value: "LUKS2 · your key server + Aircast Cloud" };
@@ -113,9 +124,14 @@ function encryption(e: SummaryInput["encryption"]): SummaryItem {
 }
 
 function fight(input: SummaryInput): SummaryItem {
-  const row = { label: "Fight mode", step: STEP.access };
+  const row = {
+    label: "Fight mode",
+    step: STEP.access,
+    fromBackup: input.marks.fight,
+  };
   if (!input.fightMode) return { ...row, value: "Off" };
-  return joinsTailnet(input.authKey, input.controlServer)
+  return input.rejoins !== null ||
+    joinsTailnet(input.authKey, input.controlServer)
     ? { ...row, value: "On · no logs, tailnet only" }
     : { ...row, value: "On · needs remote access", warn: true };
 }
@@ -153,14 +169,21 @@ export function buildSummary(input: SummaryInput): SummaryItem[] {
       step: STEP.network,
     },
     wifi(input.noWifi, input.ssid.trim(), input.wifilessBoard),
-    remoteAccess(input.authKey, input.controlServer, input.keyWrittenTo),
+    remoteAccess(
+      input.authKey,
+      input.controlServer,
+      input.keyWrittenTo,
+      input.rejoins,
+      input.marks.remote,
+    ),
     {
       label: "Device access",
       value: access,
       warn: access === IMAGE_DEFAULT_LOGIN,
+      fromBackup: input.marks.ssh,
       step: STEP.access,
     },
-    encryption(input.encryption),
+    encryption(input.encryption, input.marks.encryption),
     fight(input),
     restore(input.restore),
   ];

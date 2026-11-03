@@ -36,6 +36,7 @@ import type {
 
 const DOWNLOAD_PROGRESS_EVENT = "flasher:download-progress";
 const FLASH_PROGRESS_EVENT = "flasher:flash-progress";
+const BACKUPS_CHANGED_EVENT = "flasher:backups-changed";
 
 export function listReleases(
   board: string | null,
@@ -268,6 +269,10 @@ export function onFlashProgress(
   return listen<FlashProgress>(FLASH_PROGRESS_EVENT, (event) =>
     handler(event.payload),
   );
+}
+
+export function onBackupsChanged(handler: () => void): Promise<UnlistenFn> {
+  return listen(BACKUPS_CHANGED_EVENT, handler);
 }
 
 export async function checkForUpdate(): Promise<Update | null> {

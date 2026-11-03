@@ -13,7 +13,11 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { track } from "@/api";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { DeviceFinder } from "@/components/device-finder";
+import {
+  DeviceFinder,
+  missingAfterMinutes,
+  type RestoredCard,
+} from "@/components/device-finder";
 
 const QGC_DOWNLOAD_URL = "https://aircast.one/docs/software/qgroundcontrol";
 import { Progress } from "@/components/ui/progress";
@@ -209,15 +213,17 @@ function NotShowingUp({
   board,
   usb,
   noWifi,
+  minutes,
 }: {
   board: Board;
   usb: boolean;
   noWifi: boolean;
+  minutes: number;
 }) {
   return (
     <div className="w-full text-left text-sm text-muted-foreground">
       <h3 className="mb-1 font-medium text-foreground">
-        Not showing up after 10 minutes?
+        Not showing up after {minutes} minutes?
       </h3>
       <ul className="list-disc space-y-1 pl-5">
         {!board.builtinWifi && !noWifi ? (
@@ -253,6 +259,7 @@ export function JobView({
   noWifi,
   remoteEnrolled,
   fightMode,
+  restore,
   encryption,
   success,
   cancelled,
@@ -272,6 +279,7 @@ export function JobView({
   noWifi: boolean;
   remoteEnrolled: boolean;
   fightMode: boolean;
+  restore: RestoredCard | null;
   encryption: EncryptionConfig | null;
   success: boolean;
   cancelled: boolean;
@@ -306,8 +314,9 @@ export function JobView({
                 : "Put the card in the device and power it on."}
             </li>
             <li>
-              Wait a few minutes. It restarts once on its own — don't unplug
-              it.
+              {restore === null
+                ? "Wait a few minutes. It restarts once on its own — don't unplug it."
+                : `Wait a few minutes. It restarts twice on its own, the second time to restore ${restore.host}'s settings — don't unplug it.`}
             </li>
             <li>
               {fightMode
@@ -325,8 +334,16 @@ export function JobView({
           hostname={hostname}
           remoteEnrolled={remoteEnrolled}
           fightMode={fightMode}
+          restore={restore}
         />
-        {board ? <NotShowingUp board={board} usb={usb} noWifi={noWifi} /> : null}
+        {board ? (
+          <NotShowingUp
+            board={board}
+            usb={usb}
+            noWifi={noWifi}
+            minutes={missingAfterMinutes(restore)}
+          />
+        ) : null}
         <div className="flex w-full items-center justify-between gap-3 rounded-xl border border-border px-4 py-3 text-left">
           <div className="flex min-w-0 flex-col gap-0.5">
             <span className="text-sm font-medium">

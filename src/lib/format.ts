@@ -24,6 +24,23 @@ export function formatDateTime(iso: string): string {
       });
 }
 
+const RELATIVE = new Intl.RelativeTimeFormat("en", { numeric: "always" });
+const AGE_UNITS = [
+  ["day", 86_400_000],
+  ["hour", 3_600_000],
+  ["minute", 60_000],
+] as const;
+
+export function timeAgo(iso: string, now: number): string {
+  const elapsed = now - Date.parse(iso);
+  const unit = AGE_UNITS.find(([, ms]) => elapsed >= ms);
+  return Number.isNaN(elapsed)
+    ? iso
+    : unit === undefined
+      ? "just now"
+      : RELATIVE.format(-Math.floor(elapsed / unit[1]), unit[0]);
+}
+
 export const backupLabel = (backup: { hostname: string; created: string }) =>
   `${backup.hostname} · ${formatDateTime(backup.created)}`;
 

@@ -110,18 +110,45 @@ list_releases ─► download_image ─► flash_image ─► provision_device
   (0600), in `<data dir>/one.aircast.flasher/backups/<host>-<created>.json` —
   it carries WiFi passwords, cloud tokens and the tailnet node key, so it never
   goes into `settings.json`, the event log or telemetry. Its `files` are opaque
-  to the Flasher; only `format` is read, and anything but `1` is refused.
-  **Devices** lists the saved backups (hostname, date) and deletes them.
-- **Restore** — the Network step's **Restore settings from a backup** picks a
-  saved backup and asks **Same drone** (a reflash: it comes back as the same
-  aircraft, and the hostname is prefilled from the backup) or **New drone**
-  (the setup is copied, the identity is not). The card gets
+  to the Flasher; it reads `format` (anything but `1` is refused) and the
+  optional `card` — what the backup records about the card itself, which
+  `files` can't restore because the Flasher writes it: fight mode, SSH password
+  login, the encryption key servers and threshold, the control server, and
+  whether the bundle holds the tailnet node key. Key servers under the Aircast
+  Cloud Tang endpoint (`<api>/v1/tang/`) are reported as Cloud unlock, the rest
+  as self-hosted. A backup from an older aircastd has no `card`, and that is
+  shown rather than guessed. **Devices** lists the saved backups and deletes
+  them, and each drone row says how long ago it was last backed up.
+- **Automatic backups** — while the app is open, a Rust task looks every ten
+  minutes for the drones **Devices** would list (online Linux peers answering
+  `/healthz`) and backs up each one whose newest backup is over 24 hours old.
+  It is not tied to a view, so the wizard never waits on it; drones that 404
+  or don't answer are skipped silently, and a drone is never backed up twice
+  at once — the same guard covers the **Back up settings** button. Every save,
+  manual or automatic, keeps the newest 5 backups per hostname and deletes the
+  rest.
+- **Restore** — **Restore settings from a backup** sits at the top of the
+  Network step, since it decides the hostname; **Restore onto a card** on a
+  saved backup in **Devices** opens it with that backup chosen. It asks
+  **Same drone** (a reflash: it comes back as the same aircraft, and the
+  hostname is prefilled from the backup) or **New drone** (the setup is
+  copied, the identity is not); when the backup's drone is online on the
+  tailnet right now, Same drone warns that it is only for replacing its card.
+  A backup's `card` presets the Access step — fight mode, password login,
+  disk encryption with its key servers (encryption on and the servers left to
+  you when the backup couldn't read them), the control server — and those
+  rows say *from backup* in Access and in the Storage summary until changed.
+  For the same drone with its tailnet node in the backup, remote access is
+  *restored*: it rejoins the tailnet as the same node, so no key is asked for
+  or written, and fight mode doesn't need one. The card gets
   `aircast-restore.json` on the boot partition — the bundle plus
   `"sameDrone": true|false` — through the same customize path as every other
   boot marker, so the elevated helper and USB writes carry it too. aircastd
-  consumes it on first boot, deletes it and restarts once; what a new drone
-  drops is aircastd's call. The bundle is read from disk by the Rust side at
-  write time, so it never passes through the webview.
+  consumes it on first boot, deletes it and restarts once, so the Write page
+  says so and gives a restore card 15 minutes rather than 10 before calling it
+  missing; what a new drone drops is aircastd's call. The bundle is read from
+  disk by the Rust side at write time, so it never passes through the
+  webview.
 
 - **Headscale** — `status --json` does not carry the control server, so
   `tailscale debug prefs` supplies `ControlURL`. Anything that is not
@@ -198,7 +225,7 @@ Or build it from this repo: `just cli` → `target/release/aircast-flasher-cli`.
 | `device status <target>` | Whether a device is on a tailnet, and its name |
 | `device login <target> [--control-server URL]` | Start Tailscale sign-in on a device, print the approval URL |
 | `device backup <target>` | Save a device's settings on this computer (works over the tailnet, fight mode too) |
-| `backups list` / `backups delete <id>` | Saved backups, newest first / remove one |
+| `backups list` / `backups delete <id>` | Saved backups, newest first, with their age and whether they record the card's settings / remove one |
 | `cloud login` / `logout` / `whoami` | Aircast Cloud session (browser sign-in, kept on this computer) |
 | `cloud cards` | Cards that unlock through Aircast Cloud |
 | `cloud lost <id> --yes` | Mark a card lost — it never unlocks again |
@@ -218,11 +245,11 @@ Every command takes `--json`.
 | `--ssh-key KEY_OR_FILE` | Key-only SSH (default: your only key in `~/.ssh`, else the image login) |
 | `--no-ssh` | SSH off |
 | `--control-server URL` | Headscale instead of Tailscale |
-| `--tang URL` (repeatable), `--threshold N` | Disk encryption with Tang key servers |
+| `--tang URL` (repeatable), `--threshold N` | Disk encryption with Tang key servers (either turns encryption on) |
 | `--cloud-unlock` | Also unlock through Aircast Cloud (needs `cloud login`) |
 | `--recovery-file PATH` | Where the recovery key is saved; must not exist yet |
 | `--fight` | Fight mode: no logs on the drone, tailnet-only |
-| `--restore ID` + `--same-drone` or `--new-drone` | Put a saved backup on the card. Same drone: it comes back as the same aircraft, hostname defaults to the backup's. New drone: copy the setup, new identity |
+| `--restore ID` + `--same-drone` or `--new-drone` | Put a saved backup on the card. Same drone: it comes back as the same aircraft, hostname defaults to the backup's. New drone: copy the setup, new identity. The backup's fight mode, password login, encryption servers and control server apply unless given here, and each one taken is printed as `From the backup: …` |
 | `--yes` | Erase without the prompt |
 
 Fight mode and disk encryption need Aircast OS v0.3.6 or newer; with an older

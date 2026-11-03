@@ -1,4 +1,4 @@
-import { ArchiveRestore, CopyPlus, RotateCcw } from "lucide-react";
+import { ArchiveRestore, CopyPlus, RotateCcw, TriangleAlert } from "lucide-react";
 
 import { SettingCard } from "@/components/setting-card";
 import { SelectableCard } from "@/components/selectable-card";
@@ -11,6 +11,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { backupLabel } from "@/lib/format";
+import { useLocalTailscale } from "@/lib/use-local-tailscale";
+import { onlineNow } from "@/components/restore-card";
 import type { RestoreDraft } from "@/components/wizard-types";
 import type { Backup } from "@/types";
 
@@ -37,10 +39,13 @@ export function RestoreSection({
   restore: RestoreDraft | null;
   onRestore: (next: RestoreDraft | null) => void;
 }) {
+  const peers = useLocalTailscale()?.peers ?? [];
   const labelOf = (id: string) => {
     const backup = backups.find((b) => b.id === id);
     return backup ? backupLabel(backup) : "Pick a backup";
   };
+  const chosen = backups.find((b) => b.id === restore?.backup) ?? null;
+  const online = chosen !== null && onlineNow(chosen.hostname, peers);
 
   return (
     <SettingCard
@@ -82,6 +87,13 @@ export function RestoreSection({
             </SelectContent>
           </Select>
 
+          {chosen !== null && chosen.card === null ? (
+            <p id="restore-no-card" className="text-sm text-muted-foreground">
+              This backup doesn't record fight mode, encryption or remote
+              access — check Access yourself.
+            </p>
+          ) : null}
+
           <div
             role="group"
             aria-label="Which drone this card is for"
@@ -97,6 +109,16 @@ export function RestoreSection({
                 Reflashing this aircraft. It comes back as the same drone, under
                 the backup's name.
               </span>
+              {online ? (
+                <span
+                  id="restore-online"
+                  className="mt-1 flex items-start gap-1.5 text-sm text-amber-600 dark:text-amber-400"
+                >
+                  <TriangleAlert className="mt-0.5 size-4 shrink-0" />
+                  {chosen.hostname} is online right now. Only choose this if
+                  you're replacing its card.
+                </span>
+              ) : null}
             </SelectableCard>
             <SelectableCard
               icon={<CopyPlus />}

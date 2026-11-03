@@ -197,10 +197,25 @@ export interface SshPublicKey {
   contents: string;
 }
 
+export interface CardEncryption {
+  threshold: number;
+  tangUrls: string[];
+  cloud: boolean;
+}
+
+export interface BackupCard {
+  fightMode: boolean;
+  passwordLogin: boolean;
+  encryption: CardEncryption | null;
+  controlServer: string;
+  tailnetNode: boolean;
+}
+
 export interface Backup {
   id: string;
   hostname: string;
   created: string;
+  card: BackupCard | null;
 }
 
 export interface RestoreChoice {

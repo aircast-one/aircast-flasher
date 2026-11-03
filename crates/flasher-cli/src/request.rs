@@ -52,9 +52,12 @@ pub struct FlashRequest {
     )]
     pub fight_mode: bool,
     #[schemars(
-        description = "Put a saved backup (an id from list_backups) on the card; the drone restores it on first boot and restarts once."
+        description = "Put a saved backup (an id from list_backups) on the card; the drone restores it on first boot and restarts once. The fight mode, SSH password login, disk encryption and control server the backup records apply unless set here; for the same drone, a backup holding its tailnet node rejoins without a key."
     )]
     pub restore: Option<RestoreRequest>,
+    #[serde(skip)]
+    #[schemars(skip)]
+    pub rejoins_tailnet: bool,
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
@@ -141,6 +144,7 @@ pub struct FlashOutcome {
     pub address: Option<String>,
     pub ssh: String,
     pub recovery_file: Option<String>,
+    pub from_backup: Vec<String>,
 }
 
 const HOSTNAME_RULE: &str = "Use only lowercase letters, numbers and hyphens in the hostname";
@@ -226,7 +230,7 @@ pub fn problems(request: &FlashRequest, detected_keys: usize) -> Vec<String> {
             .filter(|t| flasher_ops::authkey::is_headscale_api_key(&t.auth_key))
             .filter(|t| t.user.as_deref().unwrap_or("").trim().is_empty())
             .map(|_| "A Headscale API key needs the user the drone joins as".to_string()),
-        (request.fight_mode && tailnet.is_none()).then(|| {
+        (request.fight_mode && tailnet.is_none() && !request.rejoins_tailnet).then(|| {
             "Fight mode needs a tailnet pre-auth key — the tailnet is the only way in".to_string()
         }),
         (request.fight_mode && request.ssh.is_none() && detected_keys != 1).then(|| {
@@ -552,6 +556,126 @@ fn restore_file(restore: &RestoreRequest) -> Result<String, String> {
     })
 }
 
+fn backup_of(restore: &RestoreRequest) -> Option<flasher_ops::backup::Backup> {
+    let dir = flasher_ops::paths::backup_dir().ok()?;
+    flasher_ops::backup::get(&dir, &restore.backup).ok()
+}
+
+pub fn apply_backup(request: FlashRequest) -> (FlashRequest, Vec<String>) {
+    match request.restore.as_ref().and_then(backup_of) {
+        Some(flasher_ops::backup::Backup {
+            card: Some(card),
+            hostname,
+            ..
+        }) => with_card(request, &card, &hostname),
+        Some(_) => (
+            request,
+            vec!["nothing — it doesn't record fight mode, encryption or remote access; set them yourself".to_string()],
+        ),
+        None => (request, Vec::new()),
+    }
+}
+
+fn describe_encryption(e: &flasher_ops::backup::CardEncryption) -> String {
+    let servers: Vec<String> = e
+        .tang_urls
+        .iter()
+        .cloned()
+        .chain(e.cloud.then(|| "Aircast Cloud".to_string()))
+        .collect();
+    match e.servers_known() {
+        true => format!(
+            "disk encryption, {} of {} key servers: {}",
+            e.threshold,
+            servers.len(),
+            servers.join(", ")
+        ),
+        false => {
+            "disk encryption — its key servers weren't recorded; add a Tang server or Cloud unlock"
+                .to_string()
+        }
+    }
+}
+
+fn with_card(
+    request: FlashRequest,
+    card: &flasher_ops::backup::Card,
+    host: &str,
+) -> (FlashRequest, Vec<String>) {
+    let rejoins = card.tailnet_node && request.restore.as_ref().is_some_and(|r| r.same_drone);
+    let fight = card.fight_mode && !request.fight_mode;
+    let password = card.password_login && request.ssh.is_none();
+    let encryption = card.encryption.as_ref().filter(|_| {
+        request
+            .encryption
+            .as_ref()
+            .is_none_or(|e| e.tang_servers.is_empty() && !e.cloud_unlock)
+    });
+    let control_server = Some(card.control_server.clone())
+        .filter(|server| !rejoins && !server.is_empty())
+        .filter(|_| {
+            request
+                .tailscale
+                .as_ref()
+                .is_some_and(|t| t.control_server.is_none())
+        });
+
+    let taken = [
+        rejoins.then(|| {
+            format!("remote access — {host} rejoins the tailnet as the same node, no key written")
+        }),
+        fight.then(|| "fight mode".to_string()),
+        password.then(|| {
+            "SSH password login — set a device password, an SSH key or SSH off".to_string()
+        }),
+        encryption.map(describe_encryption),
+        control_server
+            .as_ref()
+            .map(|server| format!("control server {server}")),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+
+    let resolved = FlashRequest {
+        fight_mode: request.fight_mode || card.fight_mode,
+        ssh: match password {
+            true => Some(SshRequest {
+                mode: SshChoice::Password,
+                key: None,
+                password: None,
+            }),
+            false => request.ssh,
+        },
+        tailscale: match rejoins {
+            true => None,
+            false => request.tailscale.map(|t| TailnetRequest {
+                control_server: t.control_server.or(control_server),
+                ..t
+            }),
+        },
+        encryption: match encryption {
+            Some(e) => Some(EncryptionRequest {
+                tang_servers: e.tang_urls.clone(),
+                threshold: request
+                    .encryption
+                    .as_ref()
+                    .and_then(|r| r.threshold)
+                    .or(e.servers_known().then_some(e.threshold)),
+                cloud_unlock: e.cloud,
+                recovery_file: request
+                    .encryption
+                    .map(|r| r.recovery_file)
+                    .unwrap_or_default(),
+            }),
+            None => request.encryption,
+        },
+        rejoins_tailnet: rejoins,
+        ..request
+    };
+    (resolved, taken)
+}
+
 fn restored_hostname(restore: Option<&RestoreRequest>) -> Option<String> {
     let restore = restore.filter(|r| r.same_drone)?;
     let dir = flasher_ops::paths::backup_dir().ok()?;
@@ -615,6 +739,7 @@ pub async fn run(
         address: hostname.map(|h| format!("http://{h}.local")),
         ssh: ssh_summary,
         recovery_file: request.encryption.as_ref().map(|e| e.recovery_file.clone()),
+        from_backup: Vec::new(),
     })
 }
 
@@ -755,6 +880,198 @@ mod tests {
             ["No backup named no-such-backup-0 on this computer"]
         );
         assert_eq!(restored_hostname(restoring.restore.as_ref()), None);
+    }
+
+    fn card() -> flasher_ops::backup::Card {
+        flasher_ops::backup::Card {
+            fight_mode: true,
+            password_login: true,
+            encryption: Some(flasher_ops::backup::CardEncryption {
+                threshold: 2,
+                tang_urls: vec!["https://tang.example.com".into()],
+                cloud: true,
+            }),
+            control_server: "https://hs.example.com".into(),
+            tailnet_node: true,
+        }
+    }
+
+    fn restoring(same_drone: bool) -> FlashRequest {
+        FlashRequest {
+            restore: Some(RestoreRequest {
+                backup: "falcon-20261101120000".into(),
+                same_drone,
+            }),
+            ..request()
+        }
+    }
+
+    #[test]
+    fn the_backup_fills_in_what_was_not_asked_for() {
+        let (new_drone, taken) = with_card(
+            FlashRequest {
+                tailscale: Some(TailnetRequest {
+                    auth_key: "tskey-auth-x".into(),
+                    control_server: None,
+                    user: None,
+                }),
+                ..restoring(false)
+            },
+            &card(),
+            "falcon",
+        );
+        assert!(new_drone.fight_mode);
+        assert_eq!(new_drone.ssh.as_ref().unwrap().mode, SshChoice::Password);
+        let encryption = new_drone.encryption.as_ref().unwrap();
+        assert_eq!(encryption.tang_servers, ["https://tang.example.com"]);
+        assert!(encryption.cloud_unlock);
+        assert_eq!(encryption.threshold, Some(2));
+        assert_eq!(
+            new_drone
+                .tailscale
+                .as_ref()
+                .unwrap()
+                .control_server
+                .as_deref(),
+            Some("https://hs.example.com")
+        );
+        assert!(!new_drone.rejoins_tailnet);
+        assert_eq!(taken.len(), 4, "{taken:?}");
+        assert!(taken.contains(
+            &"disk encryption, 2 of 2 key servers: https://tang.example.com, Aircast Cloud"
+                .to_string()
+        ));
+    }
+
+    #[test]
+    fn an_explicit_flag_beats_the_backup() {
+        let explicit = FlashRequest {
+            ssh: Some(SshRequest {
+                mode: SshChoice::Key,
+                key: Some("ssh-ed25519 AAAA me@host".into()),
+                password: None,
+            }),
+            encryption: Some(EncryptionRequest {
+                tang_servers: vec!["http://10.0.0.5:7500".into()],
+                threshold: None,
+                cloud_unlock: false,
+                recovery_file: "/tmp/key.txt".into(),
+            }),
+            tailscale: Some(TailnetRequest {
+                auth_key: "hskey-auth-x".into(),
+                control_server: Some("https://mine.example.com".into()),
+                user: None,
+            }),
+            fight_mode: true,
+            ..restoring(false)
+        };
+        let (resolved, taken) = with_card(explicit.clone(), &card(), "falcon");
+        assert_eq!(resolved.ssh.unwrap().mode, SshChoice::Key);
+        let encryption = resolved.encryption.unwrap();
+        assert_eq!(encryption.tang_servers, ["http://10.0.0.5:7500"]);
+        assert!(!encryption.cloud_unlock);
+        assert_eq!(
+            resolved.tailscale.unwrap().control_server.as_deref(),
+            Some("https://mine.example.com")
+        );
+        assert!(taken.is_empty(), "{taken:?}");
+    }
+
+    #[test]
+    fn an_explicit_threshold_or_recovery_file_keeps_the_backup_servers() {
+        let (resolved, _) = with_card(
+            FlashRequest {
+                encryption: Some(EncryptionRequest {
+                    tang_servers: vec![],
+                    threshold: Some(1),
+                    cloud_unlock: false,
+                    recovery_file: "/tmp/key.txt".into(),
+                }),
+                ..restoring(false)
+            },
+            &card(),
+            "falcon",
+        );
+        let encryption = resolved.encryption.unwrap();
+        assert_eq!(encryption.tang_servers, ["https://tang.example.com"]);
+        assert_eq!(encryption.threshold, Some(1));
+        assert_eq!(encryption.recovery_file, "/tmp/key.txt");
+    }
+
+    #[test]
+    fn the_same_drone_rejoins_its_tailnet_without_a_key() {
+        let with_key = FlashRequest {
+            tailscale: Some(TailnetRequest {
+                auth_key: "tskey-auth-x".into(),
+                control_server: None,
+                user: None,
+            }),
+            ssh: Some(SshRequest {
+                mode: SshChoice::Off,
+                key: None,
+                password: None,
+            }),
+            ..restoring(true)
+        };
+        let (same, taken) = with_card(with_key, &card(), "falcon");
+        assert!(same.tailscale.is_none());
+        assert!(same.rejoins_tailnet);
+        assert!(taken[0].contains("falcon rejoins the tailnet"), "{taken:?}");
+        let fight_problems = problems(
+            &FlashRequest {
+                encryption: None,
+                restore: None,
+                ..same
+            },
+            0,
+        );
+        assert!(fight_problems.is_empty(), "{fight_problems:?}");
+
+        let (new, _) = with_card(
+            FlashRequest {
+                ssh: Some(SshRequest {
+                    mode: SshChoice::Off,
+                    key: None,
+                    password: None,
+                }),
+                ..restoring(false)
+            },
+            &card(),
+            "falcon",
+        );
+        assert!(!new.rejoins_tailnet);
+        assert!(problems(
+            &FlashRequest {
+                encryption: None,
+                restore: None,
+                ..new
+            },
+            0
+        )
+        .iter()
+        .any(|p| p.contains("Fight mode needs a tailnet")));
+    }
+
+    #[test]
+    fn unknown_key_servers_turn_encryption_on_and_ask_for_them() {
+        let unknown = flasher_ops::backup::Card {
+            encryption: Some(flasher_ops::backup::CardEncryption::default()),
+            ..flasher_ops::backup::Card::default()
+        };
+        let (resolved, taken) = with_card(restoring(false), &unknown, "falcon");
+        let encryption = resolved.encryption.as_ref().unwrap();
+        assert!(encryption.tang_servers.is_empty() && !encryption.cloud_unlock);
+        assert_eq!(encryption.threshold, None);
+        assert!(taken[0].contains("weren't recorded"), "{taken:?}");
+        assert!(problems(
+            &FlashRequest {
+                restore: None,
+                ..resolved
+            },
+            1
+        )
+        .iter()
+        .any(|p| p.contains("Tang key server")));
     }
 
     #[test]

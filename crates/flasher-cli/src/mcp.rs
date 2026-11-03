@@ -197,18 +197,22 @@ impl Flasher {
         peer: Peer<RoleServer>,
         cancel: CancellationToken,
     ) -> Result<String, String> {
-        let request = p.request;
-        if p.confirm_erase.trim() != request.disk.trim() {
+        if p.confirm_erase.trim() != p.request.disk.trim() {
             return Err(format!(
                 "confirmErase must repeat the disk ({}) — flashing erases the whole card",
-                request.disk
+                p.request.disk
             ));
         }
+        let (request, from_backup) = request::apply_backup(p.request);
         let problems = request::problems(&request, flasher_ops::sshkeys::detect_ssh_keys().len());
         if !problems.is_empty() {
             return Err(format!(
-                "Fix this to continue:\n- {}",
-                problems.join("\n- ")
+                "Fix this to continue:\n- {}{}",
+                problems.join("\n- "),
+                match from_backup.is_empty() {
+                    true => String::new(),
+                    false => format!("\nFrom the backup: {}", from_backup.join("; ")),
+                }
             ));
         }
 
@@ -241,7 +245,10 @@ impl Flasher {
                 let _ = progress.send((phase, p.bytes_processed, p.total_bytes));
             }
         });
-        json(&request::run(&request, request::Prepared { card, image }, cancel, events).await?)
+        json(&request::FlashOutcome {
+            from_backup,
+            ..request::run(&request, request::Prepared { card, image }, cancel, events).await?
+        })
     }
 
     #[tool(
@@ -288,7 +295,9 @@ impl Flasher {
         json(&fleet::backup(&p.target).await?)
     }
 
-    #[tool(description = "List the settings backups saved on this computer, newest first.")]
+    #[tool(
+        description = "List the settings backups saved on this computer, newest first. card is what the backup records about the card itself (fight mode, SSH password login, encryption key servers, control server, whether it holds the tailnet node); null when the backup predates that."
+    )]
     async fn list_backups(&self) -> Result<String, String> {
         json(&flasher_ops::backup::list(
             &flasher_ops::paths::backup_dir()?

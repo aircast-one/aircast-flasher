@@ -30,10 +30,12 @@ async fn main() {
         .plugin(tauri_plugin_process::init())
         .manage(FlasherState::new())
         .manage(cloud::CloudState::default())
+        .manage(flasher_ops::backup::InFlight::default())
         .setup(|app| {
             let handle = app.handle().clone();
             telemetry::record_panics(handle.clone());
             telemetry::flush(&handle);
+            backup::back_up_automatically(handle);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

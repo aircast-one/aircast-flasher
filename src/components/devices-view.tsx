@@ -6,6 +6,7 @@ import {
   Copy,
   DatabaseBackup,
   ExternalLink,
+  HardDriveDownload,
   Loader2,
   RefreshCw,
   Share2,
@@ -21,7 +22,7 @@ import {
   track,
 } from "@/api";
 import { Button } from "@/components/ui/button";
-import { errorMessage, formatDateTime } from "@/lib/format";
+import { errorMessage, formatDateTime, timeAgo } from "@/lib/format";
 import { BACKUPS_KEY, useBackups } from "@/lib/use-backups";
 import { useLocalTailscale } from "@/lib/use-local-tailscale";
 import type { Backup, TailnetPeer } from "@/types";
@@ -59,7 +60,13 @@ function CopyButton({ address }: { address: string }) {
   );
 }
 
-function DeviceRow({ peer }: { peer: TailnetPeer }) {
+function DeviceRow({
+  peer,
+  lastBackup,
+}: {
+  peer: TailnetPeer;
+  lastBackup: Backup | undefined;
+}) {
   const queryClient = useQueryClient();
   const backup = useMutation({
     mutationFn: () => backupDevice(deviceUrl(peer)),
@@ -84,6 +91,11 @@ function DeviceRow({ peer }: { peer: TailnetPeer }) {
           </span>
           <span className="truncate font-mono text-xs text-muted-foreground">
             {peer.dnsName}
+          </span>
+          <span className="truncate text-xs text-muted-foreground" data-backup-age>
+            {lastBackup === undefined
+              ? "Never backed up"
+              : `Backed up ${timeAgo(lastBackup.created, Date.now())}`}
           </span>
         </div>
         <CopyButton address={peer.dnsName} />
@@ -133,7 +145,13 @@ function DeviceRow({ peer }: { peer: TailnetPeer }) {
   );
 }
 
-function BackupRow({ backup }: { backup: Backup }) {
+function BackupRow({
+  backup,
+  onRestore,
+}: {
+  backup: Backup;
+  onRestore: (id: string) => void;
+}) {
   const queryClient = useQueryClient();
   const [confirming, setConfirming] = useState(false);
   const remove = useMutation({
@@ -183,17 +201,31 @@ function BackupRow({ backup }: { backup: Backup }) {
             </Button>
           </div>
         ) : (
-          <Button
-            type="button"
-            size="sm"
-            variant="secondary"
-            className="shrink-0"
-            aria-label={`Delete the ${backup.hostname} backup`}
-            onClick={() => setConfirming(true)}
-          >
-            <Trash2 className="size-4" />
-            Delete
-          </Button>
+          <>
+            <Button
+              type="button"
+              size="sm"
+              variant="secondary"
+              className="shrink-0"
+              aria-label={`Delete the ${backup.hostname} backup`}
+              onClick={() => setConfirming(true)}
+            >
+              <Trash2 className="size-4" />
+              Delete
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              className="shrink-0"
+              onClick={() => {
+                track("backup_restore_from_list");
+                onRestore(backup.id);
+              }}
+            >
+              <HardDriveDownload className="size-4" />
+              Restore onto a card
+            </Button>
+          </>
         )}
       </div>
       {remove.isError ? (
@@ -205,7 +237,7 @@ function BackupRow({ backup }: { backup: Backup }) {
   );
 }
 
-function SavedBackups() {
+function SavedBackups({ onRestore }: { onRestore: (id: string) => void }) {
   const backups = useBackups();
   return (
     <section
@@ -218,7 +250,8 @@ function SavedBackups() {
         </h2>
         <p className="text-xs text-muted-foreground">
           Kept on this computer only — they hold the drone's WiFi passwords and
-          tailnet identity. Restore one onto a new card from the Network step.
+          tailnet identity. While the Flasher is open, each drone on your
+          tailnet is backed up once a day, keeping its newest 5.
         </p>
       </div>
       {backups.length === 0 ? (
@@ -226,7 +259,9 @@ function SavedBackups() {
           No backups yet. Back up a device above to keep its settings.
         </Empty>
       ) : (
-        backups.map((backup) => <BackupRow key={backup.id} backup={backup} />)
+        backups.map((backup) => (
+          <BackupRow key={backup.id} backup={backup} onRestore={onRestore} />
+        ))
       )}
     </section>
   );
@@ -287,8 +322,15 @@ function NoDevices({
   );
 }
 
-export function DevicesView({ onFlash }: { onFlash: () => void }) {
+export function DevicesView({
+  onFlash,
+  onRestore,
+}: {
+  onFlash: () => void;
+  onRestore: (id: string) => void;
+}) {
   const local = useLocalTailscale();
+  const backups = useBackups();
   const queryClient = useQueryClient();
 
   const candidates = (local?.peers ?? []).filter(
@@ -372,7 +414,15 @@ export function DevicesView({ onFlash }: { onFlash: () => void }) {
             onFlash={onFlash}
           />
         ) : (
-          devices.map((peer) => <DeviceRow key={peer.dnsName} peer={peer} />)
+          devices.map((peer) => (
+            <DeviceRow
+              key={peer.dnsName}
+              peer={peer}
+              lastBackup={backups.find(
+                (b) => b.hostname.toLowerCase() === peer.hostName.toLowerCase(),
+              )}
+            />
+          ))
         )}
 
         {devices.length > 0 && tailnetSummary(others, offline) ? (
@@ -381,7 +431,7 @@ export function DevicesView({ onFlash }: { onFlash: () => void }) {
           </p>
         ) : null}
 
-        <SavedBackups />
+        <SavedBackups onRestore={onRestore} />
       </div>
     </div>
   );

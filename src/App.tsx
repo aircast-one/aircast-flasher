@@ -15,6 +15,7 @@ import {
   listReleases,
   listRunningBoards,
   listWifiNetworks,
+  onBackupsChanged,
   onDownloadProgress,
   onFlashProgress,
   pickAndReadPublicKey,
@@ -60,8 +61,13 @@ import {
 } from "@/components/step-network.validation";
 import { useSettings } from "@/lib/use-settings";
 import { useLocalTailscale } from "@/lib/use-local-tailscale";
-import { useBackups } from "@/lib/use-backups";
+import { BACKUPS_KEY, useBackups } from "@/lib/use-backups";
 import { restoreProblems } from "@/components/restore-section";
+import {
+  backupMarks,
+  cardPreset,
+  rejoinsTailnet,
+} from "@/components/restore-card";
 import { answerConsent, asksConsent } from "@/components/consent";
 import { UpdateBanner } from "@/components/update-banner";
 import { WizardSidebar } from "@/components/wizard-sidebar";
@@ -153,8 +159,13 @@ function App() {
   const devicePassword = settings.devicePassword;
   const setDevicePassword = (devicePassword: string) =>
     update({ devicePassword });
+  const backups = useBackups();
+  const [restore, setRestore] = useState<RestoreDraft | null>(null);
+  const restoreBackup = backups.find((b) => b.id === restore?.backup) ?? null;
+  const restoreCard = restoreBackup?.card ?? null;
+  const rejoins = rejoinsTailnet(restoreCard, restore?.sameDrone ?? null);
   const remoteAccess = settings.remoteAccess ?? true;
-  const tailnetKey = remoteAccess ? authKey : "";
+  const tailnetKey = remoteAccess && !rejoins ? authKey : "";
   const tailnetServer = settings.selfHosted ? settings.controlServer : "";
   const headscaleUser = settings.headscaleUser;
 
@@ -174,12 +185,14 @@ function App() {
   const cloudOn = cloudKeyServer && cloudSignedIn;
   const [recoveryKey] = useState(() => randomHex(24));
   const [recoverySaved, setRecoverySaved] = useState(false);
-  const restoreTangServers = () => {
-    const remembered = settings.tangUrls;
-    if (remembered.length === 0 || tangServers.some(hasUrl)) return;
-    setTangServerRows(remembered.map((url) => ({ url, adv: "" })));
+  const loadTangServers = (urls: string[]) => {
+    if (urls.length === 0) {
+      setTangServerRows([{ url: "", adv: "" }]);
+      return;
+    }
+    setTangServerRows(urls.map((url) => ({ url, adv: "" })));
     Promise.all(
-      remembered.map(async (url) => {
+      urls.map(async (url) => {
         try {
           return { url, adv: await fetchTangAdv(url) };
         } catch {
@@ -187,6 +200,11 @@ function App() {
         }
       }),
     ).then(setTangServerRows);
+  };
+  const restoreTangServers = () => {
+    const remembered = settings.tangUrls;
+    if (remembered.length === 0 || tangServers.some(hasUrl)) return;
+    loadTangServers(remembered);
   };
   const enableEncryption = (on: boolean) => {
     update({ encryption: on });
@@ -217,15 +235,17 @@ function App() {
   const noWifi = settings.noWifi;
   const setNoWifi = (value: boolean) => update({ noWifi: value });
 
-  const backups = useBackups();
-  const [restore, setRestore] = useState<RestoreDraft | null>(null);
-  const restoreBackup = backups.find((b) => b.id === restore?.backup) ?? null;
   const chooseRestore = (next: RestoreDraft | null) => {
     setRestore(next);
-    const source = next?.sameDrone
-      ? backups.find((b) => b.id === next.backup)
-      : undefined;
-    if (source) setHostname(source.hostname);
+    const source = backups.find((b) => b.id === next?.backup);
+    const card = next?.backup === restore?.backup ? null : (source?.card ?? null);
+    update({
+      ...(next?.sameDrone && source ? { hostname: source.hostname } : {}),
+      ...(card === null ? {} : cardPreset(card)),
+    });
+    if (card?.encryption && card.encryption.threshold > 0) {
+      loadTangServers(card.encryption.tangUrls);
+    }
   };
 
   const [step, setStep] = useState<WizardStep>(STEP.os);
@@ -309,6 +329,13 @@ function App() {
       ? "No releases available."
       : null;
   useEffect(() => track("app_start"), []);
+
+  useEffect(() => {
+    const unlisten = onBackupsChanged(
+      () => void queryClient.invalidateQueries({ queryKey: BACKUPS_KEY }),
+    );
+    return () => void unlisten.then((fn) => fn());
+  }, []);
 
   useEffect(() => track("step_view", { step: STEP_NAME[step] }), [step]);
 
@@ -546,7 +573,7 @@ function App() {
     ...(cardTooSmall
       ? [{ message: "This card is too small for the image — insert a bigger one" }]
       : []),
-    ...(fightModeUnreachable(fighting, tailnetKey, tailnetServer)
+    ...(!rejoins && fightModeUnreachable(fighting, tailnetKey, tailnetServer)
       ? [
           {
             message:
@@ -585,7 +612,15 @@ function App() {
   ];
   const canProceed = storageProblems.length === 0;
 
-  const remoteEnrolled = tailnetKey.trim() !== "";
+  const remoteEnrolled = rejoins || tailnetKey.trim() !== "";
+  const marks = backupMarks(restoreCard, {
+    rejoins,
+    selfHosted: settings.selfHosted,
+    controlServer,
+    encryption: encrypting,
+    fightMode: fighting,
+    sshMode,
+  });
 
   const imageLabel =
     sourceKind === "aircast"
@@ -618,6 +653,8 @@ function App() {
       restore === null
         ? null
         : { backup: restoreBackup, sameDrone: restore.sameDrone },
+    rejoins: rejoins ? (restoreBackup?.hostname ?? "") : null,
+    marks,
   });
 
   async function handlePickLocal() {
@@ -719,6 +756,18 @@ function App() {
   const signedOut =
     flashMutation.isError && lastVars?.cloudKeyServer === true && !cloudSignedIn;
   const writesBoard = isUsbTarget(lastVars?.targetDisk ?? "");
+  const writtenBackup =
+    backups.find((b) => b.id === lastVars?.restore?.backup) ?? null;
+  const writtenRestore =
+    writtenBackup === null
+      ? null
+      : {
+          host: writtenBackup.hostname,
+          rejoins: rejoinsTailnet(
+            writtenBackup.card,
+            lastVars?.restore?.sameDrone ?? null,
+          ),
+        };
   const status = writing
     ? "Writing in progress"
     : flashMutation.isSuccess
@@ -761,6 +810,11 @@ function App() {
               onFlash={() => {
                 setFleetView(null);
                 setStep(STEP.os);
+              }}
+              onRestore={(backup) => {
+                setFleetView(null);
+                chooseRestore({ backup, sameDrone: null });
+                setStep(STEP.network);
               }}
             />
           ) : fleetView === "cloud" ? (
@@ -819,7 +873,9 @@ function App() {
                 onSelfHosted: (selfHosted) => update({ selfHosted }),
                 headscaleUser,
                 onHeadscaleUser: (headscaleUser) => update({ headscaleUser }),
+                rejoins: rejoins ? (restoreBackup?.hostname ?? "") : null,
               }}
+              marks={marks}
               access={{
                 sshMode,
                 onSshMode: setSshMode,
@@ -877,6 +933,7 @@ function App() {
               noWifi={noWifi}
               remoteEnrolled={remoteEnrolled}
               fightMode={fighting}
+              restore={writtenRestore}
               encryption={flashMutation.data ?? null}
               success={flashMutation.isSuccess}
               cancelled={stopped}

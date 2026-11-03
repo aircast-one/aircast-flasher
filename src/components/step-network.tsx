@@ -130,6 +130,12 @@ export function StepNetwork({
       }}
     >
       <div className="flex max-w-xl flex-col gap-5">
+        <RestoreSection
+          backups={backups}
+          restore={restore}
+          onRestore={onRestore}
+        />
+
         {noWifi ? (
           <div className="flex flex-col gap-2 rounded-xl border border-border p-4">
             <p className="text-sm font-medium">
@@ -313,12 +319,6 @@ export function StepNetwork({
             </Button>
           ) : null}
         </div>
-
-        <RestoreSection
-          backups={backups}
-          restore={restore}
-          onRestore={onRestore}
-        />
       </div>
     </StepShell>
   );

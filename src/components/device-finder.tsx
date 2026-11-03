@@ -30,6 +30,13 @@ const LOGIN_POLL_INTERVAL_MS = 3000;
 const TAILSCALE_DOCS_URL = "https://aircast.one/docs/software/tailscale";
 const HOTSPOT_URL = "http://10.42.0.1";
 const HOTSPOT_PASSWORD = "raspberry";
+export interface RestoredCard {
+  host: string;
+  rejoins: boolean;
+}
+
+export const missingAfterMinutes = (restore: RestoredCard | null): number =>
+  restore === null ? 10 : 15;
 
 type JoinState =
   { phase: "idle" } | { phase: "joining" } | { phase: "failed"; error: string };
@@ -145,12 +152,18 @@ function LocalTailscaleRow({ deviceName }: { deviceName: string }) {
   );
 }
 
-function useNewTailnetPeer(hostname: string): TailnetPeer | null {
+function useNewTailnetPeer(
+  hostname: string,
+  rejoins: boolean,
+): TailnetPeer | null {
   const local = useLocalTailscale();
   const baseline = useRef<Set<string> | null>(null);
+  const counts = (peer: TailnetPeer) => !rejoins || peer.online;
 
   if (baseline.current === null && local !== null) {
-    baseline.current = new Set(local.peers.map((peer) => peer.dnsName));
+    baseline.current = new Set(
+      local.peers.filter(counts).map((peer) => peer.dnsName),
+    );
   }
 
   const known = baseline.current;
@@ -160,9 +173,19 @@ function useNewTailnetPeer(hostname: string): TailnetPeer | null {
   return (
     local.peers.find(
       (peer) =>
+        counts(peer) &&
         !known.has(peer.dnsName) &&
         peer.hostName.toLowerCase().startsWith(expected),
     ) ?? null
+  );
+}
+
+function RestoreNote({ host }: { host: string }) {
+  return (
+    <span id="finder-restore" className="text-xs text-muted-foreground">
+      This card is restoring {host}'s settings, so it restarts once more on
+      first boot — allow a few extra minutes.
+    </span>
   );
 }
 
@@ -308,22 +331,28 @@ function DeviceActions({
   );
 }
 
-function FightWaiting() {
+function FightWaiting({ restore }: { restore: RestoredCard | null }) {
   return (
     <div className="flex w-full flex-col gap-3 rounded-xl border border-border px-4 py-3 text-left">
       <div className="flex items-center gap-2 text-sm text-muted-foreground">
         <Loader2 className="size-4 shrink-0 animate-spin" />
-        <span>Waiting for it to join your private network.</span>
+        <span>
+          {restore?.rejoins
+            ? `Waiting for ${restore.host} to rejoin your private network.`
+            : "Waiting for it to join your private network."}
+        </span>
       </div>
+      {restore === null ? null : <RestoreNote host={restore.host} />}
       <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
         <Network className="size-3.5 shrink-0" />
         Fight mode turns off its hotspot and blocks every other network, so
         this is the only place it shows up.
       </span>
-      <span className="text-xs text-muted-foreground">
-        Not here after 10 minutes? The pre-auth key was probably expired or
-        already used on another card. Make a fresh key and write the card
-        again.
+      <span id="finder-missing" className="text-xs text-muted-foreground">
+        Not here after {missingAfterMinutes(restore)} minutes?{" "}
+        {restore?.rejoins
+          ? `Check it has power and is in range of its WiFi — it rejoins as ${restore.host} with the identity from the backup.`
+          : "The pre-auth key was probably expired or already used on another card. Make a fresh key and write the card again."}
       </span>
     </div>
   );
@@ -333,15 +362,17 @@ export function DeviceFinder({
   hostname,
   remoteEnrolled,
   fightMode,
+  restore,
 }: {
   hostname: string;
   remoteEnrolled: boolean;
   fightMode: boolean;
+  restore: RestoredCard | null;
 }) {
   const [foundUrl, setFoundUrl] = useState<string | null>(null);
   const [rounds, setRounds] = useState(0);
   const [join, setJoin] = useState<JoinState>({ phase: "idle" });
-  const tailnetPeer = useNewTailnetPeer(hostname);
+  const tailnetPeer = useNewTailnetPeer(hostname, restore?.rejoins ?? false);
   const lanUrl = `http://${hostname}.local`;
 
   useEffect(() => {
@@ -427,7 +458,7 @@ export function DeviceFinder({
     );
   }
 
-  if (fightMode) return <FightWaiting />;
+  if (fightMode) return <FightWaiting restore={restore} />;
 
   return (
     <div className="flex w-full flex-col gap-3 rounded-xl border border-border px-4 py-3 text-left">
@@ -436,12 +467,15 @@ export function DeviceFinder({
         <span>Waiting for the device. Checking these addresses:</span>
       </div>
       <CopyableAddress address={`${hostname}.local`} />
+      {restore === null ? null : <RestoreNote host={restore.host} />}
       <div className="flex flex-col gap-1 text-xs text-muted-foreground">
         <span className="flex items-center gap-1.5">
           <Network className="size-3.5 shrink-0" />
-          {remoteEnrolled
-            ? "It joins your private network on first boot, using the key the Flasher wrote."
-            : "Once it's online you can sign it in to Tailscale from here — keep this window open."}
+          {restore?.rejoins
+            ? `It rejoins your private network as ${restore.host}, with the identity from the backup.`
+            : remoteEnrolled
+              ? "It joins your private network on first boot, using the key the Flasher wrote."
+              : "Once it's online you can sign it in to Tailscale from here — keep this window open."}
         </span>
       </div>
       {rounds >= HOTSPOT_AFTER_ROUNDS ? (

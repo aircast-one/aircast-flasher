@@ -34,7 +34,7 @@ commands:
 | `devices` | `list_devices` | `{tailnet, devices: [{name, address, ip}], offline: [names], notAnswering: [names]}` |
 | `releases` | `list_releases` | `{releases: [{version, prerelease, created_at, image}], min_card_bytes}` |
 | `find NAME` | `find_device` | `{address}` — `null` until the drone has booted |
-| `backups list` | `list_backups` | array of `{id, hostname, created}`, newest first |
+| `backups list` | `list_backups` | array of `{id, hostname, created, card}`, newest first; `card` is `null` for backups from an older aircastd |
 
 `devices` lists drones that answer as Aircast on this computer's tailnet.
 `offline` names Linux machines on the tailnet that are offline — they may be
@@ -162,10 +162,22 @@ rebuilt.
   same drone; the hostname defaults to the backup's) or `--new-drone` (copy
   the setup onto another aircraft, which gets its own identity). Ask which
   when the person hasn't said — two cards restored as the same drone fight
-  over one identity. The drone restores on first boot and restarts once more.
-- `backups list` / `backups delete ID` (MCP `list_backups`, `delete_backup`).
-  Backups hold secrets and stay on this computer; never print or copy their
-  contents.
+  over one identity; if `devices` shows that drone online, check they really
+  are replacing its card. The drone restores on first boot and restarts once
+  more, so give it about 15 minutes.
+- A backup's `card` fills in what the person didn't set: fight mode, SSH
+  password login (then a device password, `--ssh-key` or `--no-ssh` is
+  needed), disk encryption with its key servers and threshold (a recovery
+  file is still required), and the control server. Explicit flags win. Each
+  setting taken is printed as `From the backup: …` (MCP: `fromBackup` in the
+  result, or under the problems) — tell the person what came from the backup.
+  For `--same-drone` with the tailnet node in the backup, no tailnet key is
+  written or needed, fight mode included: it rejoins as the same node.
+- `backups list` / `backups delete ID` (MCP `list_backups`, `delete_backup`)
+  shows each backup's age and whether it records the card. Each drone keeps
+  its newest 5; the app also backs drones up on its own once a day while it
+  is open. Backups hold secrets and stay on this computer; never print or
+  copy their contents.
 
 ## Aircast Cloud
 

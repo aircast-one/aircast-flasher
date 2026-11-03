@@ -249,6 +249,7 @@ describe("settings backups", () => {
         id: "falcon-20261101120000",
         hostname: "falcon",
         created: "2026-11-01T12:00:00Z",
+        card: null,
       });
       const file = path.join(e2eConfigDir(), "backups", `${saved.id}.json`);
       expect(fs.readFileSync(file, "utf8")).toBe(BUNDLE);
@@ -295,5 +296,131 @@ describe("settings backups", () => {
     expect(
       await invokeFromApp("backup_device", { url: "http://127.0.0.1:1" }),
     ).toContain("Couldn't reach http://127.0.0.1:1");
+  });
+
+  it("reads what a backup records about the card, splitting Aircast Cloud from your own key servers", async () => {
+    const card = {
+      fightMode: true,
+      passwordLogin: false,
+      encryption: {
+        threshold: 1,
+        tangUrls: [
+          "https://tang.example.com",
+          "https://api.aircast.one/v1/tang/3f2a",
+        ],
+      },
+      controlServer: "https://hs.example.com",
+      tailnetNode: true,
+    };
+    const drone = await backupServer(
+      200,
+      JSON.stringify({ ...JSON.parse(BUNDLE), card }),
+    );
+    try {
+      const saved = JSON.parse(
+        String(await invokeFromApp("backup_device", { url: drone.url })),
+      );
+      expect(saved.card).toEqual({
+        ...card,
+        encryption: {
+          threshold: 1,
+          tangUrls: ["https://tang.example.com"],
+          cloud: true,
+        },
+      });
+      await invokeFromApp("delete_backup", { id: saved.id });
+    } finally {
+      drone.close();
+    }
+  });
+
+  it("keeps only the newest five backups of a drone", async () => {
+    const days = [1, 2, 3, 4, 5, 6, 7].values();
+    const server = http.createServer((_req, res) => {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(
+        BUNDLE.replace('"falcon"', '"kestrel"').replace(
+          "2026-11-01",
+          `2026-11-0${days.next().value}`,
+        ),
+      );
+    });
+    await new Promise<void>((resolve) => {
+      server.listen(0, "127.0.0.1", resolve);
+    });
+    const { port } = server.address() as AddressInfo;
+    try {
+      await [1, 2, 3, 4, 5, 6, 7].reduce(
+        (previous) =>
+          previous.then(() =>
+            invokeFromApp("backup_device", { url: `http://127.0.0.1:${port}` }),
+          ),
+        Promise.resolve<boolean | string>(true),
+      );
+      const kept = (
+        JSON.parse(String(await invokeFromApp("list_backups", {}))) as {
+          id: string;
+        }[]
+      ).map((b) => b.id);
+      expect(kept).toEqual(
+        [7, 6, 5, 4, 3].map((day) => `kestrel-2026110${day}120000`),
+      );
+      await Promise.all(
+        kept.map((id) => invokeFromApp("delete_backup", { id })),
+      );
+    } finally {
+      server.close();
+    }
+  });
+
+  it("backs up a drone once at a time", async () => {
+    const held: { res: http.ServerResponse | null; released: boolean } = {
+      res: null,
+      released: false,
+    };
+    const answer = (res: http.ServerResponse) => {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(BUNDLE);
+    };
+    const server = http.createServer((req, res) => {
+      if (req.url === "/api/backup") {
+        if (held.released) return answer(res);
+        held.res = res;
+        return;
+      }
+      held.released = true;
+      res.writeHead(200);
+      res.end();
+      if (held.res) answer(held.res);
+    });
+    await new Promise<void>((resolve) => {
+      server.listen(0, "127.0.0.1", resolve);
+    });
+    const { port } = server.address() as AddressInfo;
+    try {
+      const results = await browser.executeAsync<string[], [string]>(
+        (url, done) => {
+          const tauri = (window as { __TAURI__?: TauriGlobal }).__TAURI__;
+          if (!tauri) return done(["no-global-tauri"]);
+          const settle = (p: Promise<unknown>) =>
+            p.then(
+              (v) => `ok:${JSON.stringify(v)}`,
+              (e) => `err:${String(e)}`,
+            );
+          const first = settle(tauri.core.invoke("backup_device", { url }));
+          const second = settle(tauri.core.invoke("backup_device", { url }));
+          Promise.race([first, second])
+            .then(() => tauri.core.invoke("probe_device", { url }))
+            .then(() => Promise.all([first, second]))
+            .then(done);
+        },
+        `http://127.0.0.1:${port}`,
+      );
+      expect(results.filter((r) => r.startsWith("ok:"))).toHaveLength(1);
+      expect(results.filter((r) => r.includes("already being backed up"))).toHaveLength(1);
+      await invokeFromApp("delete_backup", { id: "falcon-20261101120000" });
+    } finally {
+      server.close();
+    }
   });
 });

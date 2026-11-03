@@ -2,7 +2,8 @@ import { useState } from "react";
 import { ChevronRight, Globe, Lock, SquareTerminal, Swords } from "lucide-react";
 
 import { StepShell, focusField, type Problem } from "@/components/step-shell";
-import { SettingCard } from "@/components/setting-card";
+import { FromBackup, SettingCard } from "@/components/setting-card";
+import type { BackupMarks } from "@/components/restore-card";
 import { Switch } from "@/components/ui/switch";
 import {
   RemoteAccessSection,
@@ -44,7 +45,11 @@ type RemoteAccessInputs = Pick<
   | "onSelfHosted"
   | "headscaleUser"
   | "onHeadscaleUser"
-> & { enabled: boolean; onEnabled: (v: boolean) => void };
+> & {
+  enabled: boolean;
+  onEnabled: (v: boolean) => void;
+  rejoins: string | null;
+};
 
 type DeviceAccessInputs = Pick<
   DeviceAccessProps,
@@ -64,6 +69,7 @@ export function StepAccess({
   encryption,
   encryptionAvailable,
   fight,
+  marks,
   onBack,
   onNext,
 }: {
@@ -72,11 +78,17 @@ export function StepAccess({
   encryption: DiskEncryptionProps;
   encryptionAvailable: boolean;
   fight: { enabled: boolean; available: boolean; onEnabled: (v: boolean) => void };
+  marks: BackupMarks;
   onBack: () => void;
   onNext: () => void;
 }) {
-  const { enabled: remoteOn, onEnabled: onRemoteOn, ...remoteFields } = remote;
-  const tailnetKey = remoteOn ? remote.authKey : "";
+  const {
+    enabled: remoteOn,
+    onEnabled: onRemoteOn,
+    rejoins,
+    ...remoteFields
+  } = remote;
+  const tailnetKey = remoteOn && rejoins === null ? remote.authKey : "";
   const tailnetServer = remote.selfHosted ? remote.controlServer : "";
 
   const controlServerValid = isValidControlServer(remote.controlServer);
@@ -98,8 +110,9 @@ export function StepAccess({
   const sshProblem = sshKeyInvalid || devicePasswordWeak || fightKeyMissing;
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const unreachable =
-    fightModeUnreachable(fight.enabled, tailnetKey, tailnetServer) ||
-    (fight.enabled && controlServerMissing);
+    rejoins === null &&
+    (fightModeUnreachable(fight.enabled, tailnetKey, tailnetServer) ||
+      (fight.enabled && controlServerMissing));
 
   const problems: Problem[] = [
     ...(sshKeyInvalid
@@ -172,21 +185,30 @@ export function StepAccess({
         <SettingCard
           icon={<Globe />}
           title="Remote access"
+          fromBackup={marks.remote}
           description={
-            fight.enabled
-              ? "The only way in while fight mode is on"
-              : `Reach it from anywhere over ${remote.selfHosted ? "Headscale" : "Tailscale"}`
+            rejoins !== null
+              ? "Restored from the backup — no key needed"
+              : fight.enabled
+                ? "The only way in while fight mode is on"
+                : `Reach it from anywhere over ${remote.selfHosted ? "Headscale" : "Tailscale"}`
           }
           action={
             <Switch
               aria-label="Remote access"
-              checked={remoteOn}
-              disabled={fight.enabled}
+              checked={remoteOn || rejoins !== null}
+              disabled={fight.enabled || rejoins !== null}
               onCheckedChange={onRemoteOn}
             />
           }
         >
-          {remoteOn ? (
+          {rejoins !== null ? (
+            <p id="remote-rejoins" className="text-sm text-muted-foreground">
+              The backup holds {rejoins}'s tailnet identity, so on first boot
+              it rejoins your tailnet as the same node. No key is written. To
+              give it a new identity, choose New drone on the Network step.
+            </p>
+          ) : remoteOn ? (
             <RemoteAccessSection
               {...remoteFields}
               controlServerValid={controlServerValid}
@@ -198,6 +220,7 @@ export function StepAccess({
         <SettingCard
           icon={<Lock />}
           title="Disk encryption"
+          fromBackup={marks.encryption}
           description={
             encryptionAvailable
               ? "A pulled card gives nothing away"
@@ -218,6 +241,7 @@ export function StepAccess({
         <SettingCard
           icon={<Swords />}
           title="Fight mode"
+          fromBackup={marks.fight}
           description={
             fight.available
               ? "No logs on the drone"
@@ -261,11 +285,13 @@ export function StepAccess({
             <span className="font-normal">
               · SSH login: {sshModeLabel(access.sshMode)}
             </span>
+            {marks.ssh ? <FromBackup /> : null}
           </summary>
           <div className="mt-3">
             <SettingCard
               icon={<SquareTerminal />}
               title="SSH login"
+              fromBackup={marks.ssh}
               description="Log in to the drone's shell"
               action={
                 <SshModePicker

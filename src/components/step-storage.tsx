@@ -3,6 +3,7 @@ import { AlertTriangle, Cpu, HardDrive, LoaderCircle } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { SelectableCard } from "@/components/selectable-card";
 import { StepShell, type Problem } from "@/components/step-shell";
+import { FromBackup } from "@/components/setting-card";
 import { cn } from "@/lib/utils";
 import type { SummaryItem } from "@/components/wizard-summary";
 import { STEP, type WizardStep } from "@/components/wizard-types";
@@ -171,13 +172,14 @@ export function StepStorage({
         <div className="flex flex-col gap-3 rounded-xl border border-border p-4">
           <h2 className="text-sm font-medium">What will be written</h2>
           <dl className="flex flex-col gap-2">
-            {rows.map(({ label, value, warn, step }) => (
+            {rows.map(({ label, value, warn, fromBackup, step }) => (
               <div
                 key={label}
                 className="flex items-baseline justify-between gap-4 text-sm"
               >
                 <dt className="shrink-0 text-muted-foreground">{label}</dt>
                 <dd className="flex min-w-0 items-baseline gap-3">
+                  {fromBackup ? <FromBackup /> : null}
                   <span
                     className={cn(
                       "text-right break-all",

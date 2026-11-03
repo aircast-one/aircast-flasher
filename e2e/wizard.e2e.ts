@@ -56,9 +56,10 @@ async function pageDiagnostics(): Promise<string> {
 }
 
 const BACKUP_ID = "falcon-20261101120000";
+const CARD_BACKUP_ID = "falcon-20261102120000";
 
-function backupFile(): string {
-  return path.join(e2eConfigDir(), "backups", `${BACKUP_ID}.json`);
+function backupFile(id = BACKUP_ID): string {
+  return path.join(e2eConfigDir(), "backups", `${id}.json`);
 }
 
 function seedBackup() {
@@ -69,6 +70,33 @@ function seedBackup() {
       format: 1,
       hostname: "falcon",
       created: "2026-11-01T12:00:00Z",
+      files: [],
+    }),
+    { mode: 0o600 },
+  );
+}
+
+function seedCardBackup() {
+  fs.mkdirSync(path.dirname(backupFile(CARD_BACKUP_ID)), { recursive: true });
+  fs.writeFileSync(
+    backupFile(CARD_BACKUP_ID),
+    JSON.stringify({
+      format: 1,
+      hostname: "falcon",
+      created: "2026-11-02T12:00:00Z",
+      card: {
+        fightMode: true,
+        passwordLogin: true,
+        encryption: {
+          threshold: 1,
+          tangUrls: [
+            "http://127.0.0.1:1",
+            "https://api.aircast.one/v1/tang/3f2a",
+          ],
+        },
+        controlServer: "",
+        tailnetNode: true,
+      },
       files: [],
     }),
     { mode: 0o600 },
@@ -662,6 +690,108 @@ describe("flasher wizard", () => {
     await backToStep("Network");
     await $('[role="switch"][aria-label="Restore settings"]').click();
     await $("#hostname").setValue("falcon-01");
+  });
+
+  it("puts the restore first on the Network step, and says when a backup records nothing about the card", async () => {
+    seedBackup();
+    await knownGoodNetworkState();
+    const restoreFirst = await browser.execute(() => {
+      const restore = document.querySelector('[aria-label="Restore settings"]');
+      const ssid = document.getElementById("ssid");
+      return Boolean(
+        restore &&
+          ssid &&
+          restore.compareDocumentPosition(ssid) &
+            Node.DOCUMENT_POSITION_FOLLOWING,
+      );
+    });
+    expect(restoreFirst).toBe(true);
+
+    await $('[role="switch"][aria-label="Restore settings"]').click();
+    await expect($("#restore-no-card")).toHaveText(
+      expect.stringContaining("doesn't record fight mode, encryption or remote access"),
+    );
+    await $('[role="switch"][aria-label="Restore settings"]').click();
+  });
+
+  it("brings a backup's fight mode, encryption and tailnet node back onto the card", async () => {
+    seedCardBackup();
+    await useNewestRelease();
+    await knownGoodNetworkState();
+    await $("button=Next").click();
+    await waitForHeading("Access");
+    await backToStep("Network");
+
+    await $('[role="switch"][aria-label="Restore settings"]').click();
+    await expect($("#restore-no-card")).not.toBeExisting();
+    await $("button*=Same drone").click();
+    await expect($("#hostname")).toHaveValue("falcon");
+    await $("button=Next").click();
+    await waitForHeading("Access");
+
+    await expect(
+      $('[role="switch"][aria-label="Fight mode"]'),
+    ).toHaveAttribute("aria-checked", "true");
+    await expect($("h2*=Fight mode")).toHaveText(
+      expect.stringContaining("from backup"),
+    );
+    await expect($("#remote-rejoins")).toHaveText(
+      expect.stringContaining("rejoins your tailnet as the same node"),
+    );
+    await expect(
+      $('[role="switch"][aria-label="Disk encryption"]'),
+    ).toHaveAttribute("aria-checked", "true");
+    await expect($("#tang-server-0")).toHaveValue("http://127.0.0.1:1");
+    await expect($("#tang-server-1")).not.toBeExisting();
+    await expect($("#access-advanced summary")).toHaveText(
+      expect.stringContaining("SSH login: Password"),
+    );
+    await browser.waitUntil(
+      () => savedSettings().tangCloud === true && savedSettings().sshMode === "password",
+      { timeout: 10_000, timeoutMsg: "the backup's Cloud unlock and password login were not preset" },
+    );
+
+    await $('[role="switch"][aria-label="Disk encryption"]').click();
+    await openAdvanced();
+    await $("button=Off").click();
+    await $("button=Next").click();
+    await waitForHeading("Storage");
+    const rows = $("dl");
+    await expect(rows).toHaveText(
+      expect.stringContaining("Rejoins your tailnet as falcon · no key needed"),
+    );
+    await expect(rows).toHaveText(expect.stringContaining("from backup"));
+    await expect(rows).not.toHaveText(
+      expect.stringContaining("needs remote access"),
+    );
+
+    await backToStep("Access");
+    await $('[role="switch"][aria-label="Fight mode"]').click();
+    await openAdvanced();
+    await $("button=SSH key").click();
+    await backToStep("Network");
+    await $('[role="switch"][aria-label="Restore settings"]').click();
+    await $("#hostname").setValue("falcon-01");
+    fs.rmSync(backupFile(CARD_BACKUP_ID));
+  });
+
+  it("restores a saved backup onto a card straight from Devices", async () => {
+    seedBackup();
+    await $('nav[aria-label="Fleet"]').$("button*=Devices").click();
+    await waitForHeading("Devices");
+    await $(`[data-backup="${BACKUP_ID}"]`).$("button*=Restore onto a card").click();
+
+    await waitForHeading("Network");
+    await expect(
+      $('[role="switch"][aria-label="Restore settings"]'),
+    ).toHaveAttribute("aria-checked", "true");
+    await expect($('[aria-label="Backup to restore"]')).toHaveText(
+      expect.stringContaining("falcon"),
+    );
+    await expect($("button*=Same drone")).toHaveAttribute("aria-pressed", "false");
+    await expect($("button*=New drone")).toHaveAttribute("aria-pressed", "false");
+    await expectBlocked("Next", "same drone or a new one");
+    await $('[role="switch"][aria-label="Restore settings"]').click();
   });
 
   it("lists saved backups under Devices, and deletes one only when confirmed", async () => {

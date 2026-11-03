@@ -3,6 +3,7 @@ import { test } from "node:test";
 
 import { buildSummary, type SummaryInput } from "./wizard-summary.ts";
 import { defaultHostname } from "./default-hostname.ts";
+import { NO_MARKS } from "./restore-card.ts";
 
 const base: SummaryInput = {
   image: "Aircast OS v0.3.0",
@@ -20,6 +21,8 @@ const base: SummaryInput = {
   encryption: null,
   fightMode: false,
   restore: null,
+  rejoins: null,
+  marks: NO_MARKS,
 };
 
 const rowOf = (input: SummaryInput, label: string) =>
@@ -247,6 +250,7 @@ test("a restore names the backup and which drone it is for", () => {
     id: "falcon-20261101120000",
     hostname: "falcon",
     created: "2026-11-01T12:00:00Z",
+    card: null,
   };
   assert.equal(valueOf(base, "Restore"), "Off");
   const same = { ...base, restore: { backup, sameDrone: true } };
@@ -264,5 +268,34 @@ test("a restore names the backup and which drone it is for", () => {
   assert.equal(
     valueOf({ ...base, restore: { backup: null, sameDrone: true } }, "Restore"),
     "Backup no longer on this computer",
+  );
+});
+
+test("a same-drone restore that keeps its tailnet node is reachable without a key", () => {
+  const rejoining = { ...base, rejoins: "falcon", marks: { ...NO_MARKS, remote: true } };
+  assert.equal(
+    valueOf(rejoining, "Remote access"),
+    "Rejoins your tailnet as falcon · no key needed",
+  );
+  assert.equal(rowOf(rejoining, "Remote access")?.fromBackup, true);
+  const fighting = { ...rejoining, fightMode: true };
+  assert.equal(valueOf(fighting, "Fight mode"), "On · no logs, tailnet only");
+  assert.equal(rowOf(fighting, "Fight mode")?.warn, undefined);
+});
+
+test("rows the backup preset say so, and only those", () => {
+  const marked = {
+    ...base,
+    marks: { remote: false, encryption: true, fight: true, ssh: true },
+  };
+  assert.deepEqual(
+    buildSummary(marked)
+      .filter((row) => row.fromBackup)
+      .map((row) => row.label),
+    ["Device access", "Disk encryption", "Fight mode"],
+  );
+  assert.deepEqual(
+    buildSummary(base).filter((row) => row.fromBackup),
+    [],
   );
 });
