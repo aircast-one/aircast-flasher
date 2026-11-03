@@ -718,6 +718,7 @@ pub async fn run(
         encryption,
         fight_mode: request.fight_mode,
         restore,
+        cloud_enroll: None,
         init_format: InitFormat::CloudInit,
     };
 

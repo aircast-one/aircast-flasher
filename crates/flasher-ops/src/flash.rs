@@ -276,6 +276,7 @@ async fn write_usb(
             encryption: None,
             fight_mode: false,
             restore: None,
+            cloud_enroll: None,
             init_format: InitFormat::CloudInit,
         };
         let mut file =

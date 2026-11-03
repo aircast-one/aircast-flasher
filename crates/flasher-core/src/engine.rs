@@ -510,6 +510,7 @@ mod tests {
             encryption: None,
             fight_mode: false,
             restore: None,
+            cloud_enroll: None,
             init_format: InitFormat::CloudInit,
         }
     }
@@ -622,6 +623,7 @@ mod tests {
             encryption: None,
             fight_mode: false,
             restore: None,
+            cloud_enroll: None,
             init_format: InitFormat::FirstRun,
         };
         let params = FlashParams {
@@ -661,6 +663,7 @@ mod tests {
             encryption: None,
             fight_mode: true,
             restore: None,
+            cloud_enroll: None,
             init_format: InitFormat::CloudInit,
         };
         let params = FlashParams {
@@ -693,6 +696,7 @@ mod tests {
             encryption: None,
             fight_mode: false,
             restore: Some(bundle.into()),
+            cloud_enroll: None,
             init_format: InitFormat::CloudInit,
         };
         let params = FlashParams {

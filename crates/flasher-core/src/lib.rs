@@ -11,7 +11,7 @@ pub use device::AlignedDevice;
 pub use engine::{customize_image, flash, BlockDevice, FlashParams, FlashStage, BLOCK};
 
 pub use model::{
-    AccessConfig, EncryptionConfig, InitFormat, ProvisionConfig, SshMode, TailscaleConfig,
-    TangServer, WifiConfig, MIN_FIGHT_PASSWORD,
+    AccessConfig, CloudEnrollment, EncryptionConfig, InitFormat, ProvisionConfig, SshMode,
+    TailscaleConfig, TangServer, WifiConfig, MIN_FIGHT_PASSWORD,
 };
 pub use provision::{encryption_files, plan, ProvisionFile, ProvisionPlan};

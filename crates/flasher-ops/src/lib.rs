@@ -1,9 +1,9 @@
+pub mod authkey;
 pub mod backup;
 pub mod cloud;
 pub mod devices;
 pub mod download;
 pub mod flash;
-pub mod authkey;
 pub mod helper;
 #[cfg(target_os = "macos")]
 mod macos_auth;
@@ -22,8 +22,8 @@ pub use types::*;
 pub use validation::*;
 
 pub use flasher_core::{
-    AccessConfig, EncryptionConfig, InitFormat, ProvisionConfig, SshMode, TailscaleConfig,
-    TangServer, WifiConfig, MIN_FIGHT_PASSWORD,
+    AccessConfig, CloudEnrollment, EncryptionConfig, InitFormat, ProvisionConfig, SshMode,
+    TailscaleConfig, TangServer, WifiConfig, MIN_FIGHT_PASSWORD,
 };
 
 use serde::{Deserialize, Serialize};

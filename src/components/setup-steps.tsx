@@ -1,6 +1,9 @@
 import { useEffect, useState } from "react";
 import { Check, Loader2 } from "lucide-react";
+import { openUrl } from "@tauri-apps/plugin-opener";
 
+import type { CloudOutcome } from "@/components/cloud";
+import { devicePage, type FoundDevice } from "@/components/device-address";
 import {
   ContinueSetup,
   DeviceOnline,
@@ -72,6 +75,63 @@ function Step({
   );
 }
 
+function DevicePageLink({
+  found,
+  page,
+  children,
+}: {
+  found: FoundDevice;
+  page: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      className="underline underline-offset-2 hover:text-foreground"
+      onClick={() => void openUrl(devicePage(found.url, page))}
+    >
+      {children}
+    </button>
+  );
+}
+
+function CloudStep({
+  cloud,
+  found,
+}: {
+  cloud: CloudOutcome;
+  found: FoundDevice | null;
+}) {
+  if (cloud !== null && "account" in cloud)
+    return (
+      <Step number={4} state="done" title={`Linked to ${cloud.account}`}>
+        <span className="text-xs text-muted-foreground">
+          It signs in to Aircast Cloud on its first start.
+        </span>
+      </Step>
+    );
+  return (
+    <Step
+      number={4}
+      state={found !== null ? "current" : "todo"}
+      title="Connect it to your Aircast account"
+    >
+      <span className="text-xs text-muted-foreground">
+        {cloud === null ? null : `Linking it while writing failed: ${cloud.error}. `}
+        Do it from{" "}
+        {found !== null ? (
+          <DevicePageLink found={found} page="/settings/device">
+            the device page
+          </DevicePageLink>
+        ) : (
+          "the device page, once it's online"
+        )}
+        .
+      </span>
+    </Step>
+  );
+}
+
 function useAfter(ms: number): boolean {
   const [passed, setPassed] = useState(false);
   useEffect(() => {
@@ -87,6 +147,7 @@ export function SetupSteps({
   remoteEnrolled,
   fightMode,
   restore,
+  cloud,
   notShowingUp,
 }: {
   hostname: string;
@@ -94,6 +155,7 @@ export function SetupSteps({
   remoteEnrolled: boolean;
   fightMode: boolean;
   restore: RestoredCard | null;
+  cloud: CloudOutcome;
   notShowingUp: React.ReactNode;
 }) {
   const { found, rounds } = useFoundDevice(hostname, fightMode, restore);
@@ -138,14 +200,23 @@ export function SetupSteps({
           </>
         )}
       </Step>
+      <CloudStep cloud={cloud} found={found} />
       <Step
-        number={4}
+        number={5}
         state={found !== null ? "current" : "todo"}
         title={`Finish setting up ${name}`}
         last
       >
         <span className="text-xs text-muted-foreground">
-          Camera and flight controller, then you're flying.
+          Add a camera on{" "}
+          {found !== null ? (
+            <DevicePageLink found={found} page="/streaming">
+              the device page
+            </DevicePageLink>
+          ) : (
+            "the device page"
+          )}
+          , then the flight controller, and you're flying.
         </span>
         {found !== null ? <ContinueSetup found={found} hostname={hostname} /> : null}
       </Step>

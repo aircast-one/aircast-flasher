@@ -4,9 +4,12 @@ import assert from "node:assert/strict";
 import {
   cardLabel,
   cardState,
+  cloudLinkSummary,
+  linkedAccount,
   retireCandidates,
   waitForSignIn,
   withCloudServer,
+  type CloudLink,
 } from "./cloud.ts";
 import type { CloudCard, CloudSignInStatus } from "../types.ts";
 
@@ -106,4 +109,37 @@ test("the cards a same-drone rewrite replaces are the drone's others still able 
     ),
     ["x"],
   );
+});
+
+const link = (over: Partial<CloudLink>): CloudLink => ({
+  account: "op@unit.example",
+  on: true,
+  sameDrone: false,
+  usb: false,
+  ...over,
+});
+
+test("a signed-in flash links the card to the account by default", () => {
+  assert.equal(linkedAccount(link({})), "op@unit.example");
+  assert.equal(cloudLinkSummary(link({})), "Links to op@unit.example on first start");
+});
+
+test("turning the link off writes no token", () => {
+  assert.equal(linkedAccount(link({ on: false })), null);
+  assert.equal(cloudLinkSummary(link({ on: false })), "Off");
+});
+
+test("without a sign-in there is nothing to link", () => {
+  assert.equal(linkedAccount(link({ account: null })), null);
+  assert.match(cloudLinkSummary(link({ account: null })), /sign in/);
+});
+
+test("a same-drone restore keeps the identity from the backup", () => {
+  assert.equal(linkedAccount(link({ sameDrone: true })), null);
+  assert.equal(cloudLinkSummary(link({ sameDrone: true })), "Keeps the link from the backup");
+});
+
+test("a board written over USB gets no card settings, so no link", () => {
+  assert.equal(linkedAccount(link({ usb: true })), null);
+  assert.match(cloudLinkSummary(link({ usb: true })), /device page/);
 });

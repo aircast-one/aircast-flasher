@@ -139,6 +139,11 @@ export interface CloudKeyset {
   advertisement: unknown;
 }
 
+export interface CloudEnrollment {
+  issuer: string;
+  token: string;
+}
+
 export interface CloudCard {
   id: string;
   label: string;
@@ -167,6 +172,7 @@ export interface Settings {
   tangUrls: string[];
   tangThreshold: number;
   tangCloud: boolean;
+  cloudLink: boolean | null;
   authKey: string;
   authKeyWrittenTo: KeyWrite | null;
   remoteAccess: boolean | null;

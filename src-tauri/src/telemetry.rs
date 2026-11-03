@@ -326,6 +326,7 @@ mod tests {
             encryption: None,
             fight_mode: false,
             restore: None,
+            cloud_enroll: None,
             init_format: InitFormat::CloudInit,
         }
     }
@@ -362,6 +363,7 @@ mod tests {
             encryption: None,
             fight_mode: false,
             restore: None,
+            cloud_enroll: None,
             init_format: InitFormat::FirstRun,
         });
         let json = serde_json::to_string(&facts).expect("serialize");
@@ -381,6 +383,7 @@ mod tests {
             encryption: None,
             fight_mode: false,
             restore: None,
+            cloud_enroll: None,
             init_format: InitFormat::CloudInit,
         });
         assert!(!facts.hostname);
@@ -399,6 +402,7 @@ mod tests {
             encryption: None,
             fight_mode: false,
             restore: None,
+            cloud_enroll: None,
             init_format: InitFormat::CloudInit,
         });
         assert_eq!(facts.remote, "tailscale");

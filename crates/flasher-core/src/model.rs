@@ -101,6 +101,12 @@ fn non_blank(v: &Option<String>) -> bool {
     v.as_deref().is_some_and(|s| !s.trim().is_empty())
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CloudEnrollment {
+    pub issuer: String,
+    pub token: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProvisionConfig {
     pub hostname: Option<String>,
@@ -114,6 +120,8 @@ pub struct ProvisionConfig {
     pub fight_mode: bool,
     #[serde(default)]
     pub restore: Option<String>,
+    #[serde(default)]
+    pub cloud_enroll: Option<CloudEnrollment>,
     pub init_format: InitFormat,
 }
 

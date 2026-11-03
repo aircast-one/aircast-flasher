@@ -144,6 +144,7 @@ pub async fn flash_image(
     encryption: Option<flasher_ops::EncryptionConfig>,
     fight_mode: bool,
     restore: Option<crate::backup::RestoreChoice>,
+    cloud_enroll: Option<flasher_ops::CloudEnrollment>,
     init_format: flasher_ops::InitFormat,
 ) -> Result<(), String> {
     let restore = restore
@@ -158,6 +159,7 @@ pub async fn flash_image(
         encryption,
         fight_mode,
         restore,
+        cloud_enroll,
         init_format,
     };
     let facts = telemetry::describe_config(&config);

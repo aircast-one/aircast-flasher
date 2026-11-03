@@ -28,6 +28,7 @@ import { cn } from "@/lib/utils";
 import type { FlashProgressState } from "@/components/wizard-types";
 import { saveRecoveryKey } from "@/components/disk-encryption-section";
 import { CloudSignInButton } from "@/components/cloud-cards-view";
+import type { CloudOutcome } from "@/components/cloud";
 import type { Board, EncryptionConfig } from "@/types";
 import { useState } from "react";
 
@@ -258,6 +259,7 @@ export function JobView({
   restore,
   retire,
   encryption,
+  cloud,
   success,
   cancelled,
   error,
@@ -279,6 +281,7 @@ export function JobView({
   restore: RestoredCard | null;
   retire: { hostnames: string[]; keep: string } | null;
   encryption: EncryptionConfig | null;
+  cloud: CloudOutcome;
   success: boolean;
   cancelled: boolean;
   error: string | null;
@@ -312,6 +315,7 @@ export function JobView({
           remoteEnrolled={remoteEnrolled}
           fightMode={fightMode}
           restore={restore}
+          cloud={cloud}
           notShowingUp={
             <NotShowingUp
               tips={troubleshootingTips({

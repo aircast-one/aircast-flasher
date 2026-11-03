@@ -178,6 +178,29 @@ pub async fn mark_lost(session_token: &str, id: &str) -> Result<(), String> {
     authed(session_token, request).await.map(|_| ())
 }
 
+#[derive(Deserialize)]
+struct Provisioned {
+    provision_token: String,
+}
+
+pub async fn provision_device(
+    session_token: &str,
+    device_name: &str,
+) -> Result<flasher_core::CloudEnrollment, String> {
+    let request = client()?
+        .post(format!("{}/v1/oauth2/device/provision", api_base()))
+        .json(&serde_json::json!({ "device_name": device_name }));
+    let provisioned = authed(session_token, request)
+        .await?
+        .json::<Provisioned>()
+        .await
+        .map_err(|e| format!("unexpected device provision response: {e}"))?;
+    Ok(flasher_core::CloudEnrollment {
+        issuer: api_base(),
+        token: provisioned.provision_token,
+    })
+}
+
 pub fn tang_prefix() -> String {
     format!("{}/v1/tang/", api_base())
 }
@@ -241,6 +264,19 @@ mod tests {
     #[tokio::test]
     async fn a_missing_session_is_signed_out_without_a_request() {
         assert_eq!(list_cards("").await.unwrap_err(), SIGNED_OUT);
+        assert_eq!(
+            provision_device(" ", "falcon-01").await.unwrap_err(),
+            SIGNED_OUT
+        );
+    }
+
+    #[test]
+    fn a_provisioned_device_hands_over_its_token() {
+        let p: Provisioned = serde_json::from_str(
+            r#"{"device_id":"d","device_name":"falcon-01","provision_token":"prov_abc","expires_at":"2026-11-11T00:00:00Z"}"#,
+        )
+        .unwrap();
+        assert_eq!(p.provision_token, "prov_abc");
     }
 
     #[test]

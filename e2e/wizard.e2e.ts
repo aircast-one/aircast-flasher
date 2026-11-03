@@ -662,6 +662,10 @@ describe("flasher wizard", () => {
     await expect(rows).toHaveText(expect.stringContaining("falcon-01.local"));
     await expect(rows).toHaveText(expect.stringContaining("test-net"));
     await expect(rows).toHaveText(expect.stringContaining("Target"));
+    await expect(rows).toHaveText(
+      expect.stringContaining("Off · sign in to link it to your account"),
+    );
+    await expect(rows.$("button=Sign in with Google")).toBeDisplayed();
     await expectBlocked("Flash SD Card", "Insert an SD card");
   });
 

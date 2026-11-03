@@ -11,6 +11,7 @@ import type {
   AccessConfig,
   Backup,
   CloudCard,
+  CloudEnrollment,
   CloudKeyset,
   CloudSignIn,
   CloudSignInStatus,
@@ -94,6 +95,7 @@ export function flashImage(args: {
   encryption: EncryptionConfig | null;
   fightMode: boolean;
   restore: RestoreChoice | null;
+  cloudEnroll: CloudEnrollment | null;
   initFormat: InitFormat;
 }): Promise<void> {
   return invoke<void>("flash_image", {
@@ -107,6 +109,7 @@ export function flashImage(args: {
     encryption: args.encryption,
     fightMode: args.fightMode,
     restore: args.restore,
+    cloudEnroll: args.cloudEnroll,
     initFormat: args.initFormat,
   });
 }
@@ -164,6 +167,12 @@ export function mintAuthKey(
 
 export function cloudCreateKeyset(label: string): Promise<CloudKeyset> {
   return invoke<CloudKeyset>("cloud_create_keyset", { label });
+}
+
+export function cloudProvisionDevice(
+  deviceName: string,
+): Promise<CloudEnrollment> {
+  return invoke<CloudEnrollment>("cloud_provision_device", { deviceName });
 }
 
 export function cloudListCards(): Promise<CloudCard[]> {

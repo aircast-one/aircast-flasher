@@ -4,6 +4,7 @@ import {
   cancelFlash,
   cloudCheckSignIn,
   cloudCreateKeyset,
+  cloudProvisionDevice,
   mintAuthKey,
   detectSshKeys,
   downloadImage,
@@ -50,7 +51,13 @@ import {
   releaseSupportsEncryption,
   releaseSupportsFight,
 } from "@/components/encryption";
-import { cardLabel, withCloudServer } from "@/components/cloud";
+import {
+  cardLabel,
+  linkedAccount,
+  withCloudServer,
+  type CloudLink,
+  type CloudOutcome,
+} from "@/components/cloud";
 import {
   MIN_FIGHT_PASSWORD,
   fightModeUnreachable,
@@ -182,7 +189,9 @@ function App() {
   const setThreshold = (tangThreshold: number) => update({ tangThreshold });
   const cloudKeyServer = settings.tangCloud;
   const setCloudKeyServer = (tangCloud: boolean) => update({ tangCloud });
-  const cloudSignedIn = typeof useCloudAccount().data === "string";
+  const cloudData = useCloudAccount().data;
+  const cloudAccount = typeof cloudData === "string" ? cloudData : null;
+  const cloudSignedIn = cloudAccount !== null;
   const cloudOn = cloudKeyServer && cloudSignedIn;
   const [recoveryKey] = useState(() => randomHex(24));
   const [recoverySaved, setRecoverySaved] = useState(false);
@@ -427,7 +436,11 @@ function App() {
             : "Downloading in the background…";
 
   const flashMutation = useMutation<
-    { encryption: EncryptionConfig | null; cloudCard: string | null },
+    {
+      encryption: EncryptionConfig | null;
+      cloudCard: string | null;
+      cloud: CloudOutcome;
+    },
     unknown,
     FlashVars
   >({
@@ -476,6 +489,17 @@ function App() {
               ),
             }
           : vars.tailscale;
+      const account = vars.cloudAccount;
+      const link =
+        account === null
+          ? null
+          : await cloudProvisionDevice(cardLabel(vars.hostname)).then(
+              (enroll) => ({ enroll, cloud: { account } }),
+              (e: unknown) => ({
+                enroll: null,
+                cloud: { error: errorMessage(e, "Aircast Cloud did not answer.") },
+              }),
+            );
       setProgress({ phase: "flashing", progress: null });
       setCardTouched(true);
       await flashImage({
@@ -489,11 +513,18 @@ function App() {
         encryption,
         fightMode: vars.fightMode,
         restore: vars.restore,
+        cloudEnroll: link?.enroll ?? null,
         initFormat: "cloud-init" satisfies InitFormat,
       });
-      return { encryption, cloudCard: keyset?.id ?? null };
+      return {
+        encryption,
+        cloudCard: keyset?.id ?? null,
+        cloud: link?.cloud ?? null,
+      };
     },
-    onSuccess: (_result, vars) => {
+    onSuccess: (result, vars) => {
+      if (result.cloud !== null && "error" in result.cloud)
+        void queryClient.invalidateQueries({ queryKey: ACCOUNT_KEY });
       const written = vars.hostname.trim();
       const remembered =
         written === "" || settings.flashedHostnames.includes(written);
@@ -550,6 +581,12 @@ function App() {
     ((sshMode === "key-only" && sshKey.trim() === "") ||
       (sshMode === "password" && isWeakDevicePassword(devicePassword, true)));
   const selectedDevice = devices.find((d) => d.path === selectedDisk);
+  const cloudLink: CloudLink = {
+    account: cloudAccount,
+    on: settings.cloudLink ?? true,
+    sameDrone: restore?.sameDrone === true,
+    usb: isUsbTarget(selectedDisk),
+  };
   const cardTooSmall =
     requiredCardBytes !== undefined &&
     selectedDevice !== undefined &&
@@ -731,6 +768,7 @@ function App() {
         restore.sameDrone === null
           ? null
           : { backup: restore.backup, sameDrone: restore.sameDrone },
+      cloudAccount: linkedAccount(cloudLink),
     };
     setLastVars(vars);
     flashMutation.mutate(vars);
@@ -940,6 +978,8 @@ function App() {
               onSelectDisk={setPickedDisk}
               requiredCardBytes={requiredCardBytes}
               summary={summary}
+              cloudLink={cloudLink}
+              onCloudLink={(on) => void update({ cloudLink: on })}
               problems={storageProblems}
               onBack={() => setStep(STEP.access)}
               onEditStep={setStep}
@@ -965,6 +1005,7 @@ function App() {
                   : null
               }
               encryption={flashMutation.data?.encryption ?? null}
+              cloud={flashMutation.data?.cloud ?? null}
               success={flashMutation.isSuccess}
               cancelled={stopped}
               error={

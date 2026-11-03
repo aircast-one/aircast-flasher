@@ -7,8 +7,11 @@ export type FoundDevice = {
   note: string;
 };
 
+export const devicePage = (deviceUrl: string, page: string): string =>
+  `${deviceUrl.replace(/\/+$/, "")}/fly/#device=${encodeURIComponent(page)}`;
+
 export const setupUrl = (deviceUrl: string): string =>
-  `${deviceUrl.replace(/\/+$/, "")}/fly/#device=${encodeURIComponent("/setup")}`;
+  devicePage(deviceUrl, "/setup");
 
 export const tailnetDevice = (peer: TailnetPeer, hostname: string): FoundDevice => {
   const address = peer.dnsName.replace(/\.$/, "");

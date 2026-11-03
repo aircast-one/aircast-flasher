@@ -43,6 +43,7 @@ export interface FlashVars {
   cloudKeyServer: boolean;
   fightMode: boolean;
   restore: RestoreChoice | null;
+  cloudAccount: string | null;
 }
 
 export interface RestoreDraft {

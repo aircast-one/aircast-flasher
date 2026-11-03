@@ -29,7 +29,10 @@ pub(crate) fn validate_disk_path(path: &str) -> Result<(), String> {
 }
 
 pub(crate) fn validate_fight_access(config: &ProvisionConfig) -> Result<(), String> {
-    let holds = config.access.as_ref().is_some_and(AccessConfig::holds_in_fight);
+    let holds = config
+        .access
+        .as_ref()
+        .is_some_and(AccessConfig::holds_in_fight);
     if config.fight_mode && !holds {
         return Err(format!(
             "Fight mode needs an SSH key, a password of at least {MIN_FIGHT_PASSWORD} characters, or SSH turned off — the image's default login must not stay on."
@@ -162,6 +165,7 @@ mod tests {
             encryption: None,
             fight_mode,
             restore: None,
+            cloud_enroll: None,
             init_format: InitFormat::CloudInit,
         }
     }

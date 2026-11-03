@@ -19,6 +19,7 @@ const EMPTY: Settings = {
   tangUrls: [],
   tangThreshold: 1,
   tangCloud: false,
+  cloudLink: null,
   authKey: "",
   authKeyWrittenTo: null,
   remoteAccess: null,

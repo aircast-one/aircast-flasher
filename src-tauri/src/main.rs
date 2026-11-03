@@ -62,6 +62,7 @@ async fn main() {
             cloud::cloud_account,
             cloud::cloud_sign_out,
             cloud::cloud_create_keyset,
+            cloud::cloud_provision_device,
             cloud::cloud_list_cards,
             cloud::cloud_mark_lost,
             flasher::list_wifi_networks,

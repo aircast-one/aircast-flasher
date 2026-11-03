@@ -87,6 +87,15 @@ pub async fn cloud_create_keyset(
 }
 
 #[tauri::command]
+pub async fn cloud_provision_device(
+    state: State<'_, CloudState>,
+    device_name: String,
+) -> Result<flasher_ops::CloudEnrollment, String> {
+    let result = cloud::provision_device(&state.token()?, &device_name).await;
+    state.forget_if_signed_out(result)
+}
+
+#[tauri::command]
 pub async fn cloud_list_cards(state: State<'_, CloudState>) -> Result<Vec<CloudCard>, String> {
     let result = cloud::list_cards(&state.token()?).await;
     state.forget_if_signed_out(result)

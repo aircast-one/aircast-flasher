@@ -4,6 +4,7 @@ const ENCRYPT_MARKER_NAME: &str = "aircast-encrypt";
 const FIGHT_MARKER_NAME: &str = "aircast-fight-mode";
 const FIGHT_PASSWORD_LOGIN: &str = "ssh-password\n";
 const RESTORE_FILE_NAME: &str = "aircast-restore.json";
+const CLOUD_ENROLL_FILE_NAME: &str = "aircast-cloud-enroll.json";
 
 const TS_STATE_PATH: &str = "/var/lib/aircastd/tailscale.json";
 const TS_KEY_PATH: &str = "/var/lib/aircastd/tailscale.authkey";
@@ -85,7 +86,19 @@ pub fn boot_markers(config: &ProvisionConfig) -> Vec<ProvisionFile> {
                 .clone()
                 .map(|bundle| ProvisionFile::plain(RESTORE_FILE_NAME, bundle)),
         )
+        .chain(config.cloud_enroll.as_ref().and_then(cloud_enroll_file))
         .collect()
+}
+
+fn cloud_enroll_file(enroll: &crate::CloudEnrollment) -> Option<ProvisionFile> {
+    let issuer = sanitize_line(enroll.issuer.trim());
+    let token = sanitize_line(enroll.token.trim());
+    (!issuer.is_empty() && !token.is_empty()).then(|| {
+        ProvisionFile::plain(
+            CLOUD_ENROLL_FILE_NAME,
+            serde_json::json!({ "issuer": issuer, "token": token }).to_string(),
+        )
+    })
 }
 
 fn fight_marker(config: &ProvisionConfig) -> String {
@@ -459,6 +472,7 @@ mod tests {
             encryption: None,
             fight_mode: false,
             restore: None,
+            cloud_enroll: None,
             init_format: init,
         }
     }
@@ -475,6 +489,7 @@ mod tests {
             encryption: None,
             fight_mode: false,
             restore: None,
+            cloud_enroll: None,
             init_format: init,
         }
     }
@@ -488,6 +503,7 @@ mod tests {
             encryption: None,
             fight_mode: false,
             restore: None,
+            cloud_enroll: None,
             init_format: init,
         }
     }
@@ -1034,6 +1050,69 @@ mod tests {
         let names: Vec<_> = markers.iter().map(|f| f.name.as_str()).collect();
         assert_eq!(names, ["aircast-fight-mode", "aircast-restore.json"]);
         assert_eq!(markers[1].contents, "{\"format\":1,\"sameDrone\":true}");
+    }
+
+    fn enrolled(issuer: &str, token: &str) -> ProvisionConfig {
+        let mut c = cfg(InitFormat::CloudInit, false, None);
+        c.cloud_enroll = Some(crate::CloudEnrollment {
+            issuer: issuer.into(),
+            token: token.into(),
+        });
+        c
+    }
+
+    #[test]
+    fn a_cloud_enrollment_lands_on_the_boot_partition_for_aircastd() {
+        let markers = boot_markers(&enrolled("https://api.aircast.one", "prov_abc"));
+        assert_eq!(markers.len(), 1);
+        assert_eq!(markers[0].name, "aircast-cloud-enroll.json");
+        assert!(!markers[0].executable);
+        let v: serde_json::Value = serde_json::from_str(&markers[0].contents).unwrap();
+        assert_eq!(
+            v,
+            serde_json::json!({ "issuer": "https://api.aircast.one", "token": "prov_abc" })
+        );
+    }
+
+    #[test]
+    fn a_cloud_enrollment_alone_is_not_a_cloud_init_seed() {
+        assert_eq!(
+            plan(&enrolled("https://api.aircast.one", "prov_abc")),
+            ProvisionPlan::Noop
+        );
+    }
+
+    #[test]
+    fn a_blank_cloud_enrollment_writes_nothing() {
+        assert!(boot_markers(&enrolled("https://api.aircast.one", "  ")).is_empty());
+        assert!(boot_markers(&enrolled("", "prov_abc")).is_empty());
+    }
+
+    #[test]
+    fn cloud_enrollment_values_cannot_break_the_json() {
+        let markers = boot_markers(&enrolled("https://a\n\"x", "prov\n\"y"));
+        let v: serde_json::Value = serde_json::from_str(&markers[0].contents).unwrap();
+        assert_eq!(v["issuer"], "https://a\"x");
+        assert_eq!(v["token"], "prov\"y");
+    }
+
+    #[test]
+    fn a_cloud_enrollment_rides_with_fight_mode_and_encryption() {
+        let mut c = enc_cfg();
+        c.fight_mode = true;
+        c.cloud_enroll = Some(crate::CloudEnrollment {
+            issuer: "https://api.aircast.one".into(),
+            token: "prov_abc".into(),
+        });
+        let names: Vec<_> = boot_markers(&c).into_iter().map(|f| f.name).collect();
+        assert_eq!(
+            names,
+            [
+                "aircast-encrypt",
+                "aircast-fight-mode",
+                "aircast-cloud-enroll.json"
+            ]
+        );
     }
 
     #[test]

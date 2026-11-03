@@ -1,6 +1,13 @@
 import { AlertTriangle, Cpu, HardDrive, LoaderCircle } from "lucide-react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Switch } from "@/components/ui/switch";
+import { CloudSignInButton } from "@/components/cloud-cards-view";
+import {
+  cloudLinkSummary,
+  linkedAccount,
+  type CloudLink,
+} from "@/components/cloud";
 import { SelectableCard } from "@/components/selectable-card";
 import { StepShell, type Problem } from "@/components/step-shell";
 import { FromBackup } from "@/components/setting-card";
@@ -53,6 +60,8 @@ export function StepStorage({
   onSelectDisk,
   requiredCardBytes,
   summary,
+  cloudLink,
+  onCloudLink,
   problems,
   onBack,
   onEditStep,
@@ -66,6 +75,8 @@ export function StepStorage({
   onSelectDisk: (path: string) => void;
   requiredCardBytes: number | undefined;
   summary: SummaryItem[];
+  cloudLink: CloudLink;
+  onCloudLink: (on: boolean) => void;
   problems: Problem[];
   onBack: () => void;
   onEditStep: (step: WizardStep) => void;
@@ -201,6 +212,24 @@ export function StepStorage({
                 </dd>
               </div>
             ))}
+            <div className="flex items-center justify-between gap-4 text-sm">
+              <dt className="shrink-0 text-muted-foreground">Aircast Cloud</dt>
+              <dd className="flex min-w-0 items-center gap-3">
+                <span className="text-right break-all">
+                  {cloudLinkSummary(cloudLink)}
+                </span>
+                {cloudLink.account === null ? (
+                  <CloudSignInButton />
+                ) : (
+                  <Switch
+                    aria-label="Link to Aircast Cloud"
+                    checked={linkedAccount(cloudLink) !== null}
+                    disabled={cloudLink.sameDrone || cloudLink.usb}
+                    onCheckedChange={onCloudLink}
+                  />
+                )}
+              </dd>
+            </div>
           </dl>
         </div>
 

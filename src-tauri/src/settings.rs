@@ -28,6 +28,7 @@ pub struct Settings {
     pub tang_urls: Vec<String>,
     pub tang_threshold: u32,
     pub tang_cloud: bool,
+    pub cloud_link: Option<bool>,
     pub auth_key: String,
     pub auth_key_written_to: Option<KeyWrite>,
     pub remote_access: Option<bool>,
@@ -210,6 +211,7 @@ mod tests {
             tang_urls: vec!["http://10.0.0.5".into()],
             tang_threshold: 1,
             tang_cloud: false,
+            cloud_link: Some(false),
             auth_key: "hskey-auth-abc".into(),
             auth_key_written_to: Some(KeyWrite {
                 hostname: "falcon-01".into(),
