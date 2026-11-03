@@ -23,6 +23,7 @@ const EMPTY: Settings = {
   authKeyWrittenTo: null,
   remoteAccess: null,
   selfHosted: false,
+  headscaleUser: "",
   sshMode: null,
   devicePassword: "",
   fightMode: false,

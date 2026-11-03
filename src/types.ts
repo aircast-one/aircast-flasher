@@ -171,6 +171,7 @@ export interface Settings {
   authKeyWrittenTo: KeyWrite | null;
   remoteAccess: boolean | null;
   selfHosted: boolean;
+  headscaleUser: string;
   sshMode: SshMode | null;
   devicePassword: string;
   fightMode: boolean;

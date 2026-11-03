@@ -102,10 +102,17 @@ pub struct SshRequest {
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct TailnetRequest {
-    #[schemars(description = "Pre-auth key (tskey-auth-… or a Headscale key).")]
+    #[schemars(
+        description = "Pre-auth key (tskey-auth-… or hskey-auth-…), or a Headscale API key (hskey-api-…) to mint a fresh one-time key for this card."
+    )]
     pub auth_key: String,
     #[schemars(description = "Headscale control server URL. Leave out for Tailscale.")]
     pub control_server: Option<String>,
+    #[serde(default)]
+    #[schemars(
+        description = "Headscale user the drone joins as. Needed with a Headscale API key."
+    )]
+    pub user: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
@@ -211,6 +218,14 @@ pub fn problems(request: &FlashRequest, detected_keys: usize) -> Vec<String> {
             .and_then(|t| t.control_server.as_deref())
             .filter(|url| !(url.starts_with("http://") || url.starts_with("https://")))
             .map(|_| "The control server must be an http(s):// URL".to_string()),
+        tailnet
+            .filter(|t| flasher_ops::headscale::is_api_key(&t.auth_key))
+            .filter(|t| t.control_server.is_none())
+            .map(|_| "A Headscale API key needs the Headscale control server URL".to_string()),
+        tailnet
+            .filter(|t| flasher_ops::headscale::is_api_key(&t.auth_key))
+            .filter(|t| t.user.as_deref().unwrap_or("").trim().is_empty())
+            .map(|_| "A Headscale API key needs the user the drone joins as".to_string()),
         (request.fight_mode && tailnet.is_none()).then(|| {
             "Fight mode needs a tailnet pre-auth key — the tailnet is the only way in".to_string()
         }),
@@ -514,6 +529,28 @@ fn save_recovery(path: &str, text: &str) -> Result<(), String> {
         .map_err(|e| format!("Could not save the recovery key to {path}: {e}"))
 }
 
+async fn tailscale(request: Option<&TailnetRequest>) -> Result<Option<TailscaleConfig>, String> {
+    let Some(request) = request else {
+        return Ok(None);
+    };
+    let control_server = request.control_server.clone().unwrap_or_default();
+    let key = request.auth_key.trim();
+    let auth_key = if flasher_ops::headscale::is_api_key(key) {
+        flasher_ops::headscale::mint_key(
+            &control_server,
+            key,
+            request.user.as_deref().unwrap_or(""),
+        )
+        .await?
+    } else {
+        key.to_string()
+    };
+    Ok(Some(TailscaleConfig {
+        control_server,
+        auth_key,
+    }))
+}
+
 fn restore_file(restore: &RestoreRequest) -> Result<String, String> {
     flasher_ops::paths::backup_dir().and_then(|dir| {
         flasher_ops::backup::restore_file(&dir, &restore.backup, restore.same_drone)
@@ -551,10 +588,7 @@ pub async fn run(
     let restore = request.restore.as_ref().map(restore_file).transpose()?;
     let (access, ssh_summary) = access(request.ssh.as_ref())?;
     let wifi = wifi(request.wifi.as_ref()).await;
-    let tailscale = request.tailscale.as_ref().map(|t| TailscaleConfig {
-        control_server: t.control_server.clone().unwrap_or_default(),
-        auth_key: t.auth_key.trim().to_string(),
-    });
+    let tailscale = tailscale(request.tailscale.as_ref()).await?;
     let encryption = encryption(request.encryption.as_ref(), hostname).await?;
 
     let config = ProvisionConfig {
@@ -656,6 +690,7 @@ mod tests {
             tailscale: Some(TailnetRequest {
                 auth_key: "tskey-auth-x".into(),
                 control_server: None,
+                user: None,
             }),
             ..request()
         };
@@ -669,12 +704,33 @@ mod tests {
     }
 
     #[test]
+    fn a_headscale_api_key_needs_the_server_and_a_user() {
+        let with = |control_server: Option<&str>, user: Option<&str>| FlashRequest {
+            tailscale: Some(TailnetRequest {
+                auth_key: "hskey-api-abc-def".into(),
+                control_server: control_server.map(String::from),
+                user: user.map(String::from),
+            }),
+            ..request()
+        };
+        assert!(problems(&with(Some("https://hs.example.com"), Some("pilots")), 1).is_empty());
+        assert_eq!(
+            problems(&with(None, None), 1),
+            [
+                "A Headscale API key needs the Headscale control server URL",
+                "A Headscale API key needs the user the drone joins as",
+            ]
+        );
+    }
+
+    #[test]
     fn fight_mode_takes_a_password_of_twelve_characters() {
         let fight = |password: &str| FlashRequest {
             fight_mode: true,
             tailscale: Some(TailnetRequest {
                 auth_key: "tskey-auth-x".into(),
                 control_server: None,
+                user: None,
             }),
             ssh: Some(SshRequest {
                 mode: SshChoice::Password,

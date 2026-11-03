@@ -1,6 +1,15 @@
 use flasher_ops::tailnet::{self, LocalTailscale, TailscaleState};
 
 #[tauri::command]
+pub async fn headscale_mint_key(
+    control_server: String,
+    api_key: String,
+    user: String,
+) -> Result<String, String> {
+    flasher_ops::headscale::mint_key(&control_server, &api_key, &user).await
+}
+
+#[tauri::command]
 pub async fn probe_device(url: String) -> bool {
     tailnet::probe_device(url).await
 }

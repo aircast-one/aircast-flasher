@@ -2,6 +2,7 @@ import type { Backup, KeyWrite, SshMode, SshPublicKey } from "@/types";
 import { backupLabel } from "@/lib/format";
 import { STEP, type WizardStep } from "@/components/wizard-types";
 import {
+  isHeadscaleApiKey,
   isValidControlServer,
   joinsTailnet,
   keyCardName,
@@ -44,10 +45,11 @@ function remoteAccess(
   if (authKey.trim() === "") return { ...row, value: "Off" };
   if (!isValidControlServer(server))
     return { ...row, value: "Off — control server isn't a URL", warn: true };
+  const minting = isHeadscaleApiKey(authKey) ? " · new key per card" : "";
   const value =
     server === ""
       ? "Tailscale"
-      : `Headscale · ${server.replace(/^https?:\/\//, "")}`;
+      : `Headscale · ${server.replace(/^https?:\/\//, "")}${minting}`;
   return keyWrittenTo === null
     ? { ...row, value }
     : {

@@ -7,6 +7,7 @@ import {
   isInvalidWifiPassword,
   isWeakDevicePassword,
   needsControlServer,
+  needsHeadscaleUser,
   networkProblems,
   reusedKeyNotice,
 } from "./step-network.validation.ts";
@@ -78,6 +79,13 @@ test("a fresh key, or no key, carries no reuse warning", () => {
   assert.equal(reusedKeyNotice(null, "hskey-auth-abc"), null);
   const written = { hostname: "pizero2", at: "2026-11-01T00:24:00.000Z" };
   assert.equal(reusedKeyNotice(written, " "), null);
+});
+
+test("a Headscale API key mints per card and needs the user it joins as", () => {
+  assert.equal(needsHeadscaleUser(true, "hskey-api-abc-def", " "), true);
+  assert.equal(needsHeadscaleUser(true, "hskey-api-abc-def", "pilots"), false);
+  assert.equal(needsHeadscaleUser(true, "hskey-auth-abc-def", ""), false);
+  assert.equal(needsHeadscaleUser(false, "hskey-api-abc-def", ""), false);
 });
 
 test("lists every network problem, in page order", () => {

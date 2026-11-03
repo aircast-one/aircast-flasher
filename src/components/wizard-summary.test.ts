@@ -91,6 +91,17 @@ test("distinguishes Tailscale from a self-hosted control server", () => {
     ),
     "Headscale · hs.example.com",
   );
+  assert.equal(
+    valueOf(
+      {
+        ...withKey,
+        authKey: "hskey-api-abc-def",
+        controlServer: "https://hs.example.com",
+      },
+      "Remote access",
+    ),
+    "Headscale · hs.example.com · new key per card",
+  );
 });
 
 test("a control server that isn't a URL means remote access is skipped", () => {

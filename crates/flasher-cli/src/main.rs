@@ -117,7 +117,7 @@ struct FlashArgs {
         long,
         env = "AIRCAST_TAILSCALE_KEY",
         hide_env_values = true,
-        help = "Tailnet pre-auth key"
+        help = "Tailnet pre-auth key, or a Headscale API key (hskey-api-…) to mint a one-time key for this card"
     )]
     tailscale_key: Option<String>,
     #[arg(
@@ -126,6 +126,12 @@ struct FlashArgs {
         help = "Headscale control server URL"
     )]
     control_server: Option<String>,
+    #[arg(
+        long,
+        requires = "tailscale_key",
+        help = "Headscale user the drone joins as (with a Headscale API key)"
+    )]
+    headscale_user: Option<String>,
     #[arg(
         long = "tang",
         help = "Tang key server URL (repeat for more); turns on disk encryption"
@@ -239,6 +245,7 @@ impl FlashArgs {
             tailscale: self.tailscale_key.as_ref().map(|key| TailnetRequest {
                 auth_key: key.clone(),
                 control_server: self.control_server.clone(),
+                user: self.headscale_user.clone(),
             }),
             encryption: encrypting.then(|| EncryptionRequest {
                 tang_servers: self.tang.clone(),

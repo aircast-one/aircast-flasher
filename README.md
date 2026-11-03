@@ -121,10 +121,16 @@ list_releases ─► download_image ─► flash_image ─► provision_device
   `tailscale debug prefs` supplies `ControlURL`. Anything that is not
   Tailscale's own server switches the whole step: the form opens on the
   self-hosted branch with the detected server filled in, the key help drops the
-  Tailscale admin link — Headscale keys come from `headscale preauthkeys
-  create`, shown with a copy button — and the post-boot sign-in PUTs the control
-  server to the device first, so a self-hosted shop's device never tries to sign
-  in to Tailscale.
+  Tailscale admin link — the key field takes a Headscale API key
+  (`headscale apikeys create`, shown with a copy button) or a pre-auth key —
+  and the post-boot sign-in PUTs the control server to the device first, so a
+  self-hosted shop's device never tries to sign in to Tailscale.
+
+  An API key (`hskey-api-…`) plus a Headscale user makes the Flasher mint a
+  one-time, non-ephemeral, 90-day pre-auth key per card right before it writes
+  (`flasher-ops/src/headscale.rs`, shared by the app, CLI and MCP). A pasted
+  pre-auth key goes onto the card as is; a spent or expired one leaves a
+  fight-mode drone unreachable, since the tailnet is its only way in.
 
   Remote access is on **iff a pre-auth key is present**: a control server alone
   writes nothing, which is why prefilling it raises no error. The only guard

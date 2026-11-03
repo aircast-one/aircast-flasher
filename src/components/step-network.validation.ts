@@ -28,6 +28,15 @@ export function joinsTailnet(authKey: string, controlServer: string): boolean {
   return authKey.trim() !== "" && isValidControlServer(controlServer);
 }
 
+export const isHeadscaleApiKey = (authKey: string): boolean =>
+  authKey.trim().startsWith("hskey-api-");
+
+export const needsHeadscaleUser = (
+  selfHosted: boolean,
+  authKey: string,
+  user: string,
+): boolean => selfHosted && isHeadscaleApiKey(authKey) && user.trim() === "";
+
 export const keyCardName = (written: KeyWrite): string =>
   written.hostname === "" ? "a card" : written.hostname;
 

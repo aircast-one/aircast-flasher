@@ -23,6 +23,7 @@ flate2 = "1"
 byte-unit = "5"
 url = "2.5"
 base64 = "0.22"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 getrandom = "0.3"
 dirs = "6"
 rockusb = { version = "0.4", features = ["nusb"] }

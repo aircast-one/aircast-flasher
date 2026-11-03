@@ -4,6 +4,7 @@ import {
   cancelFlash,
   cloudCheckSignIn,
   cloudCreateKeyset,
+  headscaleMintKey,
   detectSshKeys,
   downloadImage,
   fetchTangAdv,
@@ -50,6 +51,8 @@ import { cardLabel, withCloudServer } from "@/components/cloud";
 import {
   MIN_FIGHT_PASSWORD,
   fightModeUnreachable,
+  isHeadscaleApiKey,
+  needsHeadscaleUser,
   defaultSshMode,
   isWeakDevicePassword,
   joinsTailnet,
@@ -152,6 +155,7 @@ function App() {
   const remoteAccess = settings.remoteAccess ?? true;
   const tailnetKey = remoteAccess ? authKey : "";
   const tailnetServer = settings.selfHosted ? settings.controlServer : "";
+  const headscaleUser = settings.headscaleUser;
 
   const encryptEnabled = settings.encryption;
   const [tangServers, setTangServerRows] = useState<TangServer[]>([
@@ -415,6 +419,17 @@ function App() {
               await cloudCreateKeyset(cardLabel(vars.hostname)),
             )
           : vars.encryption;
+      const tailscale =
+        vars.tailscale !== null && isHeadscaleApiKey(vars.tailscale.authKey)
+          ? {
+              ...vars.tailscale,
+              authKey: await headscaleMintKey(
+                vars.tailscale.controlServer,
+                vars.tailscale.authKey,
+                vars.headscaleUser,
+              ),
+            }
+          : vars.tailscale;
       setProgress({ phase: "flashing", progress: null });
       setCardTouched(true);
       await flashImage({
@@ -423,7 +438,7 @@ function App() {
         targetDisk: vars.targetDisk,
         wifi: vars.wifi,
         hostname: vars.hostname,
-        tailscale: vars.tailscale,
+        tailscale,
         access: vars.access,
         encryption,
         fightMode: vars.fightMode,
@@ -437,7 +452,7 @@ function App() {
       const remembered =
         written === "" || settings.flashedHostnames.includes(written);
       update({
-        ...(vars.tailscale === null
+        ...(vars.tailscale === null || isHeadscaleApiKey(vars.tailscale.authKey)
           ? {}
           : {
               authKeyWrittenTo: {
@@ -523,6 +538,14 @@ function App() {
           {
             message:
               "Fight mode needs Remote access with a pre-auth key — the tailnet is the only way in",
+            fix: () => setStep(STEP.access),
+          },
+        ]
+      : []),
+    ...(needsHeadscaleUser(settings.selfHosted, tailnetKey, headscaleUser)
+      ? [
+          {
+            message: "Enter the Headscale user the drone joins as",
             fix: () => setStep(STEP.access),
           },
         ]
@@ -637,6 +660,7 @@ function App() {
       wifi,
       hostname: trimmedHostname,
       tailscale,
+      headscaleUser: headscaleUser.trim(),
       access,
       encryption,
       cloudKeyServer: encrypting && cloudOn,
@@ -780,6 +804,8 @@ function App() {
                 onEnabled: (remoteAccess) => update({ remoteAccess }),
                 selfHosted: settings.selfHosted,
                 onSelfHosted: (selfHosted) => update({ selfHosted }),
+                headscaleUser,
+                onHeadscaleUser: (headscaleUser) => update({ headscaleUser }),
               }}
               access={{
                 sshMode,

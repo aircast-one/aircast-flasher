@@ -30,6 +30,7 @@ import {
   isWeakDevicePassword,
   minDevicePassword,
   needsControlServer,
+  needsHeadscaleUser,
 } from "@/components/step-network.validation";
 
 type RemoteAccessInputs = Pick<
@@ -41,6 +42,8 @@ type RemoteAccessInputs = Pick<
   | "keyWrittenTo"
   | "selfHosted"
   | "onSelfHosted"
+  | "headscaleUser"
+  | "onHeadscaleUser"
 > & { enabled: boolean; onEnabled: (v: boolean) => void };
 
 type DeviceAccessInputs = Pick<
@@ -138,6 +141,14 @@ export function StepAccess({
                   "Enter your control server URL — in fight mode the tailnet is the only way in",
                 fix: focusField("control-server"),
               },
+        ]
+      : []),
+    ...(needsHeadscaleUser(remote.selfHosted, tailnetKey, remote.headscaleUser)
+      ? [
+          {
+            message: "Enter the Headscale user the drone joins as",
+            fix: focusField("headscale-user"),
+          },
         ]
       : []),
     ...encryptionProblems(encryption).map(({ field, message }) => ({

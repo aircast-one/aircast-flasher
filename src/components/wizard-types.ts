@@ -37,6 +37,7 @@ export interface FlashVars {
   wifi: WifiConfig | null;
   hostname: string;
   tailscale: TailscaleConfig | null;
+  headscaleUser: string;
   access: AccessConfig | null;
   encryption: EncryptionConfig | null;
   cloudKeyServer: boolean;

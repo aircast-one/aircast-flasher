@@ -379,6 +379,30 @@ describe("flasher wizard", () => {
     await $("#auth-key").clearValue();
   });
 
+  it("mints a key per card from a Headscale API key, once it knows the user", async () => {
+    await onAccessStep();
+    await openRemoteAccess();
+    await $("button=Headscale").click();
+    await $("#control-server").setValue("https://hs.example.com");
+    await $("#auth-key").setValue("hskey-api-abc-def");
+    await expect($("#auth-key-help")).toHaveText(
+      expect.stringContaining("its own one-time key"),
+    );
+    await expectBlocked("Next", "Headscale user");
+
+    await $("#headscale-user").setValue("pilots");
+    await expect(problems()).not.toBeDisplayed();
+    await browser.waitUntil(() => savedSettings().headscaleUser === "pilots", {
+      timeout: 10_000,
+      timeoutMsg: "the Headscale user was not saved",
+    });
+
+    await $("#headscale-user").clearValue();
+    await $("#auth-key").clearValue();
+    await $("#control-server").clearValue();
+    await $("button=Tailscale").click();
+  });
+
   it("keeps the caret where it is when editing the control server", async () => {
     await onAccessStep();
     await openRemoteAccess();

@@ -13,14 +13,16 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Segmented } from "@/components/segmented";
-import { reusedKeyNotice } from "@/components/step-network.validation";
+import {
+  isHeadscaleApiKey,
+  reusedKeyNotice,
+} from "@/components/step-network.validation";
 import { useLocalTailscale } from "@/lib/use-local-tailscale";
 import type { KeyWrite } from "@/types";
 
 const KEYS_URL = "https://login.tailscale.com/admin/settings/keys";
 const DOWNLOAD_URL = "https://aircast.one/docs/software/tailscale";
-const HEADSCALE_COMMAND =
-  "headscale preauthkeys create --user <you> --expiration 1h";
+const HEADSCALE_COMMAND = "headscale apikeys create --expiration 365d";
 
 const COPIED_FEEDBACK_MS = 2000;
 
@@ -106,6 +108,8 @@ export interface RemoteAccessProps {
   keyWrittenTo: KeyWrite | null;
   selfHosted: boolean;
   onSelfHosted: (v: boolean) => void;
+  headscaleUser: string;
+  onHeadscaleUser: (v: string) => void;
   controlServerValid: boolean;
   controlServerMissing: boolean;
 }
@@ -118,6 +122,8 @@ export function RemoteAccessSection({
   keyWrittenTo,
   selfHosted,
   onSelfHosted,
+  headscaleUser,
+  onHeadscaleUser,
   controlServerValid,
   controlServerMissing,
 }: RemoteAccessProps) {
@@ -125,6 +131,7 @@ export function RemoteAccessSection({
     onSelfHosted(provider === "headscale");
   };
   const reused = reusedKeyNotice(keyWrittenTo, authKey);
+  const minting = selfHosted && isHeadscaleApiKey(authKey);
 
   return (
     <>
@@ -166,7 +173,9 @@ export function RemoteAccessSection({
 
       <div className="flex flex-col gap-2">
         <div className="flex items-center justify-between gap-3">
-          <Label htmlFor="auth-key">Pre-auth key</Label>
+          <Label htmlFor="auth-key">
+            {selfHosted ? "API key or pre-auth key" : "Pre-auth key"}
+          </Label>
           {selfHosted ? null : <KeyLinks />}
         </div>
         <Input
@@ -175,7 +184,7 @@ export function RemoteAccessSection({
           value={authKey}
           onChange={(e) => onAuthKey(e.currentTarget.value)}
           placeholder={
-            selfHosted ? "Pre-auth key from your control server" : "tskey-auth-…"
+            selfHosted ? "hskey-api-… or hskey-auth-…" : "tskey-auth-…"
           }
           autoCapitalize="none"
           autoCorrect="off"
@@ -193,11 +202,30 @@ export function RemoteAccessSection({
           </div>
         )}
         <p id="auth-key-help" className="text-sm text-muted-foreground">
-          Used once on first boot, so pick a short-expiry or ephemeral key.
-          {selfHosted ? " Create one on your server with:" : null}
+          {minting
+            ? "Each card gets its own one-time key, valid for 90 days."
+            : selfHosted
+              ? "Paste an API key and each card gets its own one-time key. Make one on your server with:"
+              : "Use a new key for each card, still valid when the drone first boots. Not ephemeral — an ephemeral drone leaves the tailnet once it's switched off."}
         </p>
-        {selfHosted ? <HeadscaleCommand /> : null}
+        {selfHosted && !minting ? <HeadscaleCommand /> : null}
       </div>
+
+      {minting ? (
+        <div className="flex flex-col gap-2">
+          <Label htmlFor="headscale-user">Headscale user</Label>
+          <Input
+            id="headscale-user"
+            value={headscaleUser}
+            onChange={(e) => onHeadscaleUser(e.currentTarget.value)}
+            placeholder="The user drones join as"
+            autoCapitalize="none"
+            autoCorrect="off"
+            spellCheck={false}
+            aria-invalid={headscaleUser.trim() === ""}
+          />
+        </div>
+      ) : null}
     </>
   );
 }
