@@ -146,7 +146,7 @@ export function StepAccess({
     ...(needsHeadscaleUser(remote.selfHosted, tailnetKey, remote.headscaleUser)
       ? [
           {
-            message: "Enter the Headscale user the drone joins as",
+            message: "Pick the Headscale user the drone joins as",
             fix: focusField("headscale-user"),
           },
         ]

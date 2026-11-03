@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import {
   Check,
   Copy,
@@ -8,16 +9,24 @@ import {
 } from "lucide-react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 
-import { track } from "@/api";
+import { headscaleUsers, track } from "@/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Segmented } from "@/components/segmented";
 import {
   isHeadscaleApiKey,
   mintsKeys,
   reusedKeyNotice,
 } from "@/components/step-network.validation";
+import { errorMessage } from "@/lib/format";
 import { useLocalTailscale } from "@/lib/use-local-tailscale";
 import type { KeyWrite } from "@/types";
 
@@ -102,6 +111,72 @@ const keyHelp = (selfHosted: boolean, minting: boolean): string =>
     : minting
       ? "Each card gets its own one-time key, valid for 90 days. The token itself lasts at most 90 days — when Tailscale refuses it, generate a new one."
       : "Paste an API access token and each card gets its own one-time key: Get a token opens Tailscale's Keys page, then choose Generate access token. Tokens last at most 90 days. A pasted pre-auth key must still be valid when the drone first boots, and not ephemeral.";
+
+function HeadscaleUserPicker({
+  controlServer,
+  apiKey,
+  value,
+  onChange,
+}: {
+  controlServer: string;
+  apiKey: string;
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  const users = useQuery({
+    queryKey: ["headscale-users", controlServer.trim(), apiKey.trim()],
+    queryFn: () => headscaleUsers(controlServer, apiKey),
+    enabled: /^https?:\/\/.+/.test(controlServer.trim()),
+    retry: false,
+  });
+  const names = users.data;
+
+  useEffect(() => {
+    if (names === undefined || names.includes(value)) return;
+    const next = names.length === 1 ? names[0] : "";
+    if (next !== value) onChange(next);
+  }, [names, value, onChange]);
+
+  return (
+    <div className="flex flex-col gap-2">
+      <Label htmlFor="headscale-user">Headscale user</Label>
+      <Select
+        value={value}
+        onValueChange={(v) => onChange(String(v))}
+        disabled={names === undefined}
+      >
+        <SelectTrigger
+          id="headscale-user"
+          aria-label="Headscale user"
+          aria-invalid={value === "" && names !== undefined}
+          className="w-full"
+        >
+          <SelectValue>
+            {(v) =>
+              users.isLoading
+                ? "Loading users…"
+                : String(v) === ""
+                  ? "Pick the user drones join as"
+                  : String(v)
+            }
+          </SelectValue>
+        </SelectTrigger>
+        <SelectContent>
+          {(names ?? []).map((name) => (
+            <SelectItem key={name} value={name}>
+              {name}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      {users.isError ? (
+        <p id="headscale-user-error" className="text-sm text-destructive">
+          {errorMessage(users.error, "Couldn't list the users on Headscale.")}
+        </p>
+      ) : null}
+    </div>
+  );
+}
 
 type Provider = "tailscale" | "headscale";
 
@@ -223,19 +298,12 @@ export function RemoteAccessSection({
       </div>
 
       {needsUser ? (
-        <div className="flex flex-col gap-2">
-          <Label htmlFor="headscale-user">Headscale user</Label>
-          <Input
-            id="headscale-user"
-            value={headscaleUser}
-            onChange={(e) => onHeadscaleUser(e.currentTarget.value)}
-            placeholder="The user drones join as"
-            autoCapitalize="none"
-            autoCorrect="off"
-            spellCheck={false}
-            aria-invalid={headscaleUser.trim() === ""}
-          />
-        </div>
+        <HeadscaleUserPicker
+          controlServer={controlServer}
+          apiKey={authKey}
+          value={headscaleUser}
+          onChange={onHeadscaleUser}
+        />
       ) : null}
     </>
   );

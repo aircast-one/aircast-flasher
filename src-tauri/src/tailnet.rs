@@ -1,6 +1,14 @@
 use flasher_ops::tailnet::{self, LocalTailscale, TailscaleState};
 
 #[tauri::command]
+pub async fn headscale_users(
+    control_server: String,
+    api_key: String,
+) -> Result<Vec<String>, String> {
+    flasher_ops::authkey::headscale_users(&control_server, &api_key).await
+}
+
+#[tauri::command]
 pub async fn mint_auth_key(
     control_server: String,
     api_key: String,

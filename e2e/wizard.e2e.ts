@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import net, { type AddressInfo } from "node:net";
 import path from "node:path";
 
 import { browser, $, $$, expect } from "@wdio/globals";
@@ -379,25 +380,25 @@ describe("flasher wizard", () => {
     await $("#auth-key").clearValue();
   });
 
-  it("mints a key per card from a Headscale API key, once it knows the user", async () => {
+  it("lists the Headscale users with the API key, and says when the server can't be reached", async () => {
+    const closed = net.createServer();
+    await new Promise<void>((resolve) => closed.listen(0, "127.0.0.1", resolve));
+    const { port } = closed.address() as AddressInfo;
+    await new Promise((resolve) => closed.close(resolve));
+
     await onAccessStep();
     await openRemoteAccess();
     await $("button=Headscale").click();
-    await $("#control-server").setValue("https://hs.example.com");
+    await $("#control-server").setValue(`http://127.0.0.1:${port}`);
     await $("#auth-key").setValue("hskey-api-abc-def");
     await expect($("#auth-key-help")).toHaveText(
       expect.stringContaining("its own one-time key"),
     );
+    await expect($("#headscale-user-error")).toHaveText(
+      expect.stringContaining("Couldn't reach Headscale"),
+    );
     await expectBlocked("Next", "Headscale user");
 
-    await $("#headscale-user").setValue("pilots");
-    await expect(problems()).not.toBeDisplayed();
-    await browser.waitUntil(() => savedSettings().headscaleUser === "pilots", {
-      timeout: 10_000,
-      timeoutMsg: "the Headscale user was not saved",
-    });
-
-    await $("#headscale-user").clearValue();
     await $("#auth-key").clearValue();
     await $("#control-server").clearValue();
     await $("button=Tailscale").click();

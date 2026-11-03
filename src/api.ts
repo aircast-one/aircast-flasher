@@ -142,6 +142,13 @@ export function cloudSignOut(): Promise<void> {
   return invoke<void>("cloud_sign_out");
 }
 
+export function headscaleUsers(
+  controlServer: string,
+  apiKey: string,
+): Promise<string[]> {
+  return invoke<string[]>("headscale_users", { controlServer, apiKey });
+}
+
 export function mintAuthKey(
   controlServer: string,
   apiKey: string,

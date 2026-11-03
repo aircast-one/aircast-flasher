@@ -51,7 +51,13 @@ async fn call<T: DeserializeOwned>(
         .timeout(TIMEOUT)
         .send()
         .await
-        .map_err(|e| format!("Couldn't reach {service}: {e}"))?;
+        .map_err(|e| {
+            if e.is_connect() || e.is_timeout() {
+                format!("Couldn't reach {service} — check the address and that this computer is online.")
+            } else {
+                format!("Couldn't reach {service}: {e}")
+            }
+        })?;
     match response.status() {
         StatusCode::UNAUTHORIZED => Err(refused.to_string()),
         status if !status.is_success() => Err(format!(
@@ -86,19 +92,35 @@ fn tailscale_request() -> serde_json::Value {
     })
 }
 
-async fn mint_headscale(control_server: &str, api_key: &str, user: &str) -> Result<String, String> {
-    const REFUSED: &str = "Headscale refused the API key — it may have expired. Make a new one with `headscale apikeys create --expiration 365d`.";
-    let base = control_server.trim().trim_end_matches('/');
-    let user = user.trim();
-    let users: Users = call(
+const HEADSCALE_REFUSED: &str = "Headscale refused the API key — it may have expired. Make a new one with `headscale apikeys create --expiration 365d`.";
+
+fn headscale_base(control_server: &str) -> &str {
+    control_server.trim().trim_end_matches('/')
+}
+
+async fn list_headscale_users(control_server: &str, api_key: &str) -> Result<Vec<User>, String> {
+    let base = headscale_base(control_server);
+    call::<Users>(
         "Headscale",
         crate::http().get(format!("{base}/api/v1/user")),
         api_key,
-        REFUSED,
+        HEADSCALE_REFUSED,
     )
-    .await?;
-    let id = users
-        .users
+    .await
+    .map(|users| users.users)
+}
+
+pub async fn headscale_users(control_server: &str, api_key: &str) -> Result<Vec<String>, String> {
+    list_headscale_users(control_server, api_key)
+        .await
+        .map(|users| users.into_iter().map(|u| u.name).collect())
+}
+
+async fn mint_headscale(control_server: &str, api_key: &str, user: &str) -> Result<String, String> {
+    let base = headscale_base(control_server);
+    let user = user.trim();
+    let id = list_headscale_users(control_server, api_key)
+        .await?
         .into_iter()
         .find(|u| u.name == user)
         .map(|u| u.id)
@@ -109,7 +131,7 @@ async fn mint_headscale(control_server: &str, api_key: &str, user: &str) -> Resu
             .post(format!("{base}/api/v1/preauthkey"))
             .json(&headscale_request(&id, chrono::Utc::now())),
         api_key,
-        REFUSED,
+        HEADSCALE_REFUSED,
     )
     .await?;
     Ok(created.pre_auth_key.key)

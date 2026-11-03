@@ -62,6 +62,7 @@ async fn main() {
             flasher::read_public_key,
             flasher::identify_public_key,
             telemetry::reveal_event_log,
+            tailnet::headscale_users,
             tailnet::mint_auth_key,
             tailnet::probe_device,
             tailnet::probe_devices,

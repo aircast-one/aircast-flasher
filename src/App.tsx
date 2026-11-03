@@ -558,7 +558,7 @@ function App() {
     ...(needsHeadscaleUser(settings.selfHosted, tailnetKey, headscaleUser)
       ? [
           {
-            message: "Enter the Headscale user the drone joins as",
+            message: "Pick the Headscale user the drone joins as",
             fix: () => setStep(STEP.access),
           },
         ]
