@@ -32,7 +32,11 @@ export interface SummaryInput {
   devicePassword: string;
   encryption: { tang: boolean; cloud: boolean } | null;
   fightMode: boolean;
-  restore: { backup: Backup | null; sameDrone: boolean | null } | null;
+  restore: {
+    picked: boolean;
+    backup: Backup | null;
+    sameDrone: boolean | null;
+  } | null;
   rejoins: string | null;
   marks: BackupMarks;
 }
@@ -139,6 +143,7 @@ function fight(input: SummaryInput): SummaryItem {
 function restore(r: SummaryInput["restore"]): SummaryItem {
   const row = { label: "Restore", step: STEP.network };
   if (r === null) return { ...row, value: "Off" };
+  if (!r.picked) return { ...row, value: "No drone picked yet", warn: true };
   if (r.backup === null)
     return { ...row, value: "Backup no longer on this computer", warn: true };
   if (r.sameDrone === null)

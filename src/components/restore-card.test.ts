@@ -5,10 +5,12 @@ import {
   NO_MARKS,
   backupMarks,
   cardPreset,
+  droneBackups,
   onlineNow,
   rejoinsTailnet,
+  restoreProblems,
 } from "./restore-card.ts";
-import type { BackupCard, TailnetPeer } from "../types.ts";
+import type { Backup, BackupCard, TailnetPeer } from "../types.ts";
 
 const card: BackupCard = {
   fightMode: true,
@@ -111,4 +113,55 @@ test("a drone counts as online only when a peer by that name is online", () => {
   assert.equal(onlineNow("falcon", [peer("Falcon", true)]), true);
   assert.equal(onlineNow("falcon", [peer("falcon", false)]), false);
   assert.equal(onlineNow("falcon", [peer("falcon-02", true)]), false);
+});
+
+const backup = (hostname: string, created: string): Backup => ({
+  id: `${hostname}-${created.replace(/\D/g, "")}`,
+  hostname,
+  created,
+  card: null,
+});
+
+const saved = [
+  backup("owel-02", "2026-11-04T09:00:00Z"),
+  backup("falcon", "2026-11-03T12:00:00Z"),
+  backup("falcon", "2026-11-02T12:00:00Z"),
+  backup("falcon", "2026-11-01T12:00:00Z"),
+];
+
+test("backups group into one row per drone, newest first within it", () => {
+  const drones = droneBackups(saved);
+  assert.deepEqual(
+    drones.map((d) => d.hostname),
+    ["falcon", "owel-02"],
+  );
+  assert.equal(drones[0].newest.created, "2026-11-03T12:00:00Z");
+  assert.deepEqual(
+    drones[0].earlier.map((b) => b.created),
+    ["2026-11-02T12:00:00Z", "2026-11-01T12:00:00Z"],
+  );
+  assert.deepEqual(drones[1].earlier, []);
+  assert.deepEqual(droneBackups([]), []);
+});
+
+test("a restore asks for the drone first, then same or new", () => {
+  assert.deepEqual(restoreProblems(null, saved), []);
+  assert.deepEqual(restoreProblems({ backup: null, sameDrone: null }, saved), [
+    {
+      field: "restore-drone",
+      message: "Pick the drone whose backup goes on this card",
+    },
+  ]);
+  assert.equal(
+    restoreProblems({ backup: "gone-1", sameDrone: true }, saved)[0].field,
+    "restore-drone",
+  );
+  assert.equal(
+    restoreProblems({ backup: saved[1].id, sameDrone: null }, saved)[0].field,
+    "restore-same-drone",
+  );
+  assert.deepEqual(
+    restoreProblems({ backup: saved[1].id, sameDrone: false }, saved),
+    [],
+  );
 });

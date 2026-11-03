@@ -30,7 +30,8 @@ import { GENERATED_HOSTNAME } from "@/components/default-hostname";
 import { nextFreeHostname } from "@/components/next-hostname";
 import { useLocalTailscale } from "@/lib/use-local-tailscale";
 import { useBackups } from "@/lib/use-backups";
-import { RestoreSection, restoreProblems } from "@/components/restore-section";
+import { RestoreSection } from "@/components/restore-section";
+import { restoreProblems } from "@/components/restore-card";
 import type { RestoreDraft } from "@/components/wizard-types";
 import type { Board } from "@/types";
 
@@ -125,7 +126,10 @@ export function StepNetwork({
           ...networkProblems({ noWifi, ssid, password, hostname }).map(
             ({ field, message }) => ({ message, fix: focusField(field) }),
           ),
-          ...restoreProblems(restore, backups).map((message) => ({ message })),
+          ...restoreProblems(restore, backups).map(({ field, message }) => ({
+            message,
+            fix: focusField(field),
+          })),
         ],
       }}
     >

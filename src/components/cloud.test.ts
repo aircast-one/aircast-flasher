@@ -1,7 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { cardLabel, cardState, waitForSignIn, withCloudServer } from "./cloud.ts";
+import {
+  cardLabel,
+  cardState,
+  retireCandidates,
+  waitForSignIn,
+  withCloudServer,
+} from "./cloud.ts";
 import type { CloudCard, CloudSignInStatus } from "../types.ts";
 
 const card = (over: Partial<CloudCard>): CloudCard => ({
@@ -75,4 +81,29 @@ test("the cloud key server is added to the card's servers with its advertisement
 test("a card with no hostname still gets a label", () => {
   assert.equal(cardLabel("  "), "unnamed card");
   assert.equal(cardLabel(" falcon-01 "), "falcon-01");
+});
+
+test("the cards a same-drone rewrite replaces are the drone's others still able to unlock", () => {
+  const cards = [
+    card({ id: "new", label: "falcon" }),
+    card({ id: "old", label: "falcon" }),
+    card({ id: "older", label: "falcon", lostAt: "2026-10-01T00:00:00Z" }),
+    card({ id: "other", label: "owel-02" }),
+    card({ id: "renamed", label: "falcon-02" }),
+  ];
+  assert.deepEqual(
+    retireCandidates(cards, ["falcon"], "new").map((c) => c.id),
+    ["old"],
+  );
+  assert.deepEqual(
+    retireCandidates(cards, ["falcon", "falcon-02"], "new").map((c) => c.id),
+    ["old", "renamed"],
+  );
+  assert.deepEqual(retireCandidates(cards, ["racer"], "new"), []);
+  assert.deepEqual(
+    retireCandidates([card({ id: "x", label: "unnamed card" })], [""], "new").map(
+      (c) => c.id,
+    ),
+    ["x"],
+  );
 });

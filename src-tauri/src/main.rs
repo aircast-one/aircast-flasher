@@ -3,6 +3,7 @@
 #[cfg(all(feature = "wdio", not(debug_assertions)))]
 compile_error!("the wdio feature embeds a WebDriver server — never enable it in a release build");
 
+mod background;
 mod backup;
 mod cloud;
 mod flasher;
@@ -28,16 +29,20 @@ async fn main() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
+        .plugin(background::autostart())
         .manage(FlasherState::new())
         .manage(cloud::CloudState::default())
         .manage(flasher_ops::backup::InFlight::default())
+        .manage(background::Tray::default())
         .setup(|app| {
             let handle = app.handle().clone();
             telemetry::record_panics(handle.clone());
             telemetry::flush(&handle);
+            background::setup(&handle);
             backup::back_up_automatically(handle);
             Ok(())
         })
+        .on_window_event(background::on_window_event)
         .invoke_handler(tauri::generate_handler![
             flasher::list_releases,
             flasher::list_boards,
@@ -51,6 +56,7 @@ async fn main() {
             backup::backup_device,
             backup::list_backups,
             backup::delete_backup,
+            background::set_background_backups,
             cloud::cloud_sign_in_start,
             cloud::cloud_sign_in_poll,
             cloud::cloud_account,
@@ -78,6 +84,14 @@ async fn main() {
             settings::update_settings,
             telemetry::track,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while running tauri application")
+        .run(|app, event| {
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Reopen { .. } = event {
+                background::show_main(app);
+            }
+            #[cfg(not(target_os = "macos"))]
+            let _ = (app, event);
+        });
 }

@@ -76,6 +76,32 @@ function seedBackup() {
   );
 }
 
+const OWEL_BACKUP_ID = "owel-02-20261103120000";
+
+function seedOtherDrone() {
+  fs.mkdirSync(path.dirname(backupFile(OWEL_BACKUP_ID)), { recursive: true });
+  fs.writeFileSync(
+    backupFile(OWEL_BACKUP_ID),
+    JSON.stringify({
+      format: 1,
+      hostname: "owel-02",
+      created: "2026-11-03T12:00:00Z",
+      files: [],
+    }),
+    { mode: 0o600 },
+  );
+}
+
+const dronePicker = () => $('[aria-labelledby="restore-drone-label"]');
+
+async function pickDrone(hostname: string) {
+  await dronePicker().$(`label*=${hostname}`).click();
+  await expect(dronePicker().$(`label*=${hostname}`).$('[role="radio"]')).toHaveAttribute(
+    "aria-checked",
+    "true",
+  );
+}
+
 function seedCardBackup() {
   fs.mkdirSync(path.dirname(backupFile(CARD_BACKUP_ID)), { recursive: true });
   fs.writeFileSync(
@@ -582,10 +608,14 @@ describe("flasher wizard", () => {
     await openAdvanced();
     await $("button=Password").click();
     await $("#device-password").setValue("drone-pass1");
+    await expect($("#device-password-help")).not.toHaveText(
+      expect.stringContaining("Use at least"),
+    );
+    await expect($("#device-password")).toHaveAttribute("aria-invalid", "false");
+    await expectBlocked("Next", "at least 12 characters");
     await expect($("#device-password-help")).toHaveText(
       "Use at least 12 characters.",
     );
-    await expectBlocked("Next", "at least 12 characters");
 
     await $("#device-password").setValue("drone-pass12");
     await expect(problems()).not.toBeDisplayed();
@@ -664,14 +694,35 @@ describe("flasher wizard", () => {
 
   it("restores a saved backup onto the card, as the same drone or a new one", async () => {
     seedBackup();
+    seedOtherDrone();
     await knownGoodNetworkState();
     await $("button=Next").click();
     await waitForHeading("Access");
     await backToStep("Network");
 
     await $('[role="switch"][aria-label="Restore settings"]').click();
-    await expect($('[aria-label="Backup to restore"]')).toHaveText(
-      expect.stringContaining("falcon"),
+    await expect(dronePicker().$$('[role="radio"]')).toBeElementsArrayOfSize(2);
+    await expect(
+      dronePicker().$('[role="radio"][aria-checked="true"]'),
+    ).not.toBeExisting();
+    await expect($("button*=Same drone")).not.toBeExisting();
+    await expectBlocked("Next", "Pick the drone whose backup goes on this card");
+    await problems().$("button*=Pick the drone").click();
+    await browser.waitUntil(
+      () =>
+        browser.execute(
+          () =>
+            document.activeElement?.getAttribute("role") === "radio" &&
+            document.activeElement.closest(
+              '[aria-labelledby="restore-drone-label"]',
+            ) !== null,
+        ),
+      { timeout: 5_000, timeoutMsg: "the error summary didn't move focus to the drone picker" },
+    );
+
+    await pickDrone("falcon");
+    await expect(problems()).not.toHaveText(
+      expect.stringContaining("Pick the drone"),
     );
     await expectBlocked("Next", "same drone or a new one");
 
@@ -690,6 +741,7 @@ describe("flasher wizard", () => {
     await backToStep("Network");
     await $('[role="switch"][aria-label="Restore settings"]').click();
     await $("#hostname").setValue("falcon-01");
+    fs.rmSync(backupFile(OWEL_BACKUP_ID));
   });
 
   it("puts the restore first on the Network step, and says when a backup records nothing about the card", async () => {
@@ -708,6 +760,8 @@ describe("flasher wizard", () => {
     expect(restoreFirst).toBe(true);
 
     await $('[role="switch"][aria-label="Restore settings"]').click();
+    await expect($("#restore-no-card")).not.toBeExisting();
+    await pickDrone("falcon");
     await expect($("#restore-no-card")).toHaveText(
       expect.stringContaining("doesn't record fight mode, encryption or remote access"),
     );
@@ -716,6 +770,7 @@ describe("flasher wizard", () => {
 
   it("brings a backup's fight mode, encryption and tailnet node back onto the card", async () => {
     seedCardBackup();
+    seedBackup();
     await useNewestRelease();
     await knownGoodNetworkState();
     await $("button=Next").click();
@@ -723,7 +778,23 @@ describe("flasher wizard", () => {
     await backToStep("Network");
 
     await $('[role="switch"][aria-label="Restore settings"]').click();
+    await pickDrone("falcon");
+    await expect($("#restore-chosen")).toHaveText(
+      expect.stringContaining("newest backup"),
+    );
     await expect($("#restore-no-card")).not.toBeExisting();
+    const versions = $("#restore-versions");
+    await expect(versions).not.toHaveAttribute("open");
+    await versions.$("summary").click();
+    await expect(versions.$$('[role="radio"]')).toBeElementsArrayOfSize(2);
+    await versions.$$("label")[1].click();
+    await expect($("#restore-chosen")).toHaveText(
+      expect.stringContaining("an earlier backup"),
+    );
+    await expect($("#restore-no-card")).toBeDisplayed();
+    await versions.$$("label")[0].click();
+    await expect($("#restore-no-card")).not.toBeExisting();
+
     await $("button*=Same drone").click();
     await expect($("#hostname")).toHaveValue("falcon");
     await $("button=Next").click();
@@ -745,6 +816,17 @@ describe("flasher wizard", () => {
     await expect($("#tang-server-1")).not.toBeExisting();
     await expect($("#access-advanced summary")).toHaveText(
       expect.stringContaining("SSH login: Password"),
+    );
+    await expect($("#device-password-hint")).toHaveText(
+      expect.stringContaining("Backups don't carry the drone's password"),
+    );
+    await expect($("#device-password-help")).not.toHaveText(
+      expect.stringContaining("Use at least"),
+    );
+    await expect($("label=New password for pi")).toBeDisplayed();
+    await expectBlocked("Next", "at least 12 characters");
+    await expect($("#device-password-help")).toHaveText(
+      "Use at least 12 characters.",
     );
     await browser.waitUntil(
       () => savedSettings().tangCloud === true && savedSettings().sshMode === "password",
@@ -785,13 +867,40 @@ describe("flasher wizard", () => {
     await expect(
       $('[role="switch"][aria-label="Restore settings"]'),
     ).toHaveAttribute("aria-checked", "true");
-    await expect($('[aria-label="Backup to restore"]')).toHaveText(
-      expect.stringContaining("falcon"),
+    await expect(
+      dronePicker().$("label*=falcon").$('[role="radio"]'),
+    ).toHaveAttribute("aria-checked", "true");
+    await expect($("#restore-chosen")).toHaveText(
+      expect.stringContaining("falcon's newest backup"),
     );
     await expect($("button*=Same drone")).toHaveAttribute("aria-pressed", "false");
     await expect($("button*=New drone")).toHaveAttribute("aria-pressed", "false");
     await expectBlocked("Next", "same drone or a new one");
     await $('[role="switch"][aria-label="Restore settings"]').click();
+  });
+
+  it("offers background backups once there is a backup, and remembers Not now", async () => {
+    seedBackup();
+    await $('nav[aria-label="Fleet"]').$("button*=Devices").click();
+    await waitForHeading("Devices");
+
+    const prompt = $("#background-prompt");
+    await expect(prompt).toHaveText(
+      expect.stringContaining("Keep backing up your drones in the background?"),
+    );
+    const toggle = $(
+      '[role="switch"][aria-label="Keep backing up drones in the background"]',
+    );
+    await expect(toggle).toHaveAttribute("aria-checked", "false");
+
+    await prompt.$("button=Not now").click();
+    await expect(prompt).not.toBeExisting();
+    await browser.waitUntil(() => savedSettings().backgroundBackups === false, {
+      timeout: 10_000,
+      timeoutMsg: "Not now was not remembered — the prompt would come back",
+    });
+    await expect(toggle).toHaveAttribute("aria-checked", "false");
+    await $('nav[aria-label="Fleet"]').$("button*=Devices").click();
   });
 
   it("lists saved backups under Devices, and deletes one only when confirmed", async () => {

@@ -5,6 +5,7 @@ import { Eye, EyeOff, FileKey } from "lucide-react";
 import { identifyPublicKey } from "@/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Segmented } from "@/components/segmented";
 import { minDevicePassword } from "@/components/step-network.validation";
@@ -227,6 +228,7 @@ export interface DeviceAccessProps {
   sshKeyInvalid: boolean;
   devicePasswordWeak: boolean;
   fighting: boolean;
+  fromBackup: boolean;
 }
 
 export function DeviceAccessSection({
@@ -240,6 +242,7 @@ export function DeviceAccessSection({
   sshKeyInvalid,
   devicePasswordWeak,
   fighting,
+  fromBackup,
 }: DeviceAccessProps) {
   const [showDevicePassword, setShowDevicePassword] = useState(false);
 
@@ -253,20 +256,28 @@ export function DeviceAccessSection({
 
   if (sshMode === "password") {
     return (
-      <>
+      <div className="flex flex-col gap-2">
+        <Label htmlFor="device-password">New password for pi</Label>
+        {fromBackup ? (
+          <Hint id="device-password-hint">
+            Backups don't carry the drone's password — set one for this card.
+          </Hint>
+        ) : null}
         <div className="flex gap-2">
           <Input
             id="device-password"
-            aria-label="Device password"
             type={showDevicePassword ? "text" : "password"}
             value={devicePassword}
             onChange={(e) => onDevicePassword(e.currentTarget.value)}
-            placeholder="New password for the pi account"
             autoCapitalize="none"
             autoCorrect="off"
             spellCheck={false}
             aria-invalid={devicePasswordWeak}
-            aria-describedby="device-password-help"
+            aria-describedby={
+              fromBackup
+                ? "device-password-hint device-password-help"
+                : "device-password-help"
+            }
             className="flex-1"
           />
           <Button
@@ -283,6 +294,11 @@ export function DeviceAccessSection({
           <Hint id="device-password-help" tone="error">
             Use at least {minDevicePassword(fighting)} characters.
           </Hint>
+        ) : fighting ? (
+          <Hint id="device-password-help">
+            At least {minDevicePassword(fighting)} characters — fight mode
+            won't keep the default login.
+          </Hint>
         ) : devicePassword === "" ? (
           <Hint id="device-password-help" tone="warn">
             Blank keeps the default pi / raspberry login.
@@ -292,7 +308,7 @@ export function DeviceAccessSection({
             Replaces the default password on the pi account.
           </Hint>
         )}
-      </>
+      </div>
     );
   }
 

@@ -80,6 +80,7 @@ export function StepShell({
   next?: {
     label: string;
     onClick: () => void;
+    onBlocked?: () => void;
     problems?: Problem[];
   } | null;
 }) {
@@ -87,8 +88,11 @@ export function StepShell({
   const problems = next?.problems ?? [];
   const showProblems = attempt > 0 && problems.length > 0;
 
-  const submit = (onClick: () => void) =>
-    problems.length > 0 ? setAttempt((n) => n + 1) : onClick();
+  const submit = () => {
+    if (problems.length === 0) return next?.onClick();
+    setAttempt((n) => n + 1);
+    next?.onBlocked?.();
+  };
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -130,7 +134,7 @@ export function StepShell({
                   type="button"
                   size="lg"
                   className="min-w-32"
-                  onClick={() => submit(next.onClick)}
+                  onClick={submit}
                 >
                   {next.label}
                 </Button>

@@ -179,6 +179,7 @@ export interface Settings {
   useLocalImage: boolean;
   localImagePath: string | null;
   board: string | null;
+  backgroundBackups: boolean | null;
 }
 
 export interface KeyWrite {

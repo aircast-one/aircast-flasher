@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { Loader2, LogOut, RefreshCw } from "lucide-react";
+import { Check, Loader2, LogOut, RefreshCw } from "lucide-react";
 
 import {
   cloudAccount,
@@ -12,7 +12,11 @@ import {
   cloudSignOut,
 } from "@/api";
 import { Button } from "@/components/ui/button";
-import { cardState, waitForSignIn } from "@/components/cloud";
+import {
+  cardState,
+  retireCandidates,
+  waitForSignIn,
+} from "@/components/cloud";
 import type { CloudCard } from "@/types";
 
 const SIGN_IN_POLL_MS = 2000;
@@ -107,6 +111,132 @@ function CardRow({ card }: { card: CloudCard }) {
       {markLost.isError ? (
         <p className="text-sm text-destructive" role="alert">
           {errorText(markLost.error)}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+export function RetireOldCards({
+  hostnames,
+  keep,
+}: {
+  hostnames: string[];
+  keep: string;
+}) {
+  const queryClient = useQueryClient();
+  const cards = useQuery({ queryKey: CARDS_KEY, queryFn: cloudListCards });
+  const candidates = retireCandidates(cards.data ?? [], hostnames, keep);
+  const [picked, setPicked] = useState<string[] | null>(null);
+  const [confirming, setConfirming] = useState(false);
+  const ticked =
+    picked ?? (candidates.length === 1 ? [candidates[0].id] : []);
+  const retire = useMutation({
+    mutationFn: (ids: string[]) => Promise.all(ids.map(cloudMarkLost)),
+    onSettled: () => {
+      setConfirming(false);
+      void queryClient.invalidateQueries({ queryKey: CARDS_KEY });
+    },
+  });
+  const host = hostnames[0] ?? "this drone";
+
+  if (retire.isSuccess && candidates.length === 0) {
+    return (
+      <p
+        id="retire-cards"
+        className="flex w-full items-center gap-2 text-left text-sm text-muted-foreground"
+      >
+        <Check className="size-4 shrink-0 text-green-500 dark:text-green-400" />
+        {host}'s old card is marked lost — it can never unlock again.
+      </p>
+    );
+  }
+  if (candidates.length === 0) return null;
+
+  return (
+    <div
+      id="retire-cards"
+      className="flex w-full flex-col gap-3 rounded-xl border border-border px-4 py-3 text-left"
+    >
+      <div className="flex flex-col gap-0.5">
+        <p className="text-sm font-medium">
+          Retire {host}'s old {candidates.length === 1 ? "card" : "cards"}
+        </p>
+        <p className="text-xs text-muted-foreground">
+          The card this one replaces still unlocks through Aircast Cloud
+          wherever it gets online, until you mark it lost.
+        </p>
+      </div>
+      <div className="flex flex-col gap-2">
+        {candidates.map((card) => (
+          <label
+            key={card.id}
+            className="flex cursor-pointer items-start gap-3 rounded-lg border border-border px-3 py-2 text-sm"
+          >
+            <input
+              type="checkbox"
+              className="mt-0.5 size-4 accent-primary"
+              checked={ticked.includes(card.id)}
+              onChange={(e) => {
+                setConfirming(false);
+                setPicked(
+                  e.currentTarget.checked
+                    ? [...ticked, card.id]
+                    : ticked.filter((id) => id !== card.id),
+                );
+              }}
+            />
+            <span className="flex min-w-0 flex-col">
+              <span className="font-medium">{card.label}</span>
+              <span className="text-xs text-muted-foreground">
+                Flashed {when(card.createdAt)}
+                {card.lastUnlockAt === null
+                  ? " · never unlocked"
+                  : ` · last unlocked ${when(card.lastUnlockAt)}`}
+              </span>
+            </span>
+          </label>
+        ))}
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        {confirming ? (
+          <>
+            <Button
+              type="button"
+              size="sm"
+              variant="destructive"
+              disabled={retire.isPending}
+              onClick={() => retire.mutate(ticked)}
+            >
+              {retire.isPending ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : null}
+              Mark lost — can't be undone
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              onClick={() => setConfirming(false)}
+            >
+              Cancel
+            </Button>
+          </>
+        ) : (
+          <Button
+            type="button"
+            size="sm"
+            variant="secondary"
+            disabled={ticked.length === 0}
+            onClick={() => setConfirming(true)}
+          >
+            {ticked.length > 1 ? `Mark ${ticked.length} cards lost` : "Mark lost"}
+          </Button>
+        )}
+      </div>
+      {retire.isError ? (
+        <p className="text-sm text-destructive" role="alert">
+          {errorText(retire.error)}
         </p>
       ) : null}
     </div>

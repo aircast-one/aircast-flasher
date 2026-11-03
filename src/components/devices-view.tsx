@@ -8,6 +8,7 @@ import {
   ExternalLink,
   HardDriveDownload,
   Loader2,
+  MonitorDown,
   RefreshCw,
   Share2,
   Trash2,
@@ -22,6 +23,7 @@ import {
   track,
 } from "@/api";
 import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
 import { errorMessage, formatDateTime, timeAgo } from "@/lib/format";
 import { BACKUPS_KEY, useBackups } from "@/lib/use-backups";
 import { useLocalTailscale } from "@/lib/use-local-tailscale";
@@ -32,6 +34,94 @@ const PROBE_STALE_MS = 30_000;
 const HELP_URL = "https://aircast.one/docs/software/tailscale";
 
 const deviceUrl = (peer: TailnetPeer) => `http://${peer.dnsName}`;
+
+export interface BackgroundMode {
+  on: boolean | null;
+  set: (on: boolean) => Promise<boolean>;
+  decline: () => void;
+}
+
+const trayName = () =>
+  navigator.userAgent.includes("Mac") ? "menu bar" : "system tray";
+
+function useBackgroundToggle(background: BackgroundMode) {
+  return useMutation({
+    mutationFn: (on: boolean) => {
+      track("background_backups", { on });
+      return background.set(on);
+    },
+  });
+}
+
+function BackgroundPrompt({ background }: { background: BackgroundMode }) {
+  const toggle = useBackgroundToggle(background);
+  return (
+    <div
+      id="background-prompt"
+      className="flex flex-col gap-3 rounded-xl border border-primary/40 bg-primary/5 px-4 py-3"
+    >
+      <div className="flex items-start gap-3">
+        <MonitorDown className="mt-0.5 size-4 shrink-0 text-primary" />
+        <p className="text-sm">
+          Keep backing up your drones in the background? It starts with your
+          computer and lives in the {trayName()}.
+        </p>
+      </div>
+      <div className="flex items-center gap-2 pl-7">
+        <Button
+          type="button"
+          size="sm"
+          disabled={toggle.isPending}
+          onClick={() => toggle.mutate(true)}
+        >
+          {toggle.isPending ? <Loader2 className="size-4 animate-spin" /> : null}
+          Turn on
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          disabled={toggle.isPending}
+          onClick={background.decline}
+        >
+          Not now
+        </Button>
+      </div>
+      {toggle.isError ? (
+        <p className="pl-7 text-sm text-destructive" role="alert">
+          {errorMessage(toggle.error, "Couldn't turn background backups on.")}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+function BackgroundToggle({ background }: { background: BackgroundMode }) {
+  const toggle = useBackgroundToggle(background);
+  const on = toggle.isPending ? toggle.variables : background.on === true;
+  return (
+    <div className="flex flex-col items-end gap-1">
+      <label className="flex shrink-0 items-center gap-2 text-xs whitespace-nowrap text-muted-foreground">
+        In the background
+        <Switch
+          aria-label="Keep backing up drones in the background"
+          checked={on}
+          disabled={toggle.isPending}
+          onCheckedChange={(next) => toggle.mutate(next)}
+        />
+      </label>
+      {toggle.isError ? (
+        <p className="text-xs text-destructive" role="alert">
+          {errorMessage(toggle.error, "Couldn't change background backups.")}
+        </p>
+      ) : toggle.data === false && background.on === true ? (
+        <p className="max-w-64 text-right text-xs text-muted-foreground">
+          No {trayName()} here, so closing the window minimizes it instead.
+        </p>
+      ) : null}
+    </div>
+  );
+}
 
 function CopyButton({ address }: { address: string }) {
   const [copied, setCopied] = useState(false);
@@ -237,22 +327,31 @@ function BackupRow({
   );
 }
 
-function SavedBackups({ onRestore }: { onRestore: (id: string) => void }) {
+function SavedBackups({
+  onRestore,
+  background,
+}: {
+  onRestore: (id: string) => void;
+  background: BackgroundMode;
+}) {
   const backups = useBackups();
   return (
     <section
       aria-labelledby="saved-backups"
       className="mt-4 flex flex-col gap-3"
     >
-      <div className="flex flex-col gap-1 px-1">
-        <h2 id="saved-backups" className="text-sm font-medium">
-          Saved backups
-        </h2>
-        <p className="text-xs text-muted-foreground">
-          Kept on this computer only — they hold the drone's WiFi passwords and
-          tailnet identity. While the Flasher is open, each drone on your
-          tailnet is backed up once a day, keeping its newest 5.
-        </p>
+      <div className="flex items-start justify-between gap-4 px-1">
+        <div className="flex flex-col gap-1">
+          <h2 id="saved-backups" className="text-sm font-medium">
+            Saved backups
+          </h2>
+          <p className="text-xs text-muted-foreground">
+            Kept on this computer only — they hold the drone's WiFi passwords
+            and tailnet identity. Each drone on your tailnet is backed up once a
+            day while the Flasher runs, keeping its newest 5.
+          </p>
+        </div>
+        <BackgroundToggle background={background} />
       </div>
       {backups.length === 0 ? (
         <Empty>
@@ -325,9 +424,11 @@ function NoDevices({
 export function DevicesView({
   onFlash,
   onRestore,
+  background,
 }: {
   onFlash: () => void;
   onRestore: (id: string) => void;
+  background: BackgroundMode;
 }) {
   const local = useLocalTailscale();
   const backups = useBackups();
@@ -381,6 +482,9 @@ export function DevicesView({
       </div>
 
       <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-8 pb-8">
+        {background.on === null && backups.length > 0 ? (
+          <BackgroundPrompt background={background} />
+        ) : null}
         {local === null ? (
           <Empty>Checking Tailscale…</Empty>
         ) : !local.installed ? (
@@ -431,7 +535,7 @@ export function DevicesView({
           </p>
         ) : null}
 
-        <SavedBackups onRestore={onRestore} />
+        <SavedBackups onRestore={onRestore} background={background} />
       </div>
     </div>
   );

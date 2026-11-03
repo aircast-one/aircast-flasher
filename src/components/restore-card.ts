@@ -1,4 +1,59 @@
-import type { BackupCard, Settings, SshMode, TailnetPeer } from "@/types";
+import type {
+  Backup,
+  BackupCard,
+  Settings,
+  SshMode,
+  TailnetPeer,
+} from "@/types";
+import type { FieldProblem } from "@/components/step-network.validation";
+import type { RestoreDraft } from "@/components/wizard-types";
+
+export interface DroneBackups {
+  hostname: string;
+  newest: Backup;
+  earlier: Backup[];
+}
+
+export const droneBackups = (backups: Backup[]): DroneBackups[] =>
+  [...new Set(backups.map((b) => b.hostname))]
+    .sort((a, b) => a.localeCompare(b))
+    .map((hostname) => {
+      const [newest, ...earlier] = backups.filter(
+        (b) => b.hostname === hostname,
+      );
+      return { hostname, newest, earlier };
+    });
+
+export function restoreProblems(
+  restore: RestoreDraft | null,
+  backups: Backup[],
+): FieldProblem[] {
+  if (restore === null) return [];
+  if (restore.backup === null)
+    return [
+      {
+        field: "restore-drone",
+        message: "Pick the drone whose backup goes on this card",
+      },
+    ];
+  if (!backups.some((b) => b.id === restore.backup))
+    return [
+      {
+        field: "restore-drone",
+        message:
+          "Pick the backup to restore — the chosen one is no longer on this computer",
+      },
+    ];
+  return restore.sameDrone === null
+    ? [
+        {
+          field: "restore-same-drone",
+          message:
+            "Say whether the backup goes back onto the same drone or a new one",
+        },
+      ]
+    : [];
+}
 
 export const cardPreset = (card: BackupCard): Partial<Settings> => ({
   fightMode: card.fightMode,

@@ -38,3 +38,15 @@ export const withCloudServer = (
     { url: keyset.url, adv: JSON.stringify(keyset.advertisement) },
   ],
 });
+
+export const retireCandidates = (
+  cards: CloudCard[],
+  hostnames: string[],
+  keep: string,
+): CloudCard[] =>
+  cards.filter(
+    (card) =>
+      card.id !== keep &&
+      card.lostAt === null &&
+      hostnames.some((host) => cardLabel(host) === card.label),
+  );

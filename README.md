@@ -127,9 +127,27 @@ list_releases ─► download_image ─► flash_image ─► provision_device
   at once — the same guard covers the **Back up settings** button. Every save,
   manual or automatic, keeps the newest 5 backups per hostname and deletes the
   rest.
+- **Backing up in the background** — opt-in, off by default. Operators open
+  the Flasher to flash, not daily, so after the first backup **Devices** asks
+  once whether to keep backing up in the background (a switch in the Saved
+  backups header changes it later). On, the Flasher registers itself to start
+  at login (`tauri-plugin-autostart`: a LaunchAgent on macOS, the Run key on
+  Windows, an autostart entry on Linux) with `--background`, which starts it
+  with the window hidden, and puts an icon in the menu bar / system tray with
+  **Open** and **Quit**. Closing the window then hides it rather than quitting;
+  on macOS the Dock icon goes with it. A Linux desktop without the
+  AppIndicator library gets no tray icon, so closing the window minimizes it
+  instead and the switch says so. The answer is `backgroundBackups` in
+  `settings.json`; a second launch on Windows or Linux starts a second copy
+  rather than showing the first.
 - **Restore** — **Restore settings from a backup** sits at the top of the
-  Network step, since it decides the hostname; **Restore onto a card** on a
-  saved backup in **Devices** opens it with that backup chosen. It asks
+  Network step, since it decides the hostname. Switching it on lists the
+  drones that have backups — one row each, with the age of its newest — and
+  picks none: with daily backups the newest backup of *any* drone is close to
+  random, and restoring another drone's backup as the same drone puts two
+  aircraft on one identity. Picking a drone uses its newest backup; older ones
+  sit under **Earlier backups**. **Restore onto a card** on a saved backup in
+  **Devices** opens the step with that backup already chosen. It asks
   **Same drone** (a reflash: it comes back as the same aircraft, and the
   hostname is prefilled from the backup) or **New drone** (the setup is
   copied, the identity is not); when the backup's drone is online on the
@@ -145,10 +163,14 @@ list_releases ─► download_image ─► flash_image ─► provision_device
   `"sameDrone": true|false` — through the same customize path as every other
   boot marker, so the elevated helper and USB writes carry it too. aircastd
   consumes it on first boot, deletes it and restarts once, so the Write page
-  says so and gives a restore card 15 minutes rather than 10 before calling it
-  missing; what a new drone drops is aircastd's call. The bundle is read from
-  disk by the Rust side at write time, so it never passes through the
-  webview.
+  says so and gives a restore card 15 minutes rather than 10 before showing
+  its one "Still not here?" list; what a new drone drops is aircastd's call.
+  When a same-drone card unlocks through Aircast Cloud, the Write page offers
+  to mark the drone's other Cloud cards lost (matched by label, which is the
+  hostname; never automatically, and with a second click, since a lost card
+  can't be brought back) — the card it replaces would otherwise still unlock
+  wherever it gets online. The bundle is read from disk by the Rust side at
+  write time, so it never passes through the webview.
 
 - **Headscale** — `status --json` does not carry the control server, so
   `tailscale debug prefs` supplies `ControlURL`. Anything that is not

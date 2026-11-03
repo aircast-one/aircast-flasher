@@ -18,6 +18,8 @@ import {
   type RestoredCard,
 } from "@/components/device-finder";
 import { SetupSteps } from "@/components/setup-steps";
+import { troubleshootingTips } from "@/components/troubleshooting";
+import { RetireOldCards } from "@/components/cloud-cards-view";
 
 const QGC_DOWNLOAD_URL = "https://aircast.one/docs/software/qgroundcontrol";
 import { Progress } from "@/components/ui/progress";
@@ -210,43 +212,37 @@ function EncryptionReminder({
 const BOARDS_DOCS_URL = "https://aircast.one/docs/hardware/boards";
 
 function NotShowingUp({
-  board,
-  usb,
-  noWifi,
+  tips,
+  boardNotes,
   minutes,
 }: {
-  board: Board;
-  usb: boolean;
-  noWifi: boolean;
+  tips: string[];
+  boardNotes: boolean;
   minutes: number;
 }) {
   return (
-    <div className="w-full text-left text-sm text-muted-foreground">
+    <div
+      id="not-showing-up"
+      className="w-full text-left text-sm text-muted-foreground"
+    >
       <h3 className="mb-1 font-medium text-foreground">
         Still not here after {minutes} minutes?
       </h3>
       <ul className="list-disc space-y-1 pl-5">
-        {!board.builtinWifi && !noWifi ? (
+        {tips.map((tip) => (
+          <li key={tip}>{tip}</li>
+        ))}
+        {boardNotes ? (
           <li>
-            {board.name} has no built-in WiFi. Plug in a USB WiFi adapter or an
-            Ethernet cable, then power it on again.
+            <button
+              type="button"
+              className="underline underline-offset-2 hover:text-foreground"
+              onClick={() => void openUrl(BOARDS_DOCS_URL)}
+            >
+              Setup notes for each board
+            </button>
           </li>
         ) : null}
-        {usb ? null : (
-          <li>
-            This card holds the {board.name} image. It won't start on a
-            different board.
-          </li>
-        )}
-        <li>
-          <button
-            type="button"
-            className="underline underline-offset-2 hover:text-foreground"
-            onClick={() => void openUrl(BOARDS_DOCS_URL)}
-          >
-            Setup notes for each board
-          </button>
-        </li>
       </ul>
     </div>
   );
@@ -260,6 +256,7 @@ export function JobView({
   remoteEnrolled,
   fightMode,
   restore,
+  retire,
   encryption,
   success,
   cancelled,
@@ -280,6 +277,7 @@ export function JobView({
   remoteEnrolled: boolean;
   fightMode: boolean;
   restore: RestoredCard | null;
+  retire: { hostnames: string[]; keep: string } | null;
   encryption: EncryptionConfig | null;
   success: boolean;
   cancelled: boolean;
@@ -315,16 +313,22 @@ export function JobView({
           fightMode={fightMode}
           restore={restore}
           notShowingUp={
-            board ? (
-              <NotShowingUp
-                board={board}
-                usb={usb}
-                noWifi={noWifi}
-                minutes={missingAfterMinutes(restore)}
-              />
-            ) : null
+            <NotShowingUp
+              tips={troubleshootingTips({
+                board,
+                usb,
+                noWifi,
+                fightMode,
+                restore,
+              })}
+              boardNotes={board !== null}
+              minutes={missingAfterMinutes(restore)}
+            />
           }
         />
+        {retire ? (
+          <RetireOldCards hostnames={retire.hostnames} keep={retire.keep} />
+        ) : null}
         <div className="flex flex-col items-center gap-2">
           <Button
             type="button"

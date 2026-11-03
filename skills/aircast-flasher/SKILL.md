@@ -176,7 +176,7 @@ rebuilt.
 - `backups list` / `backups delete ID` (MCP `list_backups`, `delete_backup`)
   shows each backup's age and whether it records the card. Each drone keeps
   its newest 5; the app also backs drones up on its own once a day while it
-  is open. Backups hold secrets and stay on this computer; never print or
+  runs, and can keep running in the menu bar / system tray to do that. Backups hold secrets and stay on this computer; never print or
   copy their contents.
 
 ## Aircast Cloud

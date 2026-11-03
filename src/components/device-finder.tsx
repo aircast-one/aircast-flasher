@@ -441,12 +441,6 @@ export function DeviceWaiting({
             ? `rejoins your private network as ${restore.host}.`
             : "joins your private network."}
         </span>
-        <span id="finder-missing">
-          Not here after {missingAfterMinutes(restore)} minutes?{" "}
-          {restore?.rejoins
-            ? `Check it has power and is in range of its WiFi — it rejoins as ${restore.host} with the identity from the backup.`
-            : "The pre-auth key was probably expired or already used on another card. Make a fresh key and write the card again."}
-        </span>
       </div>
     );
 

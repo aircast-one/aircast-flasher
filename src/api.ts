@@ -115,6 +115,10 @@ export function backupDevice(url: string): Promise<Backup> {
   return invoke<Backup>("backup_device", { url });
 }
 
+export function setBackgroundBackups(on: boolean): Promise<boolean> {
+  return invoke<boolean>("set_background_backups", { on });
+}
+
 export function listBackups(): Promise<Backup[]> {
   return invoke<Backup[]>("list_backups");
 }

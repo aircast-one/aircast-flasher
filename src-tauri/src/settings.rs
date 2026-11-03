@@ -40,6 +40,7 @@ pub struct Settings {
     pub use_local_image: bool,
     pub local_image_path: Option<String>,
     pub board: Option<String>,
+    pub background_backups: Option<bool>,
 }
 
 const E2E_CONFIG_DIR: &str = "FLASHER_E2E_CONFIG_DIR";
@@ -121,6 +122,12 @@ fn with_install_id(settings: Settings) -> Settings {
             ..settings
         },
     }
+}
+
+pub fn background_backups(app: &AppHandle) -> bool {
+    settings_path(app)
+        .map(|path| load_from(&path).background_backups == Some(true))
+        .unwrap_or(false)
 }
 
 pub fn telemetry_id(app: &AppHandle) -> Option<String> {
@@ -218,6 +225,7 @@ mod tests {
             use_local_image: true,
             local_image_path: Some("/tmp/aircast.img".into()),
             board: Some("orangepi5".into()),
+            background_backups: Some(true),
         }
     }
 

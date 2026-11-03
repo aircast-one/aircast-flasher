@@ -103,6 +103,7 @@ export function StepAccess({
   const devicePasswordWeak =
     access.sshMode === "password" &&
     isWeakDevicePassword(access.devicePassword, fight.enabled);
+  const [submitted, setSubmitted] = useState(false);
   const fightKeyMissing =
     fight.enabled &&
     access.sshMode === "key-only" &&
@@ -178,6 +179,7 @@ export function StepAccess({
       next={{
         label: "Next",
         onClick: onNext,
+        onBlocked: () => setSubmitted(true),
         problems,
       }}
     >
@@ -303,8 +305,9 @@ export function StepAccess({
               <DeviceAccessSection
                 {...access}
                 sshKeyInvalid={sshKeyInvalid}
-                devicePasswordWeak={devicePasswordWeak}
+                devicePasswordWeak={devicePasswordWeak && submitted}
                 fighting={fight.enabled}
+                fromBackup={marks.ssh}
               />
             </SettingCard>
           </div>

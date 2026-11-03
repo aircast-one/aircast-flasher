@@ -19,6 +19,7 @@ import {
   onDownloadProgress,
   onFlashProgress,
   pickAndReadPublicKey,
+  setBackgroundBackups,
   pickLocalImage,
   revealEventLog,
   track,
@@ -62,11 +63,11 @@ import {
 import { useSettings } from "@/lib/use-settings";
 import { useLocalTailscale } from "@/lib/use-local-tailscale";
 import { BACKUPS_KEY, useBackups } from "@/lib/use-backups";
-import { restoreProblems } from "@/components/restore-section";
 import {
   backupMarks,
   cardPreset,
   rejoinsTailnet,
+  restoreProblems,
 } from "@/components/restore-card";
 import { answerConsent, asksConsent } from "@/components/consent";
 import { UpdateBanner } from "@/components/update-banner";
@@ -425,7 +426,11 @@ function App() {
             ? `Downloading in the background… ${Math.min(100, Math.round(downloadProgress.percent))}%`
             : "Downloading in the background…";
 
-  const flashMutation = useMutation<EncryptionConfig | null, unknown, FlashVars>({
+  const flashMutation = useMutation<
+    { encryption: EncryptionConfig | null; cloudCard: string | null },
+    unknown,
+    FlashVars
+  >({
     mutationFn: async (vars) => {
       setCardTouched(false);
       const cloud = vars.encryption !== null && vars.cloudKeyServer;
@@ -452,12 +457,13 @@ function App() {
         if (!vars.localPath) throw new Error("No local image selected.");
         imagePath = vars.localPath;
       }
-      const encryption =
+      const keyset =
         vars.encryption !== null && cloud
-          ? withCloudServer(
-              vars.encryption,
-              await cloudCreateKeyset(cardLabel(vars.hostname)),
-            )
+          ? await cloudCreateKeyset(cardLabel(vars.hostname))
+          : null;
+      const encryption =
+        vars.encryption !== null && keyset !== null
+          ? withCloudServer(vars.encryption, keyset)
           : vars.encryption;
       const tailscale =
         vars.tailscale !== null && mintsKeys(vars.tailscale.authKey)
@@ -485,7 +491,7 @@ function App() {
         restore: vars.restore,
         initFormat: "cloud-init" satisfies InitFormat,
       });
-      return encryption;
+      return { encryption, cloudCard: keyset?.id ?? null };
     },
     onSuccess: (_result, vars) => {
       const written = vars.hostname.trim();
@@ -605,7 +611,7 @@ function App() {
       cloud: cloudOn,
       recoverySaved,
     }).map(({ message }) => ({ message, fix: () => setStep(STEP.access) })),
-    ...restoreProblems(restore, backups).map((message) => ({
+    ...restoreProblems(restore, backups).map(({ message }) => ({
       message,
       fix: () => setStep(STEP.network),
     })),
@@ -652,7 +658,11 @@ function App() {
     restore:
       restore === null
         ? null
-        : { backup: restoreBackup, sameDrone: restore.sameDrone },
+        : {
+            picked: restore.backup !== null,
+            backup: restoreBackup,
+            sameDrone: restore.sameDrone,
+          },
     rejoins: rejoins ? (restoreBackup?.hostname ?? "") : null,
     marks,
   });
@@ -716,7 +726,9 @@ function App() {
       cloudKeyServer: encrypting && cloudOn,
       fightMode: fighting,
       restore:
-        restore === null || restore.sameDrone === null
+        restore === null ||
+        restore.backup === null ||
+        restore.sameDrone === null
           ? null
           : { backup: restore.backup, sameDrone: restore.sameDrone },
     };
@@ -815,6 +827,14 @@ function App() {
                 setFleetView(null);
                 chooseRestore({ backup, sameDrone: null });
                 setStep(STEP.network);
+              }}
+              background={{
+                on: settings.backgroundBackups,
+                set: (on) =>
+                  setBackgroundBackups(on).then((tray) =>
+                    update({ backgroundBackups: on }).then(() => tray),
+                  ),
+                decline: () => void update({ backgroundBackups: false }),
               }}
             />
           ) : fleetView === "cloud" ? (
@@ -934,7 +954,17 @@ function App() {
               remoteEnrolled={remoteEnrolled}
               fightMode={fighting}
               restore={writtenRestore}
-              encryption={flashMutation.data ?? null}
+              retire={
+                writtenBackup !== null &&
+                lastVars?.restore?.sameDrone === true &&
+                flashMutation.data?.cloudCard
+                  ? {
+                      hostnames: [writtenBackup.hostname, lastVars.hostname],
+                      keep: flashMutation.data.cloudCard,
+                    }
+                  : null
+              }
+              encryption={flashMutation.data?.encryption ?? null}
               success={flashMutation.isSuccess}
               cancelled={stopped}
               error={

@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
 export function SelectableCard({
+  id,
   icon,
   title,
   selected,
@@ -10,6 +11,7 @@ export function SelectableCard({
   onClick,
   children,
 }: {
+  id?: string;
   icon: ReactNode;
   title: ReactNode;
   selected: boolean;
@@ -19,6 +21,7 @@ export function SelectableCard({
 }) {
   return (
     <button
+      id={id}
       type="button"
       disabled={disabled}
       onClick={onClick}

@@ -31,6 +31,7 @@ const EMPTY: Settings = {
   useLocalImage: false,
   localImagePath: null,
   board: null,
+  backgroundBackups: null,
 };
 
 export function useSettings(): {

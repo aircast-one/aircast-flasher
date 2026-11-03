@@ -46,6 +46,6 @@ export interface FlashVars {
 }
 
 export interface RestoreDraft {
-  backup: string;
+  backup: string | null;
   sameDrone: boolean | null;
 }
