@@ -1,6 +1,8 @@
 import { useState } from "react";
+import { useMutation } from "@tanstack/react-query";
 import {
   Cable,
+  CircleCheck,
   Eye,
   EyeOff,
   RefreshCw,
@@ -29,6 +31,8 @@ import {
 import { GENERATED_HOSTNAME } from "@/components/default-hostname";
 import { nextFreeHostname } from "@/components/next-hostname";
 import { useLocalTailscale } from "@/lib/use-local-tailscale";
+import { errorMessage } from "@/lib/format";
+import { testWifi } from "@/api";
 import { useBackups } from "@/lib/use-backups";
 import { RestoreSection } from "@/components/restore-section";
 import { restoreProblems } from "@/components/restore-card";
@@ -89,6 +93,10 @@ export function StepNetwork({
   const local = useLocalTailscale();
   const backups = useBackups();
   const [ssidTouched, setSsidTouched] = useState(false);
+  const wifiTest = useMutation({
+    mutationFn: (net: { ssid: string; password: string }) =>
+      testWifi(net.ssid, net.password),
+  });
 
   const trimmedHostname = hostname.trim();
   const hostnameEmpty = trimmedHostname === "";
@@ -108,6 +116,10 @@ export function StepNetwork({
   const suggestion = nextFreeHostname(trimmedHostname, takenNames);
 
   const wifiPasswordInvalid = !noWifi && isInvalidWifiPassword(password);
+  const trimmedSsid = ssid.trim();
+  const testedThis =
+    wifiTest.variables?.ssid === trimmedSsid &&
+    wifiTest.variables?.password === password;
   const wifilessBoard = board !== null && !board.builtinWifi ? board : null;
 
   return (
@@ -253,6 +265,48 @@ export function StepNetwork({
                 {wifiPasswordInvalid
                   ? "A WiFi password is 8–63 characters — the device cannot join with this one."
                   : "Leave blank for an open network."}
+              </p>
+            </div>
+
+            <div className="flex flex-col gap-2">
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                className="self-start"
+                disabled={
+                  ssidMissing || wifiPasswordInvalid || wifiTest.isPending
+                }
+                onClick={() => wifiTest.mutate({ ssid: trimmedSsid, password })}
+              >
+                <Wifi className="size-4" />
+                {wifiTest.isPending && testedThis
+                  ? "Testing…"
+                  : "Test from this computer"}
+              </Button>
+              <p
+                id="wifi-test-result"
+                className={
+                  testedThis && wifiTest.isError
+                    ? "flex items-start gap-1.5 text-sm text-destructive"
+                    : testedThis && wifiTest.isSuccess
+                      ? "flex items-start gap-1.5 text-sm text-green-600 dark:text-green-400"
+                      : "text-sm text-muted-foreground"
+                }
+              >
+                {testedThis && wifiTest.isError ? (
+                  <>
+                    <TriangleAlert className="mt-0.5 size-4 shrink-0" />
+                    {errorMessage(wifiTest.error, "The test could not run.")}
+                  </>
+                ) : testedThis && wifiTest.isSuccess ? (
+                  <>
+                    <CircleCheck className="mt-0.5 size-4 shrink-0" />
+                    {wifiTest.data}
+                  </>
+                ) : (
+                  "Optional: joins this network from this computer to check the password. This computer's WiFi switches to it."
+                )}
               </p>
             </div>
 

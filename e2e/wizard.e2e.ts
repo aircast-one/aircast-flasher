@@ -410,6 +410,20 @@ describe("flasher wizard", () => {
     await $("#password").clearValue();
   });
 
+  it("tests the WiFi from this computer and says when it is out of range", async () => {
+    await knownGoodNetworkState();
+    await $("#ssid").setValue("aircast-e2e-not-here");
+    await $("#password").setValue("longenough");
+    await $("button=Test from this computer").click();
+    await expect($("#wifi-test-result")).toHaveText(
+      expect.stringContaining(
+        "aircast-e2e-not-here is not in range of this computer",
+      ),
+      { wait: 40_000 },
+    );
+    await $("#password").clearValue();
+  });
+
   it("offers remote access before anyone asks for it", async () => {
     await onAccessStep();
     await expect(

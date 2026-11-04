@@ -290,6 +290,11 @@ pub async fn list_wifi_networks() -> Result<flasher_ops::wifi::WifiNetworks, Str
 }
 
 #[tauri::command]
+pub async fn test_wifi(ssid: String, password: String) -> Result<String, String> {
+    flasher_ops::wifi::test_wifi(&ssid, &password).await
+}
+
+#[tauri::command]
 pub fn detect_ssh_keys() -> Vec<flasher_ops::sshkeys::SshPublicKey> {
     flasher_ops::sshkeys::detect_ssh_keys()
 }
