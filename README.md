@@ -354,6 +354,29 @@ cargo test              # flasher-core (psk/provision) + flasher.rs (validation)
 npm run build           # tsc + vite typecheck/build
 ```
 
+### Debug API
+
+Drive the wizard of any build, release included, over HTTP. It is off unless
+the app starts with `--debug-port <port>` (or `AIRCAST_FLASHER_DEBUG_PORT`),
+listens on 127.0.0.1 only, and every request needs `X-Aircast-Flasher-Debug: 1`.
+
+```sh
+aircast-flasher --debug-port 28800
+H='X-Aircast-Flasher-Debug: 1'
+curl -H "$H" localhost:28800/state             # page, board, versions, disks, problems, progress
+curl -H "$H" -d '{"action":"goto","page":"storage"}' localhost:28800/action
+curl -H "$H" -d '{"action":"set","board":"rpi","version":"v0.4.0-beta.4","noWifi":true}' localhost:28800/action
+curl -H "$H" localhost:28800/disks             # every removable card the backend sees
+curl -H "$H" 'localhost:28800/events?tail=20'  # the diagnostics log
+```
+
+Actions: `state`, `consent {share}`, `goto {page}` (os, network, access,
+storage, devices, cloud), `set {…}` (board, version, disk, hostname, ssid,
+wifiPassword, authKey, devicePassword, noWifi, remoteAccess, encryption,
+fightMode, sshMode; all or nothing), `flash`, `cancel`. State never echoes a
+secret, only whether one is set. `flash` writes a card, so it is refused unless
+the app also has `AIRCAST_FLASHER_DEBUG_ALLOW_WRITE=1` in its environment.
+
 ## Safety
 
 `list_block_devices` only ever returns removable, non-system disks ≤ 2 TB (the

@@ -6,6 +6,7 @@ compile_error!("the wdio feature embeds a WebDriver server — never enable it i
 mod background;
 mod backup;
 mod cloud;
+mod debugapi;
 mod flasher;
 mod settings;
 mod tailnet;
@@ -34,11 +35,13 @@ async fn main() {
         .manage(cloud::CloudState::default())
         .manage(flasher_ops::backup::InFlight::default())
         .manage(background::Tray::default())
+        .manage(debugapi::Pending::default())
         .setup(|app| {
             let handle = app.handle().clone();
             telemetry::record_panics(handle.clone());
             telemetry::flush(&handle);
             background::setup(&handle);
+            debugapi::start(&handle);
             backup::back_up_automatically(handle);
             Ok(())
         })
@@ -85,6 +88,7 @@ async fn main() {
             settings::read_settings,
             settings::update_settings,
             telemetry::track,
+            debugapi::debug_reply,
         ])
         .build(tauri::generate_context!())
         .expect("error while running tauri application")

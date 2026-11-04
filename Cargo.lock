@@ -32,6 +32,7 @@ dependencies = [
 name = "aircast-flasher"
 version = "0.3.7"
 dependencies = [
+ "axum",
  "flasher-ops",
  "libloading",
  "reqwest 0.12.28",

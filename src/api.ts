@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import type { DebugReply, DebugRequest } from "@/components/debug-requests";
 import { open } from "@tauri-apps/plugin-dialog";
 import {
   check,
@@ -291,6 +292,27 @@ export function onFlashProgress(
 
 export function onBackupsChanged(handler: () => void): Promise<UnlistenFn> {
   return listen(BACKUPS_CHANGED_EVENT, handler);
+}
+
+const DEBUG_REQUEST_EVENT = "debug://request";
+
+const answered = (
+  answer: (request: DebugRequest) => DebugReply,
+  request: DebugRequest,
+): DebugReply => {
+  try {
+    return answer(request);
+  } catch (e: unknown) {
+    return { ok: false, reason: e instanceof Error ? e.message : String(e) };
+  }
+};
+
+export function listenDebugRequests(
+  answer: (request: DebugRequest) => DebugReply,
+): Promise<UnlistenFn> {
+  return listen<{ id: number; request: DebugRequest }>(DEBUG_REQUEST_EVENT, ({ payload }) =>
+    void invoke("debug_reply", { id: payload.id, result: answered(answer, payload.request) }),
+  );
 }
 
 export async function checkForUpdate(): Promise<Update | null> {

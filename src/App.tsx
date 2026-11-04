@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   cancelFlash,
@@ -12,6 +12,7 @@ import {
   prepareImage,
   fetchTangAdv,
   flashImage,
+  listenDebugRequests,
   listBlockDevices,
   listBoards,
   listReleases,
@@ -79,6 +80,13 @@ import {
   restoreProblems,
 } from "@/components/restore-card";
 import { answerConsent, asksConsent } from "@/components/consent";
+import {
+  runDebugRequest,
+  type DebugControls,
+  type DebugPage,
+  type TextField,
+  type ToggleField,
+} from "@/components/debug-requests";
 import { UpdateBanner } from "@/components/update-banner";
 import { WizardSidebar } from "@/components/wizard-sidebar";
 import { StepStorage } from "@/components/step-storage";
@@ -849,6 +857,77 @@ function App() {
           : step === STEP.storage && canProceed
             ? "Ready to write"
             : "Configure your device";
+
+  const stepName = (Object.keys(STEP) as (keyof typeof STEP)[]).find((name) => STEP[name] === step) ?? "os";
+  const textSetters: Record<TextField, (value: string) => void> = {
+    hostname: setHostname,
+    ssid: setSsid,
+    wifiPassword: setPassword,
+    authKey: setAuthKey,
+    devicePassword: setDevicePassword,
+  };
+  const toggleSetters: Record<ToggleField, (on: boolean) => void> = {
+    noWifi: setNoWifi,
+    remoteAccess: (on) => void update({ remoteAccess: on }),
+    encryption: enableEncryption,
+    fightMode: enableFightMode,
+  };
+  const gotoPage = (page: DebugPage) => {
+    if (page === "devices" || page === "cloud") {
+      setFleetView(page);
+      return;
+    }
+    setFleetView(null);
+    setStep(STEP[page]);
+  };
+  const debugControls: DebugControls = {
+    view: {
+      page: fleetView ?? (asksConsent(loaded, settings.telemetry) ? "consent" : stepName),
+      boards: boards.map((b) => b.id),
+      board: settings.board,
+      sourceKind,
+      versions: releases.map((r) => r.version),
+      version: release?.version ?? null,
+      hostname,
+      ssid,
+      noWifi,
+      wifiPasswordSet: password !== "",
+      remoteAccess,
+      authKeySet: authKey !== "",
+      sshMode,
+      devicePasswordSet: devicePassword !== "",
+      encryption: encryptEnabled,
+      fightMode,
+      disks: targets.map((d) => ({ path: d.path, name: d.name, size: d.size })),
+      disk: selectedDisk,
+      problems: storageProblems.map((p) => p.message),
+      canFlash: canProceed,
+      status,
+      progress,
+      writing,
+      written: flashMutation.isSuccess,
+      error: flashMutation.isError ? errorMessage(flashMutation.error, "Flashing failed.") : null,
+    },
+    consent: answerTelemetry,
+    goto: gotoPage,
+    board: (id) => {
+      const next = boards.find((b) => b.id === id);
+      if (next) setBoard(next);
+    },
+    version: setSelectedVersion,
+    disk: setPickedDisk,
+    text: (field, value) => textSetters[field](value),
+    toggle: (field, on) => toggleSetters[field](on),
+    sshMode: setSshMode,
+    flash: handleFlash,
+    cancel: handleCancel,
+  };
+  const debug = useRef(debugControls);
+  debug.current = debugControls;
+  useEffect(() => {
+    const unlisten = listenDebugRequests((request) => runDebugRequest(request, debug.current));
+    return () => void unlisten.then((stop) => stop());
+  }, []);
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-background text-foreground">
