@@ -2,7 +2,7 @@ use std::io::Write;
 
 use base64::Engine as _;
 use flasher_core::engine::{self, FlashParams, FlashStage};
-use flasher_core::{AlignedDevice, ProvisionConfig};
+use flasher_core::{AircastdOutcome, AlignedDevice, ProvisionConfig};
 
 pub fn run_flash_helper() -> ! {
     let args: Vec<String> = std::env::args().collect();
@@ -75,7 +75,10 @@ pub fn run_flash_helper() -> ! {
         &append,
         &diag,
     ) {
-        Ok(()) => {
+        Ok(aircastd) => {
+            if let Some(outcome) = aircastd {
+                append(&serde_json::json!({ "aircastd": outcome }).to_string());
+            }
             append("{\"stage\":\"done\"}");
             std::process::exit(0);
         }
@@ -95,7 +98,7 @@ fn flash(
     no_verify: bool,
     append: &dyn Fn(&str),
     diag: &dyn Fn(&str),
-) -> Result<(), String> {
+) -> Result<Option<AircastdOutcome>, String> {
     let json = base64::engine::general_purpose::STANDARD
         .decode(provision_b64)
         .map_err(|e| format!("Failed to decode provision config: {e}"))?;
@@ -138,7 +141,7 @@ fn open_and_run(
     cfg: &ProvisionConfig,
     progress: &mut dyn FnMut(FlashStage, u64, u64),
     diag: &dyn Fn(&str),
-) -> Result<(), String> {
+) -> Result<Option<AircastdOutcome>, String> {
     #[cfg(target_os = "macos")]
     {
         let raw = open_device_macos(device)?;
@@ -176,7 +179,7 @@ fn probe_wait_and_flash(
     cfg: &ProvisionConfig,
     progress: &mut dyn FnMut(FlashStage, u64, u64),
     diag: &dyn Fn(&str),
-) -> Result<(), String> {
+) -> Result<Option<AircastdOutcome>, String> {
     use std::io::SeekFrom;
 
     let size = dev

@@ -1,4 +1,10 @@
-import type { Backup, KeyWrite, SshMode, SshPublicKey } from "@/types";
+import type {
+  AircastdOutcome,
+  Backup,
+  KeyWrite,
+  SshMode,
+  SshPublicKey,
+} from "@/types";
 import { backupLabel } from "@/lib/format";
 import { STEP, type WizardStep } from "@/components/wizard-types";
 import type { BackupMarks } from "@/components/restore-card";
@@ -19,6 +25,7 @@ export interface SummaryItem {
 
 export interface SummaryInput {
   image: string;
+  aircastd: AircastdOutcome | null;
   hostname: string;
   ssid: string;
   noWifi: boolean;
@@ -42,6 +49,20 @@ export interface SummaryInput {
 }
 
 const IMAGE_DEFAULT_LOGIN = "Image default (pi / raspberry)";
+
+const BUILT_IN = "The version built into the image";
+
+function aircastd(outcome: AircastdOutcome | null): SummaryItem {
+  const row = { label: "aircastd", step: STEP.storage };
+  if (outcome === null) return { ...row, value: "Checking for the newest…" };
+  if (outcome === "builtIn") return { ...row, value: BUILT_IN };
+  if ("skipped" in outcome)
+    return { ...row, value: `${BUILT_IN} · ${outcome.skipped}` };
+  return {
+    ...row,
+    value: `${outcome.added} · installs on first boot if newer`,
+  };
+}
 
 function remoteAccess(
   authKey: string,
@@ -168,6 +189,7 @@ export function buildSummary(input: SummaryInput): SummaryItem[] {
   );
   return [
     { label: "Image", value: input.image, step: STEP.os },
+    aircastd(input.aircastd),
     {
       label: "Hostname",
       value: hostname === "" ? "Image default" : `${hostname}.local`,

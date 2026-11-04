@@ -4,9 +4,11 @@ import { test } from "node:test";
 import { buildSummary, type SummaryInput } from "./wizard-summary.ts";
 import { defaultHostname } from "./default-hostname.ts";
 import { NO_MARKS } from "./restore-card.ts";
+import { STEP } from "./wizard-types.ts";
 
 const base: SummaryInput = {
   image: "Aircast OS v0.3.0",
+  aircastd: "builtIn",
   hostname: "falcon-01",
   ssid: "field-net",
   noWifi: false,
@@ -30,6 +32,27 @@ const rowOf = (input: SummaryInput, label: string) =>
 
 const valueOf = (input: SummaryInput, label: string) =>
   rowOf(input, label)?.value;
+
+test("names the aircastd going on the card, and that it isn't changed here", () => {
+  const row = (aircastd: SummaryInput["aircastd"]) =>
+    rowOf({ ...base, aircastd }, "aircastd");
+  assert.equal(
+    row({ added: "v0.4.6-rc.19 (beta)" })?.value,
+    "v0.4.6-rc.19 (beta) · installs on first boot if newer",
+  );
+  assert.equal(
+    row({ added: "v0.4.5" })?.value,
+    "v0.4.5 · installs on first boot if newer",
+  );
+  assert.equal(row("builtIn")?.value, "The version built into the image");
+  assert.equal(
+    row({ skipped: "couldn't reach apt.aircast.one" })?.value,
+    "The version built into the image · couldn't reach apt.aircast.one",
+  );
+  assert.equal(row(null)?.value, "Checking for the newest…");
+  assert.equal(row(null)?.step, STEP.storage);
+  assert.equal(row("builtIn")?.warn, undefined);
+});
 
 test("reports the hostname as the address the device answers on", () => {
   assert.equal(valueOf(base, "Hostname"), "falcon-01.local");

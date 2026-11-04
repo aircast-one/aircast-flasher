@@ -21,7 +21,7 @@ use super::CANCEL_POLL;
 use super::HELPER_ABORT_GRACE;
 use super::MIN_TEMP_SPACE_BYTES;
 use super::PROGRESS_THROTTLE_MS;
-use flasher_core::InitFormat;
+use flasher_core::{AircastdOutcome, InitFormat};
 use std::io::Write as _;
 
 #[derive(Debug, Clone)]
@@ -64,10 +64,36 @@ pub async fn flash_image(
     cancel: Arc<AtomicBool>,
     events: FlashEvents,
     trace: &mut FlashTrace,
-) -> Result<(), String> {
-    if usbboard::is_target(target_disk) {
-        return flash_usb(config, image_path, target_disk, cancel, events, trace).await;
-    }
+) -> Result<AircastdOutcome, String> {
+    let update = crate::aircastd::prepare(image_path).await;
+    let config = ProvisionConfig {
+        aircastd: update.as_ref().ok().cloned(),
+        ..config.clone()
+    };
+    let written = match usbboard::is_target(target_disk) {
+        true => flash_usb(&config, image_path, target_disk, cancel, events, trace).await,
+        false => flash_card(&config, image_path, target_disk, cancel, events, trace).await,
+    }?;
+    Ok(update.map_or_else(
+        |outcome| outcome,
+        |_| {
+            written.unwrap_or_else(|| {
+                AircastdOutcome::Skipped(
+                    "the flash helper didn't say whether it wrote aircastd".into(),
+                )
+            })
+        },
+    ))
+}
+
+async fn flash_card(
+    config: &ProvisionConfig,
+    image_path: &str,
+    target_disk: &str,
+    cancel: Arc<AtomicBool>,
+    events: FlashEvents,
+    trace: &mut FlashTrace,
+) -> Result<Option<AircastdOutcome>, String> {
     validate_disk_path(target_disk)?;
     validate_fight_access(config)?;
     let src_path = validate_image_file(std::path::Path::new(image_path))?;
@@ -165,7 +191,7 @@ pub async fn flash_image(
                 Ok(joined) => {
                     joined.unwrap_or_else(|e| Err(format!("Elevated flash task failed: {e}")))
                 }
-                Err(_) => Ok(()),
+                Err(_) => Ok(None),
             };
             match helper_result {
                 Err(e) if !e.contains("image preparation aborted") => Err(e),
@@ -188,7 +214,7 @@ async fn flash_usb(
     cancel: Arc<AtomicBool>,
     events: FlashEvents,
     trace: &mut FlashTrace,
-) -> Result<(), String> {
+) -> Result<Option<AircastdOutcome>, String> {
     validate_fight_access(config)?;
     let family = usbboard::family_of_target(target)
         .ok_or_else(|| format!("{target} is not a board this Flasher can write over USB"))?;
@@ -220,15 +246,20 @@ async fn flash_usb(
             stage: "customize",
             bytes: 0,
         });
-        customize_file(&write_path, config).await?;
-        write_usb(family, &write_path, cancel, events, trace).await
+        let aircastd = customize_file(&write_path, config).await?;
+        write_usb(family, &write_path, cancel, events, trace)
+            .await
+            .map(|()| aircastd)
     }
     .await;
     let _ = std::fs::remove_file(&write_path);
     result
 }
 
-async fn customize_file(image: &std::path::Path, config: &ProvisionConfig) -> Result<(), String> {
+async fn customize_file(
+    image: &std::path::Path,
+    config: &ProvisionConfig,
+) -> Result<Option<AircastdOutcome>, String> {
     let image = image.to_path_buf();
     let config = config.clone();
     tokio::task::spawn_blocking(move || {
@@ -277,6 +308,7 @@ async fn write_usb(
             fight_mode: false,
             restore: None,
             cloud_enroll: None,
+            aircastd: None,
             init_format: InitFormat::CloudInit,
         };
         let mut file =
@@ -317,7 +349,7 @@ async fn write_usb(
     match written {
         Err(_) if cancel.load(Ordering::SeqCst) => Err("Cancelled".to_string()),
         Err(e) => Err(e),
-        Ok(()) => usbboard::restart(family).await,
+        Ok(_) => usbboard::restart(family).await,
     }
 }
 
@@ -347,7 +379,7 @@ async fn run_elevated_flash(
     provision_b64: String,
     events: FlashEvents,
     cancel: Arc<AtomicBool>,
-) -> Result<(), String> {
+) -> Result<Option<AircastdOutcome>, String> {
     let exe = std::env::current_exe().map_err(|e| format!("Failed to find current exe: {e}"))?;
 
     let progress_file = std::env::temp_dir().join(format!(
@@ -435,19 +467,24 @@ async fn run_elevated_flash(
     let _ = tail.await;
 
     let contents = std::fs::read_to_string(&progress_file).unwrap_or_default();
-    let last_error = contents
+    let lines: Vec<serde_json::Value> = contents
         .lines()
         .rev()
         .filter_map(|l| serde_json::from_str::<serde_json::Value>(l.trim()).ok())
-        .find_map(|v| {
-            v.get("error")
-                .and_then(|e| e.as_str())
-                .map(|s| s.to_string())
-        });
+        .collect();
+    let last_error = lines.iter().find_map(|v| {
+        v.get("error")
+            .and_then(|e| e.as_str())
+            .map(|s| s.to_string())
+    });
+    let aircastd = lines.iter().find_map(|v| {
+        v.get("aircastd")
+            .and_then(|o| serde_json::from_value::<AircastdOutcome>(o.clone()).ok())
+    });
     let _ = std::fs::remove_file(&progress_file);
 
     let out = match launch {
-        Ok(true) => Ok(()),
+        Ok(true) => Ok(aircastd),
         Ok(false) => Err(last_error.unwrap_or_else(|| {
             "Elevated flash failed (authorization declined or write error)".to_string()
         })),

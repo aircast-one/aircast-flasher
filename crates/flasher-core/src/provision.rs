@@ -473,6 +473,7 @@ mod tests {
             fight_mode: false,
             restore: None,
             cloud_enroll: None,
+            aircastd: None,
             init_format: init,
         }
     }
@@ -490,6 +491,7 @@ mod tests {
             fight_mode: false,
             restore: None,
             cloud_enroll: None,
+            aircastd: None,
             init_format: init,
         }
     }
@@ -504,6 +506,7 @@ mod tests {
             fight_mode: false,
             restore: None,
             cloud_enroll: None,
+            aircastd: None,
             init_format: init,
         }
     }

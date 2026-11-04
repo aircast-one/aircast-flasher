@@ -122,6 +122,8 @@ pub struct ProvisionConfig {
     pub restore: Option<String>,
     #[serde(default)]
     pub cloud_enroll: Option<CloudEnrollment>,
+    #[serde(default)]
+    pub aircastd: Option<crate::AircastdUpdate>,
     pub init_format: InitFormat,
 }
 

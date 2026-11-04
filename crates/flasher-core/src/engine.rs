@@ -4,6 +4,7 @@ use std::time::{Duration, Instant};
 use mbrman::MBR;
 use sha2::{Digest, Sha256};
 
+use crate::aircastd::AircastdOutcome;
 use crate::provision::{ProvisionFile, ProvisionPlan};
 use crate::ProvisionConfig;
 
@@ -56,7 +57,7 @@ pub fn flash(
     params: &FlashParams,
     provision: &ProvisionConfig,
     progress: &mut dyn FnMut(FlashStage, u64, u64),
-) -> Result<(), String> {
+) -> Result<Option<AircastdOutcome>, String> {
     let image_len = params.image_len;
 
     let mut first_block = vec![0u8; BLOCK];
@@ -137,6 +138,7 @@ pub fn flash(
 
     progress(FlashStage::Customize, 0, 0);
     customize(device, &first_block, provision)?;
+    let aircastd = add_aircastd(device, &first_block, provision)?;
 
     device
         .seek(SeekFrom::Start(0))
@@ -147,7 +149,7 @@ pub fn flash(
 
     device.sync().map_err(|e| ioerr("final sync", e))?;
 
-    Ok(())
+    Ok(aircastd)
 }
 
 fn zero_tail(device: &mut dyn BlockDevice) -> Result<(), String> {
@@ -168,14 +170,27 @@ fn zero_tail(device: &mut dyn BlockDevice) -> Result<(), String> {
 pub fn customize_image(
     image: &mut dyn BlockDevice,
     provision: &ProvisionConfig,
-) -> Result<(), String> {
+) -> Result<Option<AircastdOutcome>, String> {
     image
         .seek(SeekFrom::Start(0))
         .map_err(|e| ioerr("seek to image start", e))?;
     let mut first_block = vec![0u8; BLOCK];
     let first_len = read_full(image, &mut first_block).map_err(|e| ioerr("read image", e))?;
     first_block.truncate(first_len);
-    customize(image, &first_block, provision)
+    customize(image, &first_block, provision)?;
+    add_aircastd(image, &first_block, provision)
+}
+
+fn add_aircastd(
+    device: &mut dyn BlockDevice,
+    first_block: &[u8],
+    provision: &ProvisionConfig,
+) -> Result<Option<AircastdOutcome>, String> {
+    provision
+        .aircastd
+        .as_ref()
+        .map(|update| crate::aircastd::add_to_card(device, first_block, update))
+        .transpose()
 }
 
 fn customize(
@@ -264,7 +279,7 @@ fn append_cmdline<T: fatfs::ReadWriteSeek>(
     Ok(())
 }
 
-fn fat_partition_extent(first_block: &[u8]) -> Result<(u64, u64), String> {
+pub(crate) fn fat_partition_extent(first_block: &[u8]) -> Result<(u64, u64), String> {
     let mbr = MBR::read_from(&mut Cursor::new(first_block), SECTOR as u32)
         .map_err(|e| format!("parse MBR: {e}"))?;
     if mbr
@@ -511,20 +526,140 @@ mod tests {
             fight_mode: false,
             restore: None,
             cloud_enroll: None,
+            aircastd: None,
             init_format: InitFormat::CloudInit,
         }
     }
 
-    fn read_fat_file(image: &[u8], name: &str) -> Option<String> {
+    fn read_fat_bytes(image: &[u8], name: &str) -> Option<Vec<u8>> {
         let part_off = PART_START_SECTOR as usize * SECTOR as usize;
         let part_len = FAT_SECTORS as usize * SECTOR as usize;
         let mut owned = image[part_off..part_off + part_len].to_vec();
         let slice = fscommon::StreamSlice::new(Cursor::new(&mut owned), 0, part_len as u64).ok()?;
         let fs = fatfs::FileSystem::new(slice, fatfs::FsOptions::new()).ok()?;
         let mut f = fs.root_dir().open_file(name).ok()?;
-        let mut s = String::new();
-        f.read_to_string(&mut s).ok()?;
-        Some(s)
+        let mut bytes = Vec::new();
+        f.read_to_end(&mut bytes).ok()?;
+        Some(bytes)
+    }
+
+    fn read_fat_file(image: &[u8], name: &str) -> Option<String> {
+        read_fat_bytes(image, name).and_then(|bytes| String::from_utf8(bytes).ok())
+    }
+
+    fn aircastd_update(name: &str, deb: &[u8]) -> crate::AircastdUpdate {
+        let path = std::env::temp_dir().join(format!("aircastd-{name}-{}.deb", std::process::id()));
+        std::fs::write(&path, deb).expect("write deb");
+        crate::AircastdUpdate {
+            version: "v0.4.6-rc.19 (beta)".into(),
+            sha256: crate::aircastd::sha256_hex(deb),
+            deb: path.to_string_lossy().into(),
+        }
+    }
+
+    fn flash_with_aircastd(update: crate::AircastdUpdate) -> (Vec<u8>, Option<AircastdOutcome>) {
+        let image = build_image();
+        let mut device = MemDevice::zeroed(image.len());
+        let params = FlashParams {
+            image_len: image.len() as u64,
+            verify: true,
+        };
+        let cfg = ProvisionConfig {
+            aircastd: Some(update),
+            ..cloud_init_config()
+        };
+        let outcome = flash(
+            &mut device,
+            &mut Cursor::new(image),
+            &params,
+            &cfg,
+            &mut |_, _, _| {},
+        )
+        .expect("an aircastd problem must not fail the flash");
+        (device.into_bytes(), outcome)
+    }
+
+    #[test]
+    fn the_newest_aircastd_lands_in_aircast_update_with_its_checksum() {
+        let deb: Vec<u8> = (0..300_000u32).map(|i| (i % 251) as u8).collect();
+        let (card, outcome) = flash_with_aircastd(aircastd_update("lands", &deb));
+
+        assert_eq!(
+            outcome,
+            Some(AircastdOutcome::Added("v0.4.6-rc.19 (beta)".into()))
+        );
+        assert_eq!(
+            read_fat_bytes(&card, "aircast-update/aircastd.deb"),
+            Some(deb.clone())
+        );
+        assert_eq!(
+            read_fat_file(&card, "aircast-update/aircastd.deb.sha256"),
+            Some(format!("{}\n", crate::aircastd::sha256_hex(&deb)))
+        );
+        assert!(read_fat_file(&card, "user-data").is_some_and(|u| u.contains("hostname: aircast")));
+    }
+
+    #[test]
+    fn aircast_update_starts_with_plain_dot_entries_as_fsck_expects() {
+        let (card, _) = flash_with_aircastd(aircastd_update("dots", b"deb"));
+        let entries: Vec<&[u8; 32]> = card.as_chunks::<32>().0.iter().collect();
+        let dots: Vec<usize> = entries
+            .windows(2)
+            .enumerate()
+            .filter(|(_, pair)| {
+                pair[0][..11] == *b".          " && pair[1][..11] == *b"..         "
+            })
+            .map(|(at, _)| at)
+            .collect();
+
+        assert_eq!(dots.len(), 1, "one new directory");
+        let dotdot = entries[dots[0] + 1];
+        assert_eq!(
+            [dotdot[20], dotdot[21], dotdot[26], dotdot[27]],
+            [0; 4],
+            "its parent is the root"
+        );
+        assert!(!card
+            .as_chunks::<128>()
+            .0
+            .iter()
+            .any(|entries| crate::aircastd::has_lfn_dot_entries(entries)));
+    }
+
+    #[test]
+    fn no_room_on_the_boot_partition_skips_aircastd_and_leaves_the_card_alone() {
+        let deb = vec![7u8; FAT_SECTORS as usize * SECTOR as usize];
+        let (card, outcome) = flash_with_aircastd(aircastd_update("full", &deb));
+
+        assert!(
+            matches!(&outcome, Some(AircastdOutcome::Skipped(why)) if why.contains("no room")),
+            "{outcome:?}"
+        );
+        assert_eq!(read_fat_bytes(&card, "aircast-update/aircastd.deb"), None);
+        assert!(read_fat_file(&card, "user-data").is_some());
+    }
+
+    #[test]
+    fn a_download_that_is_missing_or_does_not_match_its_checksum_is_not_written() {
+        let tampered = crate::AircastdUpdate {
+            sha256: "0".repeat(64),
+            ..aircastd_update("tampered", b"deb")
+        };
+        let missing = crate::AircastdUpdate {
+            deb: "/nonexistent/aircastd.deb".into(),
+            ..aircastd_update("missing", b"deb")
+        };
+
+        [(tampered, "checksum"), (missing, "couldn't read")]
+            .into_iter()
+            .for_each(|(update, why)| {
+                let (card, outcome) = flash_with_aircastd(update);
+                assert!(
+                    matches!(&outcome, Some(AircastdOutcome::Skipped(said)) if said.contains(why)),
+                    "{outcome:?}"
+                );
+                assert_eq!(read_fat_bytes(&card, "aircast-update/aircastd.deb"), None);
+            });
     }
 
     #[test]
@@ -624,6 +759,7 @@ mod tests {
             fight_mode: false,
             restore: None,
             cloud_enroll: None,
+            aircastd: None,
             init_format: InitFormat::FirstRun,
         };
         let params = FlashParams {
@@ -664,6 +800,7 @@ mod tests {
             fight_mode: true,
             restore: None,
             cloud_enroll: None,
+            aircastd: None,
             init_format: InitFormat::CloudInit,
         };
         let params = FlashParams {
@@ -697,6 +834,7 @@ mod tests {
             fight_mode: false,
             restore: Some(bundle.into()),
             cloud_enroll: None,
+            aircastd: None,
             init_format: InitFormat::CloudInit,
         };
         let params = FlashParams {

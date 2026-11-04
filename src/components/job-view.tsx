@@ -29,7 +29,7 @@ import type { FlashProgressState } from "@/components/wizard-types";
 import { saveRecoveryKey } from "@/components/disk-encryption-section";
 import { CloudSignInButton } from "@/components/cloud-cards-view";
 import type { CloudOutcome } from "@/components/cloud";
-import type { Board, EncryptionConfig } from "@/types";
+import type { AircastdOutcome, Board, EncryptionConfig } from "@/types";
 import { useState } from "react";
 
 function IndeterminateBar() {
@@ -260,6 +260,7 @@ export function JobView({
   retire,
   encryption,
   cloud,
+  aircastd,
   success,
   cancelled,
   error,
@@ -282,6 +283,7 @@ export function JobView({
   retire: { hostnames: string[]; keep: string } | null;
   encryption: EncryptionConfig | null;
   cloud: CloudOutcome;
+  aircastd: AircastdOutcome | null;
   success: boolean;
   cancelled: boolean;
   error: string | null;
@@ -305,6 +307,14 @@ export function JobView({
           <p className="text-sm text-balance text-muted-foreground">
             A few more steps and {hostname.trim()} is flying.
           </p>
+          {aircastd !== null &&
+          typeof aircastd === "object" &&
+          "skipped" in aircastd ? (
+            <p className="text-xs text-balance text-muted-foreground">
+              aircastd wasn't added: {aircastd.skipped}. The card will use the
+              aircastd version built into the image.
+            </p>
+          ) : null}
         </div>
         {encryption ? (
           <EncryptionReminder hostname={hostname} encryption={encryption} />

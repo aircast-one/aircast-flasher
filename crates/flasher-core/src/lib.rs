@@ -1,3 +1,5 @@
+pub mod aircastd;
+mod cache;
 pub mod device;
 pub mod engine;
 pub mod model;
@@ -7,6 +9,7 @@ pub mod psk;
 #[cfg(windows)]
 pub mod win;
 
+pub use aircastd::{AircastdOutcome, AircastdPackage, AircastdUpdate};
 pub use device::AlignedDevice;
 pub use engine::{customize_image, flash, BlockDevice, FlashParams, FlashStage, BLOCK};
 

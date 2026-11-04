@@ -166,6 +166,7 @@ mod tests {
             fight_mode,
             restore: None,
             cloud_enroll: None,
+            aircastd: None,
             init_format: InitFormat::CloudInit,
         }
     }

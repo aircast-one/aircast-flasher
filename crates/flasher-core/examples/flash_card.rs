@@ -82,6 +82,7 @@ fn main() -> Result<(), String> {
         fight_mode: args.iter().any(|a| a == "--fight-mode"),
         restore: None,
         cloud_enroll: None,
+        aircastd: None,
         init_format: InitFormat::CloudInit,
     };
 
@@ -110,4 +111,5 @@ fn main() -> Result<(), String> {
         &provision,
         &mut |_, _, _| {},
     )
+    .map(|_| ())
 }

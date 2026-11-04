@@ -43,6 +43,11 @@ export interface BlockDevice {
   mount_points: string[];
 }
 
+export type AircastdOutcome =
+  | { added: string }
+  | { skipped: string }
+  | "builtIn";
+
 export interface DownloadResult {
   image_path: string;
   checksum: string;

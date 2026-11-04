@@ -380,6 +380,15 @@ async fn flash(args: &FlashArgs, json: bool) -> Result<(), String> {
         request::check_image(&request, release)?;
         eprintln!("Image: Aircast OS {}", release.version);
     }
+    let image_name = release
+        .as_ref()
+        .map(|r| r.version.as_str())
+        .or(request.image.as_deref())
+        .unwrap_or_default();
+    eprintln!(
+        "aircastd: {}",
+        flasher_ops::aircastd::check(image_name).await
+    );
     if let Some(note) = request::wifi_note(&request) {
         eprintln!("Note: {note}");
     }
@@ -432,6 +441,7 @@ async fn flash(args: &FlashArgs, json: bool) -> Result<(), String> {
                 }
             );
             println!("SSH: {}", outcome.ssh);
+            println!("aircastd: {}", outcome.aircastd);
             if let Some(address) = &outcome.address {
                 println!(
                     "Once it boots: {address}  (`aircast-flasher-cli find {}`)",

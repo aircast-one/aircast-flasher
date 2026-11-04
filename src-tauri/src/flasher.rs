@@ -3,8 +3,8 @@ use std::sync::{Arc, Mutex};
 
 use flasher_ops::flash::{FlashEvent, FlashTrace};
 use flasher_ops::{
-    BlockDevice, DownloadProgress, DownloadResult, ProvisionConfig, ReleasesResponse,
-    TailscaleConfig, WifiConfig,
+    AircastdOutcome, BlockDevice, DownloadProgress, DownloadResult, ProvisionConfig,
+    ReleasesResponse, TailscaleConfig, WifiConfig,
 };
 use tauri::{AppHandle, Emitter, State};
 use tauri_plugin_dialog::DialogExt;
@@ -130,6 +130,14 @@ pub async fn prepare_image(image_path: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+pub async fn prepare_aircastd(image: String) -> AircastdOutcome {
+    flasher_ops::aircastd::prepare(&image).await.map_or_else(
+        |outcome| outcome,
+        |update| AircastdOutcome::Added(update.version),
+    )
+}
+
+#[tauri::command]
 #[allow(clippy::too_many_arguments)]
 pub async fn flash_image(
     app_handle: AppHandle,
@@ -146,7 +154,7 @@ pub async fn flash_image(
     restore: Option<crate::backup::RestoreChoice>,
     cloud_enroll: Option<flasher_ops::CloudEnrollment>,
     init_format: flasher_ops::InitFormat,
-) -> Result<(), String> {
+) -> Result<AircastdOutcome, String> {
     let restore = restore
         .as_ref()
         .map(crate::backup::RestoreChoice::file)
@@ -160,6 +168,7 @@ pub async fn flash_image(
         fight_mode,
         restore,
         cloud_enroll,
+        aircastd: None,
         init_format,
     };
     let facts = telemetry::describe_config(&config);

@@ -188,7 +188,7 @@ impl Flasher {
     }
 
     #[tool(
-        description = "Erase an SD card, write Aircast OS (or a local image) and configure WiFi, hostname, SSH, tailnet, disk encryption, fight mode and a settings restore. Takes a few minutes and asks for an administrator password unless the server runs as root."
+        description = "Erase an SD card, write Aircast OS (or a local image) and configure WiFi, hostname, SSH, tailnet, disk encryption, fight mode and a settings restore. Cards with Aircast OS v0.4.0-beta.4 or newer also get the newest aircastd from the image's apt channel; the result's aircastd says which version the card runs. Takes a few minutes and asks for an administrator password unless the server runs as root."
     )]
     async fn flash_card(
         &self,

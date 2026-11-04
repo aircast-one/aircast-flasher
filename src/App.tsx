@@ -8,6 +8,7 @@ import {
   mintAuthKey,
   detectSshKeys,
   downloadImage,
+  prepareAircastd,
   prepareImage,
   fetchTangAdv,
   flashImage,
@@ -27,6 +28,7 @@ import {
 } from "@/api";
 import type {
   AccessConfig,
+  AircastdOutcome,
   Board,
   EncryptionConfig,
   TangServer,
@@ -440,6 +442,7 @@ function App() {
       encryption: EncryptionConfig | null;
       cloudCard: string | null;
       cloud: CloudOutcome;
+      aircastd: AircastdOutcome;
     },
     unknown,
     FlashVars
@@ -502,7 +505,7 @@ function App() {
             );
       setProgress({ phase: "flashing", progress: null });
       setCardTouched(true);
-      await flashImage({
+      const aircastd = await flashImage({
         jobId: vars.jobId,
         imagePath,
         targetDisk: vars.targetDisk,
@@ -520,6 +523,7 @@ function App() {
         encryption,
         cloudCard: keyset?.id ?? null,
         cloud: link?.cloud ?? null,
+        aircastd,
       };
     },
     onSuccess: (result, vars) => {
@@ -556,6 +560,19 @@ function App() {
     if (!localPath) return null;
     return localPath.split(/[\\/]/).pop() ?? localPath;
   }, [localPath]);
+
+  const aircastdImage =
+    sourceKind === "aircast"
+      ? chosen
+        ? (release?.version ?? null)
+        : null
+      : localFileName;
+  const aircastdQuery = useQuery({
+    queryKey: ["aircastd", aircastdImage],
+    queryFn: () => prepareAircastd(aircastdImage!),
+    enabled: aircastdImage !== null,
+    retry: false,
+  });
 
   const sourceReady =
     sourceKind === "aircast" ? release !== null : localPath !== null;
@@ -674,6 +691,7 @@ function App() {
 
   const summary = buildSummary({
     image: imageLabel,
+    aircastd: aircastdQuery.data ?? null,
     hostname,
     ssid,
     noWifi,
@@ -1006,6 +1024,7 @@ function App() {
               }
               encryption={flashMutation.data?.encryption ?? null}
               cloud={flashMutation.data?.cloud ?? null}
+              aircastd={flashMutation.data?.aircastd ?? null}
               success={flashMutation.isSuccess}
               cancelled={stopped}
               error={

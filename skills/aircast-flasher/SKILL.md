@@ -131,6 +131,12 @@ Rules the CLI enforces, so check them before calling:
   before the card is, and it is the only copy — tell the person to keep it
   somewhere safe. Cloud unlock needs an Aircast Cloud sign-in first.
 
+Every card with Aircast OS v0.4.0-beta.4 or newer also gets the newest aircastd
+from the image's apt channel (stable for a stable image, testing for a beta),
+installed on first boot if it's newer than the one baked in. The CLI prints
+`aircastd: …` before and after the write (MCP: `aircastd` in the result); pass
+it on when it says the card keeps the image's own aircastd.
+
 When something is missing, the CLI lists every problem at once
 ("Fix this to continue: …"). Fix them all and retry rather than one at a time.
 

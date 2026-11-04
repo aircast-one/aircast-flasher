@@ -145,6 +145,10 @@ pub struct FlashOutcome {
     pub ssh: String,
     pub recovery_file: Option<String>,
     pub from_backup: Vec<String>,
+    #[schemars(
+        description = "Which aircastd the card runs: the newest from the image's apt channel (stable, or testing for a beta image), installed on first boot if it's newer than the image's, or the version built into the image."
+    )]
+    pub aircastd: String,
 }
 
 const HOSTNAME_RULE: &str = "Use only lowercase letters, numbers and hyphens in the hostname";
@@ -719,11 +723,12 @@ pub async fn run(
         fight_mode: request.fight_mode,
         restore,
         cloud_enroll: None,
+        aircastd: None,
         init_format: InitFormat::CloudInit,
     };
 
     let mut trace = FlashTrace::default();
-    flasher_ops::flash::flash_image(
+    let aircastd = flasher_ops::flash::flash_image(
         &config,
         &prepared.image,
         &prepared.card.path,
@@ -741,6 +746,7 @@ pub async fn run(
         ssh: ssh_summary,
         recovery_file: request.encryption.as_ref().map(|e| e.recovery_file.clone()),
         from_backup: Vec::new(),
+        aircastd: aircastd.to_string(),
     })
 }
 

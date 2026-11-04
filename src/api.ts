@@ -9,6 +9,7 @@ import {
 import { relaunch } from "@tauri-apps/plugin-process";
 import type {
   AccessConfig,
+  AircastdOutcome,
   Backup,
   CloudCard,
   CloudEnrollment,
@@ -84,6 +85,10 @@ export function prepareImage(imagePath: string): Promise<void> {
   return invoke<void>("prepare_image", { imagePath });
 }
 
+export function prepareAircastd(image: string): Promise<AircastdOutcome> {
+  return invoke<AircastdOutcome>("prepare_aircastd", { image });
+}
+
 export function flashImage(args: {
   jobId: string;
   imagePath: string;
@@ -97,8 +102,8 @@ export function flashImage(args: {
   restore: RestoreChoice | null;
   cloudEnroll: CloudEnrollment | null;
   initFormat: InitFormat;
-}): Promise<void> {
-  return invoke<void>("flash_image", {
+}): Promise<AircastdOutcome> {
+  return invoke<AircastdOutcome>("flash_image", {
     jobId: args.jobId,
     imagePath: args.imagePath,
     targetDisk: args.targetDisk,

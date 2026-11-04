@@ -50,6 +50,7 @@ async fn main() {
             flasher::list_block_devices,
             flasher::download_image,
             flasher::prepare_image,
+            flasher::prepare_aircastd,
             flasher::flash_image,
             flasher::fetch_tang_adv,
             flasher::save_recovery_file,

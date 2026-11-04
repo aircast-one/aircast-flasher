@@ -1,3 +1,4 @@
+pub mod aircastd;
 pub mod authkey;
 pub mod backup;
 pub mod cloud;
@@ -22,8 +23,8 @@ pub use types::*;
 pub use validation::*;
 
 pub use flasher_core::{
-    AccessConfig, CloudEnrollment, EncryptionConfig, InitFormat, ProvisionConfig, SshMode,
-    TailscaleConfig, TangServer, WifiConfig, MIN_FIGHT_PASSWORD,
+    AccessConfig, AircastdOutcome, CloudEnrollment, EncryptionConfig, InitFormat, ProvisionConfig,
+    SshMode, TailscaleConfig, TangServer, WifiConfig, MIN_FIGHT_PASSWORD,
 };
 
 use serde::{Deserialize, Serialize};

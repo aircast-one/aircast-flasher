@@ -64,6 +64,15 @@ list_releases ─► download_image ─► flash_image ─► provision_device
   PSK + hostname are written as cloud-init (`user-data` + `network-config`) or
   legacy `firstrun.sh`, then the card is ejected. The plaintext WiFi passphrase
   is never written — only the derived WPA-PSK.
+- **Newest aircastd on every card** — for Aircast OS v0.4.0-beta.4 and newer,
+  the Flasher reads the image's aircastd apt channel (`stable`, or `testing`
+  for a beta; `https://apt.aircast.one/aircastd/dists/<channel>/main/binary-arm64/Packages`),
+  downloads the newest arm64 .deb into its cache (keyed by version and hash),
+  checks its SHA-256 against the index and writes `aircast-update/aircastd.deb`
+  plus `aircastd.deb.sha256` to the boot partition after the image is verified.
+  The image installs it on first boot only if it's newer than its own. Offline,
+  an older image, or no room on the boot partition: the card keeps the image's
+  aircastd and the summary and the CLI say so — the flash never fails over it.
 - **Remote access (optional)** — paste a pre-auth key and it is provisioned into
   aircastd's store, so the device joins your tailnet on first boot with no
   sign-in. Getting that key needs a Tailscale account, so the step checks this
