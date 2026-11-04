@@ -131,7 +131,7 @@ pub fn encryption_files(config: &ProvisionConfig) -> Vec<ProvisionFile> {
              WIFI_PSK='{psk}'\n\
              WIFI_COUNTRY='{country}'\n",
             ssid = hex::encode(wifi.ssid.as_bytes()),
-            psk = shell_single_quote(&psk::derive(&wifi.ssid, &wifi.password)),
+            psk = shell_single_quote(&psk::key(&wifi.ssid, &wifi.password).unwrap_or_default()),
             country = shell_single_quote(&sanitize_line(&wifi.country)),
         ));
     }
@@ -345,7 +345,10 @@ fn tailscale_write_files_entry(control_server: &str, auth_key: &str) -> String {
 }
 
 fn network_config_v2(wifi: &WifiConfig) -> String {
-    let key = psk::derive(&wifi.ssid, &wifi.password);
+    let security = psk::key(&wifi.ssid, &wifi.password).map_or_else(
+        || " {}\n".to_string(),
+        |key| format!("\n        password: \"{key}\"\n"),
+    );
     format!(
         "version: 2\n\
          wifis:\n  \
@@ -354,8 +357,7 @@ fn network_config_v2(wifi: &WifiConfig) -> String {
          optional: true\n    \
          regulatory-domain: \"{country}\"\n    \
          access-points:\n      \
-         \"{ssid}\":\n        \
-         password: \"{key}\"\n",
+         \"{ssid}\":{security}",
         country = wifi.country,
         ssid = wifi.ssid,
     )
@@ -377,7 +379,8 @@ fn firstrun_script(config: &ProvisionConfig) -> String {
     }
 
     if let Some(wifi) = &config.wifi {
-        let key = psk::derive(&wifi.ssid, &wifi.password);
+        let security = psk::key(&wifi.ssid, &wifi.password)
+            .map_or_else(|| "key_mgmt=NONE".to_string(), |key| format!("psk={key}"));
         s.push_str(&format!(
             "cat >/etc/wpa_supplicant/wpa_supplicant.conf <<'WPAEOF'\n\
              ctrl_interface=DIR=/var/run/wpa_supplicant GROUP=netdev\n\
@@ -385,7 +388,7 @@ fn firstrun_script(config: &ProvisionConfig) -> String {
              country={country}\n\
              network={{\n\
              \x20  ssid=\"{ssid}\"\n\
-             \x20  psk={key}\n\
+             \x20  {security}\n\
              }}\n\
              WPAEOF\n\
              rfkill unblock wifi\n\
@@ -544,6 +547,33 @@ mod tests {
             .iter()
             .any(|f| f.name == "user-data" && f.contents.contains("hostname: aircast")));
         assert!(files.iter().any(|f| f.name == "meta-data"));
+    }
+
+    #[test]
+    fn an_open_network_is_written_without_a_key() {
+        let mut c = cfg(InitFormat::CloudInit, false, None);
+        c.wifi = Some(WifiConfig {
+            ssid: "STARLINK".into(),
+            password: String::new(),
+            country: "UA".into(),
+        });
+        let ProvisionPlan::CloudInit { files } = plan(&c) else {
+            panic!("expected CloudInit plan");
+        };
+        let net = &files
+            .iter()
+            .find(|f| f.name == "network-config")
+            .unwrap()
+            .contents;
+        assert!(net.ends_with("\"STARLINK\": {}\n"), "{net}");
+        assert!(!net.contains("password"));
+
+        c.init_format = InitFormat::FirstRun;
+        let ProvisionPlan::FirstRun { script, .. } = plan(&c) else {
+            panic!("expected FirstRun plan");
+        };
+        assert!(script.contents.contains("key_mgmt=NONE"));
+        assert!(!script.contents.contains("psk="));
     }
 
     #[test]
