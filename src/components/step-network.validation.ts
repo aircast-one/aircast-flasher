@@ -7,6 +7,17 @@ export interface FieldProblem {
 
 const HOSTNAME_PATTERN = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/;
 
+export function listsNetwork(
+  network: string,
+  query: string,
+  known: readonly string[],
+): boolean {
+  return (
+    known.includes(query) ||
+    network.toLowerCase().includes(query.trim().toLowerCase())
+  );
+}
+
 export function isValidHostname(value: string): boolean {
   return HOSTNAME_PATTERN.test(value.trim());
 }

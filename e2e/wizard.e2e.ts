@@ -410,6 +410,20 @@ describe("flasher wizard", () => {
     await $("#password").clearValue();
   });
 
+  it("lists every known network even when one is already picked", async () => {
+    await knownGoodNetworkState();
+    await $("#ssid").clearValue();
+    await $('[aria-label="Show suggestions"]').click();
+    const known = await $$('[role="option"]').map((o) => o.getText());
+    await browser.keys("Escape");
+
+    await $("#ssid").setValue(known[0]);
+    await browser.keys("Escape");
+    await $('[aria-label="Show suggestions"]').click();
+    await expect($$('[role="option"]')).toBeElementsArrayOfSize(known.length);
+    await browser.keys("Escape");
+  });
+
   it("tests the WiFi from this computer and says when it is out of range", async () => {
     await knownGoodNetworkState();
     await $("#ssid").setValue("aircast-e2e-not-here");

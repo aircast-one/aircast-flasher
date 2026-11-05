@@ -25,6 +25,7 @@ import { StepShell, focusField } from "@/components/step-shell";
 import {
   isInvalidWifiPassword,
   isValidHostname,
+  listsNetwork,
   needsSsid,
   networkProblems,
 } from "@/components/step-network.validation";
@@ -180,6 +181,9 @@ export function StepNetwork({
               <div className="flex items-start gap-2">
                 <Autocomplete
                   items={knownNetworks}
+                  filter={(network: string, query: string) =>
+                    listsNetwork(network, query, knownNetworks)
+                  }
                   value={ssid}
                   onValueChange={(value) => {
                     setSsidTouched(true);

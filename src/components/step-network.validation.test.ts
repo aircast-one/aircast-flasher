@@ -6,12 +6,29 @@ import {
   fightModeUnreachable,
   isInvalidWifiPassword,
   isWeakDevicePassword,
+  listsNetwork,
   needsControlServer,
   mintsKeys,
   needsHeadscaleUser,
   networkProblems,
   reusedKeyNotice,
 } from "./step-network.validation.ts";
+
+test("a network already picked still lists every other one", () => {
+  const known = ["home", "Workshop", "iPhone"];
+  assert.deepEqual(
+    known.filter((n) => listsNetwork(n, "home", known)),
+    known,
+  );
+  assert.deepEqual(
+    known.filter((n) => listsNetwork(n, "wORK", known)),
+    ["Workshop"],
+  );
+  assert.deepEqual(
+    known.filter((n) => listsNetwork(n, "", known)),
+    known,
+  );
+});
 
 test("an open network needs no password", () => {
   assert.equal(isInvalidWifiPassword(""), false);
