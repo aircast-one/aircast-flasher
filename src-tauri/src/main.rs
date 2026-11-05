@@ -71,6 +71,7 @@ async fn main() {
             cloud::cloud_mark_lost,
             flasher::list_wifi_networks,
             flasher::test_wifi,
+            flasher::allow_wifi_names,
             flasher::cancel_flash,
             flasher::detect_ssh_keys,
             flasher::read_public_key,

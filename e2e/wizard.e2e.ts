@@ -414,6 +414,10 @@ describe("flasher wizard", () => {
     await knownGoodNetworkState();
     await $("#ssid").clearValue();
     await $('[aria-label="Show suggestions"]').click();
+    await browser.waitUntil(async () => (await $$('[role="option"]').length) > 0, {
+      timeout: 20_000,
+      timeoutMsg: "the network list never filled — is Wi-Fi on?",
+    });
     const known = await $$('[role="option"]').map((o) => o.getText());
     await browser.keys("Escape");
 

@@ -69,6 +69,7 @@ import {
   defaultSshMode,
   isWeakDevicePassword,
   joinsTailnet,
+  networkChoices,
 } from "@/components/step-network.validation";
 import { useSettings } from "@/lib/use-settings";
 import { useLocalTailscale } from "@/lib/use-local-tailscale";
@@ -314,6 +315,7 @@ function App() {
   const wifiQuery = useQuery({
     queryKey: ["wifi"],
     queryFn: listWifiNetworks,
+    refetchOnWindowFocus: true,
   });
 
   const sshKeysQuery = useQuery({
@@ -998,7 +1000,10 @@ function App() {
               board={board}
               ssid={ssid}
               onSsid={setSsid}
-              knownNetworks={wifiQuery.data?.known ?? []}
+              knownNetworks={networkChoices(
+                wifiQuery.data?.nearby ?? [],
+                wifiQuery.data?.known ?? [],
+              )}
               scanning={wifiQuery.isFetching}
               onRescan={() => void wifiQuery.refetch()}
               password={password}

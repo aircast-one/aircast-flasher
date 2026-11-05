@@ -203,6 +203,10 @@ export function listWifiNetworks(): Promise<WifiNetworks> {
   return invoke<WifiNetworks>("list_wifi_networks");
 }
 
+export function allowWifiNames(): Promise<void> {
+  return invoke<void>("allow_wifi_names");
+}
+
 export function testWifi(ssid: string, password: string): Promise<string> {
   return invoke<string>("test_wifi", { ssid, password });
 }

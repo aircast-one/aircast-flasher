@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import {
   Cable,
@@ -33,7 +33,7 @@ import { GENERATED_HOSTNAME } from "@/components/default-hostname";
 import { nextFreeHostname } from "@/components/next-hostname";
 import { useLocalTailscale } from "@/lib/use-local-tailscale";
 import { errorMessage } from "@/lib/format";
-import { testWifi } from "@/api";
+import { allowWifiNames, testWifi } from "@/api";
 import { useBackups } from "@/lib/use-backups";
 import { RestoreSection } from "@/components/restore-section";
 import { restoreProblems } from "@/components/restore-card";
@@ -94,6 +94,7 @@ export function StepNetwork({
   const local = useLocalTailscale();
   const backups = useBackups();
   const [ssidTouched, setSsidTouched] = useState(false);
+  useEffect(() => void allowWifiNames().catch(() => undefined), []);
   const wifiTest = useMutation({
     mutationFn: (net: { ssid: string; password: string }) =>
       testWifi(net.ssid, net.password),
@@ -192,7 +193,7 @@ export function StepNetwork({
                 >
                   <AutocompleteInput
                     id="ssid"
-                    placeholder="Pick a known network or type one"
+                    placeholder="Pick a network nearby or type one"
                     className="flex-1"
                     onBlur={() => setSsidTouched(true)}
                     aria-invalid={ssidMissing && ssidTouched}

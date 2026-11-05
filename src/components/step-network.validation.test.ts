@@ -7,12 +7,21 @@ import {
   isInvalidWifiPassword,
   isWeakDevicePassword,
   listsNetwork,
+  networkChoices,
   needsControlServer,
   mintsKeys,
   needsHeadscaleUser,
   networkProblems,
   reusedKeyNotice,
 } from "./step-network.validation.ts";
+
+test("networks in range come first, then the ones this computer saved", () => {
+  assert.deepEqual(
+    networkChoices(["Tenda", "cafe"], ["home", "Tenda", "office"]),
+    ["Tenda", "cafe", "home", "office"],
+  );
+  assert.deepEqual(networkChoices([], ["home"]), ["home"]);
+});
 
 test("a network already picked still lists every other one", () => {
   const known = ["home", "Workshop", "iPhone"];

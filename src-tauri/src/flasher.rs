@@ -290,6 +290,24 @@ pub async fn list_wifi_networks() -> Result<flasher_ops::wifi::WifiNetworks, Str
 }
 
 #[tauri::command]
+pub fn allow_wifi_names(app_handle: AppHandle) {
+    #[cfg(target_os = "macos")]
+    let _ = app_handle.run_on_main_thread(ask_for_location);
+    #[cfg(not(target_os = "macos"))]
+    let _ = app_handle;
+}
+
+#[cfg(target_os = "macos")]
+fn ask_for_location() {
+    use objc2_core_location::{CLAuthorizationStatus, CLLocationManager};
+    let manager = unsafe { CLLocationManager::new() };
+    if unsafe { manager.authorizationStatus() } == CLAuthorizationStatus::NotDetermined {
+        unsafe { manager.requestWhenInUseAuthorization() };
+        std::mem::forget(manager);
+    }
+}
+
+#[tauri::command]
 pub async fn test_wifi(ssid: String, password: String) -> Result<String, String> {
     flasher_ops::wifi::test_wifi(&ssid, &password).await
 }

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+  <dict>
+    <key>NSLocationUsageDescription</key>
+    <string>Aircast Flasher lists the Wi-Fi networks around you so you can pick the one your drone joins. macOS shows network names only to apps allowed to use Location.</string>
+    <key>NSLocationWhenInUseUsageDescription</key>
+    <string>Aircast Flasher lists the Wi-Fi networks around you so you can pick the one your drone joins. macOS shows network names only to apps allowed to use Location.</string>
+  </dict>
+</plist>

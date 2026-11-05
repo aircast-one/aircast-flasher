@@ -5,6 +5,7 @@ use super::Serialize;
 #[derive(Debug, Clone, Serialize)]
 pub struct WifiNetworks {
     pub current: Option<String>,
+    pub nearby: Vec<String>,
     pub known: Vec<String>,
     pub country: Option<String>,
 }
@@ -39,6 +40,7 @@ pub async fn list_wifi_networks() -> Result<WifiNetworks, String> {
     {
         Ok(WifiNetworks {
             current: None,
+            nearby: vec![],
             known: vec![],
             country: None,
         })
@@ -169,11 +171,17 @@ async fn test_wifi_linux(ssid: &str, password: &str) -> Result<String, String> {
 
 #[cfg(any(target_os = "linux", test))]
 fn active_wifi_connection(terse: &str) -> Option<String> {
+    wifi_connections(terse).into_iter().next()
+}
+
+#[cfg(any(target_os = "linux", test))]
+fn wifi_connections(terse: &str) -> Vec<String> {
     terse
         .lines()
         .filter_map(|l| l.rsplit_once(':'))
-        .find(|(_, kind)| *kind == "802-11-wireless")
+        .filter(|(_, kind)| *kind == "802-11-wireless")
         .map(|(name, _)| name.replace("\\:", ":"))
+        .collect()
 }
 
 #[cfg(any(target_os = "linux", test))]
@@ -331,8 +339,16 @@ async fn list_wifi_windows() -> Result<WifiNetworks, String> {
         .await
         .and_then(|l| region_from_locale(&l));
 
+    let nearby = hidden_command("netsh")
+        .args(["wlan", "show", "networks", "mode=bssid"])
+        .output()
+        .await
+        .map(|o| strongest_first(netsh_networks(&String::from_utf8_lossy(&o.stdout))))
+        .unwrap_or_default();
+
     Ok(WifiNetworks {
         current,
+        nearby,
         known,
         country,
     })
@@ -415,36 +431,52 @@ async fn list_wifi_macos() -> Result<WifiNetworks, String> {
         .ok()
         .and_then(|o| region_from_locale(String::from_utf8_lossy(&o.stdout).trim()));
 
+    let (heard_current, nearby) = tokio::task::spawn_blocking(scan_macos)
+        .await
+        .unwrap_or_default();
+
     Ok(WifiNetworks {
-        current,
+        current: heard_current.or(current),
+        nearby,
         known,
         country,
     })
 }
 
+#[cfg(target_os = "macos")]
+fn scan_macos() -> (Option<String>, Vec<String>) {
+    use objc2_core_wlan::CWWiFiClient;
+    let Some(iface) = (unsafe { CWWiFiClient::sharedWiFiClient().interface() }) else {
+        return (None, Vec::new());
+    };
+    let current = unsafe { iface.ssid() }.map(|s| s.to_string());
+    let heard = unsafe { iface.scanForNetworksWithName_error(None) }
+        .map(|found| {
+            found
+                .iter()
+                .filter_map(|n| {
+                    unsafe { n.ssid() }.map(|s| (s.to_string(), unsafe { n.rssiValue() } as i64))
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    (current, strongest_first(heard))
+}
+
 #[cfg(target_os = "linux")]
 async fn list_wifi_linux() -> Result<WifiNetworks, String> {
-    let out = tokio::process::Command::new("nmcli")
-        .args(["-t", "-f", "ACTIVE,SSID", "dev", "wifi"])
+    let scan = tokio::process::Command::new("nmcli")
+        .args(["-t", "-f", "ACTIVE,SIGNAL,SSID", "device", "wifi"])
         .output()
         .await
         .map_err(|e| format!("Failed to run nmcli: {e}"))?;
-
-    let mut current = None;
-    let mut known = Vec::new();
-    for line in String::from_utf8_lossy(&out.stdout).lines() {
-        let (active, ssid) = line.split_once(':').unwrap_or(("no", line));
-        let ssid = ssid.trim();
-        if ssid.is_empty() {
-            continue;
-        }
-        if active == "yes" {
-            current = Some(ssid.to_string());
-        }
-        if !known.iter().any(|s| s == ssid) {
-            known.push(ssid.to_string());
-        }
-    }
+    let heard = nmcli_scan(&String::from_utf8_lossy(&scan.stdout));
+    let known = tokio::process::Command::new("nmcli")
+        .args(["-t", "-f", "NAME,TYPE", "connection", "show"])
+        .output()
+        .await
+        .map(|o| wifi_connections(&String::from_utf8_lossy(&o.stdout)))
+        .unwrap_or_default();
 
     let country = std::env::var("LANG")
         .or_else(|_| std::env::var("LC_ALL"))
@@ -452,10 +484,77 @@ async fn list_wifi_linux() -> Result<WifiNetworks, String> {
         .and_then(|l| region_from_locale(l.split('.').next().unwrap_or(&l)));
 
     Ok(WifiNetworks {
-        current,
+        current: heard
+            .iter()
+            .find(|(_, _, active)| *active)
+            .map(|(ssid, _, _)| ssid.clone()),
+        nearby: strongest_first(
+            heard
+                .into_iter()
+                .map(|(ssid, signal, _)| (ssid, signal))
+                .collect(),
+        ),
         known,
         country,
     })
+}
+
+#[cfg(any(target_os = "linux", test))]
+fn nmcli_scan(terse: &str) -> Vec<(String, i64, bool)> {
+    terse
+        .lines()
+        .filter_map(|l| {
+            let mut fields = l.splitn(3, ':');
+            let active = fields.next()? == "yes";
+            let signal = fields.next()?.trim().parse().unwrap_or(0);
+            let ssid = fields.next()?.replace("\\:", ":");
+            Some((ssid, signal, active))
+        })
+        .collect()
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows", test))]
+fn strongest_first(heard: Vec<(String, i64)>) -> Vec<String> {
+    let ranked: std::collections::BTreeSet<(std::cmp::Reverse<i64>, String)> = heard
+        .into_iter()
+        .filter(|(ssid, _)| !ssid.trim().is_empty())
+        .map(|(ssid, signal)| (std::cmp::Reverse(signal), ssid))
+        .collect();
+    ranked.into_iter().fold(Vec::new(), |names, (_, ssid)| {
+        if names.contains(&ssid) {
+            names
+        } else {
+            [names, vec![ssid]].concat()
+        }
+    })
+}
+
+#[cfg(any(target_os = "windows", test))]
+fn netsh_networks(text: &str) -> Vec<(String, i64)> {
+    text.lines()
+        .filter_map(|l| l.split_once(':'))
+        .map(|(k, v)| (k.trim(), v.trim()))
+        .fold(Vec::new(), |nets: Vec<(String, i64)>, (key, value)| {
+            let signal = value
+                .strip_suffix('%')
+                .and_then(|n| n.trim().parse::<i64>().ok());
+            match (netsh_ssid_key(key), signal, nets.last().cloned()) {
+                (true, _, _) => [nets, vec![(value.to_string(), 0)]].concat(),
+                (false, Some(signal), Some((ssid, best))) => [
+                    nets[..nets.len() - 1].to_vec(),
+                    vec![(ssid, signal.max(best))],
+                ]
+                .concat(),
+                _ => nets,
+            }
+        })
+}
+
+#[cfg(any(target_os = "windows", test))]
+fn netsh_ssid_key(key: &str) -> bool {
+    key.strip_prefix("SSID")
+        .map(|n| !n.trim().is_empty() && n.trim().chars().all(|c| c.is_ascii_digit()))
+        .unwrap_or(false)
 }
 
 #[cfg(test)]
@@ -470,6 +569,55 @@ mod tests {
         assert_eq!(region_from_locale("zh-Hans-CN"), Some("CN".into()));
         assert_eq!(region_from_locale("en"), None);
         assert_eq!(region_from_locale("C"), None);
+    }
+
+    #[test]
+    fn networks_in_range_come_strongest_first_and_once() {
+        let heard = vec![
+            ("weak".to_string(), -80),
+            ("home".to_string(), -60),
+            ("".to_string(), -30),
+            ("home".to_string(), -40),
+            ("cafe".to_string(), -50),
+        ];
+        assert_eq!(strongest_first(heard), vec!["home", "cafe", "weak"]);
+    }
+
+    #[test]
+    fn nmcli_scan_reads_signal_and_escaped_names() {
+        let terse = "no:42:Neighbour\nyes:80:Tenda_DBDAA0\nno:65:Cafe\\: Guest\nno:20:";
+        assert_eq!(
+            nmcli_scan(terse),
+            vec![
+                ("Neighbour".to_string(), 42, false),
+                ("Tenda_DBDAA0".to_string(), 80, true),
+                ("Cafe: Guest".to_string(), 65, false),
+                ("".to_string(), 20, false),
+            ]
+        );
+    }
+
+    #[test]
+    fn saved_wifi_connections_are_listed_by_name() {
+        let terse = "Wired connection 1:802-3-ethernet\nhome:802-11-wireless\nCafe\\: Guest:802-11-wireless";
+        assert_eq!(wifi_connections(terse), vec!["home", "Cafe: Guest"]);
+    }
+
+    #[test]
+    fn netsh_networks_reads_every_ssid_with_its_best_signal() {
+        let text = "Interface name : Wi-Fi\nThere are 3 networks currently visible.\n\nSSID 1 : Tenda_DBDAA0\n    Network type            : Infrastructure\n    Authentication          : WPA2-Personal\n    BSSID 1                 : cc:2d:21:db:da:a4\n         Signal             : 61%\n    BSSID 2                 : cc:2d:21:db:da:a5\n         Сигнал             : 88%\n\nSSID 2 : \n    BSSID 1                 : 00:11:22:33:44:55\n         Signal             : 40%\n\nSSID 3 : Cafe: Guest\n    BSSID 1                 : 66:77:88:99:aa:bb\n         Signal             : 70%\n";
+        assert_eq!(
+            netsh_networks(text),
+            vec![
+                ("Tenda_DBDAA0".to_string(), 88),
+                ("".to_string(), 40),
+                ("Cafe: Guest".to_string(), 70),
+            ]
+        );
+        assert_eq!(
+            strongest_first(netsh_networks(text)),
+            vec!["Tenda_DBDAA0", "Cafe: Guest"]
+        );
     }
 
     #[test]

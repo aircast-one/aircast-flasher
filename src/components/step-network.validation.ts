@@ -7,6 +7,13 @@ export interface FieldProblem {
 
 const HOSTNAME_PATTERN = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/;
 
+export function networkChoices(
+  nearby: readonly string[],
+  known: readonly string[],
+): string[] {
+  return [...nearby, ...known.filter((n) => !nearby.includes(n))];
+}
+
 export function listsNetwork(
   network: string,
   query: string,

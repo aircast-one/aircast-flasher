@@ -160,6 +160,7 @@ export interface CloudCard {
 
 export interface WifiNetworks {
   current: string | null;
+  nearby: string[];
   known: string[];
   country: string | null;
 }
