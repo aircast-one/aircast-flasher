@@ -81,6 +81,12 @@ list_releases ─► download_image ─► flash_image ─► provision_device
   three situations you're in: signed in (naming the account the key will come
   from), installed but signed out, or not installed — offering **Get a key**
   and, when missing, **Get Tailscale**.
+- **Finding the device** — the Write screen probes `<hostname>.local` and the
+  hotspot's `10.42.0.1` every few seconds. A probe counts only aircastd's own
+  `ok` from `/healthz`, with redirects off: a captive portal (an ExpressLRS
+  backpack's WiFi answers every name and redirects every page) otherwise reads
+  as the drone. The probe connects over IPv4 and reports the address that
+  answered, and the screen shows and opens that IP, not the `.local` name.
 - **Remote access after boot** — leave the key blank and the device can sign
   itself in instead. Once found on the LAN, `tailscale_login` POSTs to
   aircastd's `/api/tailscale/connection`, which starts the headless tsnet login
@@ -252,7 +258,7 @@ Or build it from this repo: `just cli` → `target/release/aircast-flasher-cli`.
 | `download [--release V] [--channel C]` | Fetch an image into the shared cache, print its path |
 | `flash --disk D [options]` | Erase a card, write Aircast OS and configure it |
 | `devices` | Aircast devices answering on this computer's tailnet |
-| `find <hostname>` | Locate a freshly flashed device (`<hostname>.local`, or its hotspot) |
+| `find <hostname>` | Locate a freshly flashed device by `<hostname>.local` or its hotspot and print the IP it answered on |
 | `device status <target>` | Whether a device is on a tailnet, and its name |
 | `device login <target> [--control-server URL]` | Start Tailscale sign-in on a device, print the approval URL |
 | `device backup <target>` | Save a device's settings on this computer (works over the tailnet, fight mode too) |

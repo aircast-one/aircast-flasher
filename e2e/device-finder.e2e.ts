@@ -35,16 +35,21 @@ async function attachToAppWindow() {
 function invokeFromApp(
   command: string,
   args: Record<string, unknown>,
-): Promise<boolean | string> {
+): Promise<boolean | string | null> {
   return browser.executeAsync<
-    boolean | string,
+    boolean | string | null,
     [string, Record<string, unknown>]
   >(
     (cmd, cmdArgs, done) => {
       const tauri = (window as { __TAURI__?: TauriGlobal }).__TAURI__;
       if (!tauri) return done("no-global-tauri");
       tauri.core.invoke(cmd, cmdArgs).then(
-        (v) => done(typeof v === "object" ? JSON.stringify(v) : (v as boolean | string)),
+        (v) =>
+          done(
+            v !== null && typeof v === "object"
+              ? JSON.stringify(v)
+              : (v as boolean | string | null),
+          ),
         (e) => done(`invoke failed: ${String(e)}`),
       );
     },
@@ -98,9 +103,29 @@ describe("device probing", () => {
     await attachToAppWindow();
   });
 
-  it("finds a device whose /healthz answers", async () => {
+  it("finds aircastd by its /healthz and reports the IP that answered", async () => {
     const server = http.createServer((req, res) => {
       res.writeHead(req.url === "/healthz" ? 200 : 404);
+      res.end(req.url === "/healthz" ? "ok" : "");
+    });
+    await new Promise<void>((resolve) => {
+      server.listen(0, "127.0.0.1", resolve);
+    });
+    const { port } = server.address() as AddressInfo;
+    try {
+      expect(await probeFromApp(`http://127.0.0.1:${port}`)).toBe("127.0.0.1");
+    } finally {
+      server.close();
+    }
+  });
+
+  it("does not take a captive portal that redirects every page for a device", async () => {
+    const server = http.createServer((req, res) => {
+      if (req.url === "/") {
+        res.writeHead(200, { "content-type": "text/html" });
+        return res.end("<html>ExpressLRS</html>");
+      }
+      res.writeHead(302, { location: "/" });
       res.end();
     });
     await new Promise<void>((resolve) => {
@@ -108,14 +133,14 @@ describe("device probing", () => {
     });
     const { port } = server.address() as AddressInfo;
     try {
-      expect(await probeFromApp(`http://127.0.0.1:${port}`)).toBe(true);
+      expect(await probeFromApp(`http://127.0.0.1:${port}`)).toBe(null);
     } finally {
       server.close();
     }
   });
 
   it("finds nothing behind a closed port", async () => {
-    expect(await probeFromApp("http://127.0.0.1:1")).toBe(false);
+    expect(await probeFromApp("http://127.0.0.1:1")).toBe(null);
   });
 
   it("returns the auth URL aircastd hands back for a headless login", async () => {
@@ -355,7 +380,7 @@ describe("settings backups", () => {
           previous.then(() =>
             invokeFromApp("backup_device", { url: `http://127.0.0.1:${port}` }),
           ),
-        Promise.resolve<boolean | string>(true),
+        Promise.resolve<boolean | string | null>(true),
       );
       const kept = (
         JSON.parse(String(await invokeFromApp("list_backups", {}))) as {

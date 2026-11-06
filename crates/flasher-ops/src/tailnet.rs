@@ -1,3 +1,4 @@
+use std::net::{IpAddr, Ipv4Addr};
 use std::sync::OnceLock;
 use std::time::Duration;
 
@@ -11,15 +12,141 @@ fn probe_client() -> &'static reqwest::Client {
     })
 }
 
-const LAN_PROBE_TIMEOUT: Duration = Duration::from_secs(8);
-pub async fn probe_device(url: String) -> bool {
-    probe_client()
+fn health_client() -> &'static reqwest::Client {
+    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+    CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .local_address(IpAddr::V4(Ipv4Addr::UNSPECIFIED))
+            .build()
+            .expect("health probe client")
+    })
+}
+
+const MDNS_GROUP: (Ipv4Addr, u16) = (Ipv4Addr::new(224, 0, 0, 251), 5353);
+const MDNS_WAIT: Duration = Duration::from_millis(1500);
+
+fn mdns_query(host: &str) -> Option<Vec<u8>> {
+    let mut packet = simple_dns::Packet::new_query(0);
+    packet.questions.push(simple_dns::Question::new(
+        simple_dns::Name::new(host).ok()?,
+        simple_dns::TYPE::A.into(),
+        simple_dns::CLASS::IN.into(),
+        false,
+    ));
+    packet.build_bytes_vec().ok()
+}
+
+fn a_records(reply: &[u8], host: &str) -> Vec<Ipv4Addr> {
+    simple_dns::Packet::parse(reply)
+        .map(|packet| {
+            packet
+                .answers
+                .iter()
+                .chain(packet.additional_records.iter())
+                .filter(|record| record.name.to_string().eq_ignore_ascii_case(host))
+                .filter_map(|record| match &record.rdata {
+                    simple_dns::rdata::RData::A(a) => Some(Ipv4Addr::from(a.address)),
+                    _ => None,
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn query_socket(local: Ipv4Addr) -> std::io::Result<tokio::net::UdpSocket> {
+    let socket = socket2::Socket::new(socket2::Domain::IPV4, socket2::Type::DGRAM, None)?;
+    socket.set_multicast_if_v4(&local)?;
+    socket.bind(&std::net::SocketAddr::from((local, 0)).into())?;
+    socket.set_nonblocking(true)?;
+    tokio::net::UdpSocket::from_std(socket.into())
+}
+
+async fn ask_on(local: Ipv4Addr, query: &[u8], host: &str) -> Vec<Ipv4Addr> {
+    let Ok(socket) = query_socket(local) else {
+        return Vec::new();
+    };
+    if socket.send_to(query, MDNS_GROUP).await.is_err() {
+        return Vec::new();
+    }
+    let mut reply = [0u8; 1500];
+    match tokio::time::timeout(MDNS_WAIT, socket.recv(&mut reply)).await {
+        Ok(Ok(len)) => a_records(&reply[..len], host),
+        _ => Vec::new(),
+    }
+}
+
+async fn resolve_local(host: &str) -> Vec<Ipv4Addr> {
+    let Some(query) = mdns_query(host) else {
+        return Vec::new();
+    };
+    let locals: Vec<Ipv4Addr> = if_addrs::get_if_addrs()
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|interface| match interface.ip() {
+            IpAddr::V4(ip) if !ip.is_loopback() && !ip.is_link_local() => Some(ip),
+            _ => None,
+        })
+        .collect();
+    futures::future::join_all(locals.into_iter().map(|local| ask_on(local, &query, host)))
+        .await
+        .into_iter()
+        .flatten()
+        .collect()
+}
+
+async fn candidates(url: &str) -> Vec<String> {
+    let parsed = url::Url::parse(url).ok();
+    let host = parsed
+        .as_ref()
+        .and_then(|u| u.host_str())
+        .filter(|host| host.ends_with(".local"))
+        .map(str::to_string);
+    let resolved = match (parsed, host) {
+        (Some(parsed), Some(host)) => resolve_local(&host)
+            .await
+            .into_iter()
+            .filter_map(|ip| {
+                let mut by_ip = parsed.clone();
+                by_ip.set_ip_host(IpAddr::V4(ip)).ok()?;
+                Some(by_ip.as_str().trim_end_matches('/').to_string())
+            })
+            .collect(),
+        _ => Vec::new(),
+    };
+    [resolved, vec![url.to_string()]].concat()
+}
+
+async fn aircastd_ip(url: &str, timeout: Duration) -> Option<IpAddr> {
+    let probes = candidates(url)
+        .await
+        .into_iter()
+        .map(|candidate| Box::pin(async move { healthz_ip(&candidate, timeout).await.ok_or(()) }));
+    futures::future::select_ok(probes)
+        .await
+        .ok()
+        .map(|(ip, _)| ip)
+}
+
+async fn healthz_ip(url: &str, timeout: Duration) -> Option<IpAddr> {
+    let response = health_client()
         .get(format!("{url}/healthz"))
-        .timeout(LAN_PROBE_TIMEOUT)
+        .timeout(timeout)
         .send()
         .await
-        .map(|r| r.status().is_success())
-        .unwrap_or(false)
+        .ok()?;
+    let ip = response.remote_addr()?.ip();
+    if response.status() != reqwest::StatusCode::OK {
+        return None;
+    }
+    (response.text().await.ok()?.trim() == "ok").then_some(ip)
+}
+
+const LAN_PROBE_TIMEOUT: Duration = Duration::from_secs(8);
+pub async fn probe_device(url: String) -> Option<String> {
+    aircastd_ip(&url, LAN_PROBE_TIMEOUT)
+        .await
+        .map(|ip| ip.to_string())
 }
 
 const LOGIN_TIMEOUT: Duration = Duration::from_secs(20);
@@ -109,16 +236,7 @@ pub async fn set_device_control_server(url: String, control_server: String) -> R
 const PEER_PROBE_TIMEOUT: Duration = Duration::from_secs(5);
 pub async fn probe_devices(urls: Vec<String>) -> Vec<String> {
     let probes = urls.into_iter().map(|url| {
-        tokio::spawn(async move {
-            let ok = probe_client()
-                .get(format!("{url}/healthz"))
-                .timeout(PEER_PROBE_TIMEOUT)
-                .send()
-                .await
-                .map(|r| r.status().is_success())
-                .unwrap_or(false);
-            ok.then_some(url)
-        })
+        tokio::spawn(async move { aircastd_ip(&url, PEER_PROBE_TIMEOUT).await.map(|_| url) })
     });
 
     let mut reachable = Vec::new();
@@ -423,5 +541,73 @@ async fn join_wifi_impl(ssid: &str, password: &str) -> Result<(), String> {
     match out.status.success() {
         true => Ok(()),
         false => Err(String::from_utf8_lossy(&out.stderr).trim().to_string()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    async fn serve(reply: &'static str) -> String {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        tokio::spawn(async move {
+            while let Ok((mut sock, _)) = listener.accept().await {
+                let mut buf = [0u8; 1024];
+                let _ = sock.read(&mut buf).await;
+                let _ = sock.write_all(reply.as_bytes()).await;
+            }
+        });
+        url
+    }
+
+    #[tokio::test]
+    async fn aircastd_answers_with_the_ip_it_was_reached_on() {
+        let url =
+            serve("HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok").await;
+        assert_eq!(probe_device(url).await.as_deref(), Some("127.0.0.1"));
+    }
+
+    fn reply(name: &str, ip: Ipv4Addr) -> Vec<u8> {
+        let mut packet = simple_dns::Packet::new_reply(0);
+        packet.answers.push(simple_dns::ResourceRecord::new(
+            simple_dns::Name::new(name).unwrap(),
+            simple_dns::CLASS::IN,
+            10,
+            simple_dns::rdata::RData::A(simple_dns::rdata::A { address: ip.into() }),
+        ));
+        packet.build_bytes_vec().unwrap()
+    }
+
+    #[test]
+    fn an_mdns_reply_names_the_drone_s_ipv4() {
+        let ip = Ipv4Addr::new(192, 168, 0, 117);
+        assert_eq!(
+            a_records(&reply("owel-red-test.local", ip), "owel-red-test.local"),
+            vec![ip]
+        );
+        assert!(a_records(&reply("other.local", ip), "owel-red-test.local").is_empty());
+        assert!(a_records(b"junk", "owel-red-test.local").is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_url_by_ip_is_probed_as_given() {
+        assert_eq!(
+            candidates("http://10.42.0.1").await,
+            vec!["http://10.42.0.1"]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_captive_portal_that_answers_every_name_is_not_a_device() {
+        let redirect = serve("HTTP/1.1 302 Found\r\nLocation: http://10.0.0.1/\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").await;
+        let page = serve(
+            "HTTP/1.1 200 OK\r\nContent-Length: 13\r\nConnection: close\r\n\r\n<html></html>",
+        )
+        .await;
+        assert_eq!(probe_device(redirect).await, None);
+        assert_eq!(probe_device(page.clone()).await, None);
+        assert!(probe_devices(vec![page]).await.is_empty());
     }
 }

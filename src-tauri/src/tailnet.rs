@@ -18,7 +18,7 @@ pub async fn mint_auth_key(
 }
 
 #[tauri::command]
-pub async fn probe_device(url: String) -> bool {
+pub async fn probe_device(url: String) -> Option<String> {
     tailnet::probe_device(url).await
 }
 

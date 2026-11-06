@@ -71,8 +71,13 @@ pub fn address(target: &str) -> String {
 
 pub async fn find(hostname: &str) -> Option<String> {
     let candidates = [format!("http://{hostname}.local"), HOTSPOT_URL.to_string()];
-    let reachable = flasher_ops::tailnet::probe_devices(candidates.to_vec()).await;
-    candidates.into_iter().find(|url| reachable.contains(url))
+    let probes = candidates.map(|url| {
+        Box::pin(async move { flasher_ops::tailnet::probe_device(url).await.ok_or(()) })
+    });
+    futures_util::future::select_ok(probes)
+        .await
+        .ok()
+        .map(|(ip, _)| format!("http://{ip}"))
 }
 
 #[derive(Debug, Serialize, JsonSchema)]

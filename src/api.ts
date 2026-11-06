@@ -235,8 +235,8 @@ export function cancelFlash(): Promise<void> {
   return invoke<void>("cancel_flash");
 }
 
-export function probeDevice(url: string): Promise<boolean> {
-  return invoke<boolean>("probe_device", { url });
+export function probeDevice(url: string): Promise<string | null> {
+  return invoke<string | null>("probe_device", { url });
 }
 
 export function setDeviceControlServer(

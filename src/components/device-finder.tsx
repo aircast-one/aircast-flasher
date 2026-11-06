@@ -316,13 +316,13 @@ export function useFoundDevice(
   fightMode: boolean,
   restore: RestoredCard | null,
 ): { found: FoundDevice | null; rounds: number } {
-  const [foundUrl, setFoundUrl] = useState<string | null>(null);
+  const [hit, setHit] = useState<{ url: string; ip: string } | null>(null);
   const [rounds, setRounds] = useState(0);
   const tailnetPeer = useNewTailnetPeer(hostname, restore?.rejoins ?? false);
   const lanUrl = `http://${hostname}.local`;
 
   useEffect(() => {
-    if (foundUrl !== null || fightMode) return;
+    if (hit !== null || fightMode) return;
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout>;
 
@@ -330,16 +330,16 @@ export function useFoundDevice(
       const results = await Promise.all(
         [lanUrl, HOTSPOT_URL].map((url) =>
           probeDevice(url).then(
-            (ok) => (ok ? url : null),
+            (ip) => (ip === null ? null : { url, ip }),
             () => null,
           ),
         ),
       );
       if (cancelled) return;
-      const hit = results.find((r) => r !== null) ?? null;
-      if (hit !== null) {
-        setFoundUrl(hit);
-        track("device_found", { via: hit === HOTSPOT_URL ? "hotspot" : "lan" });
+      const answered = results.find((r) => r !== null) ?? null;
+      if (answered !== null) {
+        setHit(answered);
+        track("device_found", { via: answered.url === HOTSPOT_URL ? "hotspot" : "lan" });
         return;
       }
       setRounds((n) => n + 1);
@@ -351,13 +351,13 @@ export function useFoundDevice(
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [foundUrl, lanUrl, fightMode]);
+  }, [hit, lanUrl, fightMode]);
 
   const found: FoundDevice | null =
-    foundUrl === HOTSPOT_URL
-      ? { url: foundUrl, address: new URL(foundUrl).host, via: "hotspot", note: HOTSPOT_HELP }
-      : foundUrl !== null
-        ? { url: foundUrl, address: `${hostname}.local`, via: "lan", note: "" }
+    hit?.url === HOTSPOT_URL
+      ? { url: hit.url, address: hit.ip, via: "hotspot", note: HOTSPOT_HELP }
+      : hit !== null
+        ? { url: `http://${hit.ip}`, address: hit.ip, via: "lan", note: `Also answers as ${hostname}.local.` }
         : tailnetPeer !== null
           ? tailnetDevice(tailnetPeer, hostname)
           : null;
