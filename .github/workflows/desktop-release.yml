@@ -100,7 +100,7 @@ jobs:
     needs: setup
     strategy:
       fail-fast: false
-      matrix:
+      matrix: &platforms
         include:
           - runner: macos-latest
             os: macos
@@ -121,7 +121,8 @@ jobs:
             libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev \
             build-essential curl wget file libssl-dev libxdo-dev patchelf
 
-      - name: Determine target
+      - &determine-target
+        name: Determine target
         id: target
         shell: bash
         run: |
@@ -141,14 +142,10 @@ jobs:
             echo "rust_targets=x86_64-unknown-linux-gnu" >> "$GITHUB_OUTPUT"
           fi
 
-      - uses: dtolnay/rust-toolchain@stable
+      - &rust-toolchain
+        uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ steps.target.outputs.rust_targets }}
-
-      - uses: swatinem/rust-cache@v2
-        with:
-          workspaces: "src-tauri -> target"
-          cache-on-failure: true
 
       - uses: actions/setup-node@v4
         with:
@@ -187,6 +184,17 @@ jobs:
           includeUpdaterJson: true
           args: ${{ matrix.os == 'windows' && format('--target {0} --bundles nsis', steps.target.outputs.target) || format('--target {0}', steps.target.outputs.target) }}
 
+      - name: Check the app links no Homebrew library
+        if: matrix.os == 'macos'
+        run: |
+          for b in target/*/release/aircast-flasher; do
+            if otool -L "$b" | grep -q /opt/homebrew; then
+              echo "::error::$b links a Homebrew library and won't run on other Macs"
+              otool -L "$b"
+              exit 1
+            fi
+          done
+
       - name: Notarize and staple the DMG
         if: matrix.os == 'macos'
         env:
@@ -202,6 +210,19 @@ jobs:
           asset="$(basename "$dmg" | tr ' ' .)"
           cp "$dmg" "$asset"
           gh release upload "${{ needs.setup.outputs.version }}" "$asset" --clobber -R "${{ github.repository }}"
+
+  cli-builds:
+    needs: setup
+    strategy:
+      fail-fast: false
+      matrix: *platforms
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - *determine-target
+
+      - *rust-toolchain
 
       - name: Build, sign and attach the CLI
         shell: bash
@@ -230,13 +251,11 @@ jobs:
                 cp "target/${targets[0]}/release/$bin" "$bin"
                 arch=aarch64
               fi
-              for b in "$bin" target/*/release/aircast-flasher; do
-                if otool -L "$b" | grep -q /opt/homebrew; then
-                  echo "::error::$b links a Homebrew library and won't run on other Macs"
-                  otool -L "$b"
-                  exit 1
-                fi
-              done
+              if otool -L "$bin" | grep -q /opt/homebrew; then
+                echo "::error::$bin links a Homebrew library and won't run on other Macs"
+                otool -L "$bin"
+                exit 1
+              fi
               if [ -n "$APPLE_CERTIFICATE" ]; then
                 kc="$RUNNER_TEMP/cli-signing.keychain-db"
                 pw=$(openssl rand -hex 16)
@@ -447,7 +466,7 @@ jobs:
           fi
 
   notify:
-    needs: [setup, desktop-builds, mirror-to-s3, cleanup-old-releases]
+    needs: [setup, desktop-builds, cli-builds, mirror-to-s3, cleanup-old-releases]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -456,6 +475,7 @@ jobs:
             echo "## Aircast Flasher Release"
             echo "- **Version:** ${{ needs.setup.outputs.version }} (${{ needs.setup.outputs.environment }})"
             echo "- **Builds:** ${{ needs.desktop-builds.result }}"
+            echo "- **CLI:** ${{ needs.cli-builds.result }}"
             echo "- **R2 mirror:** ${{ needs.mirror-to-s3.result }}"
             echo "- **Downloads:** ${{ needs.setup.outputs.downloads_url }}/flasher/${{ needs.setup.outputs.version }}/"
             echo "- **Catalog:** ${{ needs.setup.outputs.downloads_url }}/flasher/releases.json"
